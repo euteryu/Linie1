@@ -1,8 +1,9 @@
+# -*- coding: utf-8 -*-
 import random
 from enum import Enum, auto
 from typing import List, Dict, Tuple, Optional, Set, Any
 
-# --- Constants --- (Keep all constants from Phase 0, including corrected BUILDING_COORDS)
+# --- Constants ---
 GRID_ROWS = 12
 GRID_COLS = 12
 BUILDING_COORDS: Dict[str, Tuple[int, int]] = {
@@ -11,7 +12,6 @@ BUILDING_COORDS: Dict[str, Tuple[int, int]] = {
     'I': (5, 8),  'K': (8, 6),  'L': (6, 3),  'M': (3, 5),
 }
 TILE_DEFINITIONS: Dict[str, Dict[str, Any]] = {
-    # Corrected keys as per previous step
     "Straight":           {"connections": [['N', 'S']], "is_swappable": True},
     "Curve":              {"connections": [['N', 'E']], "is_swappable": True},
     "StraightLeftCurve":  {"connections": [['N', 'S'], ['S', 'W']], "is_swappable": True},
@@ -32,304 +32,649 @@ TILE_COUNTS_BASE: Dict[str, int] = {
 }
 TILE_COUNTS_5_PLUS_ADD: Dict[str, int] = {"Straight": 15, "Curve": 10,}
 STARTING_HAND_TILES: Dict[str, int] = {"Straight": 3, "Curve": 2,}
-
-# --- New Route Card Structure ---
-# List index (0-5) represents the 6 unique physical Route Cards.
-# Each card defines stops for ALL lines, separated by player count.
 ROUTE_CARD_VARIANTS: List[Dict[str, Dict[int, List[str]]]] = [
-    # Variant 0 (Corresponds to Card 1 in images)
-    {
-        "2-4": { 1: ['A', 'F'], 2: ['G', 'L'], 3: ['C', 'F'], 4: ['D', 'F'], 5: ['A', 'L'], 6: ['C', 'E'] },
-        "5-6": { 1: ['A', 'C', 'L'], 2: ['C', 'G', 'K'], 3: ['D', 'H', 'I'], 4: ['C', 'E', 'M'], 5: ['A', 'B', 'M'], 6: ['E', 'I', 'K'] }
-    },
-    # Variant 1 (Corresponds to Card 2 in images)
-    {
-        "2-4": { 1: ['F', 'K'], 2: ['F', 'H'], 3: ['A', 'C'], 4: ['D', 'K'], 5: ['D', 'G'], 6: ['E', 'H'] },
-        "5-6": { 1: ['B', 'G', 'L'], 2: ['B', 'L', 'M'], 3: ['C', 'I', 'M'], 4: ['A', 'D', 'M'], 5: ['A', 'G', 'K'], 6: ['B', 'F', 'M'] }
-    },
-    # Variant 2 (Corresponds to Card 3 in images)
-    {
-        "2-4": { 1: ['C', 'M'], 2: ['F', 'L'], 3: ['H', 'K'], 4: ['E', 'K'], 5: ['D', 'I'], 6: ['B', 'L'] },
-        "5-6": { 1: ['C', 'G', 'M'], 2: ['G', 'H', 'L'], 3: ['C', 'D', 'M'], 4: ['A', 'E', 'I'], 5: ['D', 'F', 'I'], 6: ['E', 'K', 'L'] }
-    },
-    # Variant 3 (Corresponds to Card 4 in images)
-    {
-        "2-4": { 1: ['B', 'I'], 2: ['B', 'M'], 3: ['D', 'M'], 4: ['E', 'I'], 5: ['B', 'H'], 6: ['F', 'I'] },
-        "5-6": { 1: ['C', 'D', 'I'], 2: ['E', 'G', 'I'], 3: ['D', 'H', 'K'], 4: ['H', 'K', 'L'], 5: ['A', 'E', 'L'], 6: ['A', 'B', 'L'] } # Stops from blue card image
-    },
-    # Variant 4 (Corresponds to Card 5 in images)
-    {
-        "2-4": { 1: ['B', 'D'], 2: ['B', 'E'], 3: ['B', 'G'], 4: ['H', 'L'], 5: ['A', 'M'], 6: ['A', 'D'] },
-        "5-6": { 1: ['F', 'I', 'K'], 2: ['F', 'H', 'K'], 3: ['G', 'M', 'L'], 4: ['E', 'F', 'K'], 5: ['E', 'H', 'K'], 6: ['B', 'F', 'I'] } # Stops from blue card image
-    },
-    # Variant 5 (Corresponds to Card 6 in images)
-    {
-        "2-4": { 1: ['C', 'I'], 2: ['G', 'K'], 3: ['E', 'G'], 4: ['C', 'H'], 5: ['H', 'M'], 6: ['A', 'G'] },
-        "5-6": { 1: ['F', 'H', 'K'], 2: ['C', 'F', 'I'], 3: ['B', 'H', 'L'], 4: ['D', 'I', 'M'], 5: ['A', 'L', 'M'], 6: ['B', 'F', 'I'] } # Stops from blue card image
-    },
+    { "2-4": { 1: ['A', 'F'], 2: ['G', 'L'], 3: ['C', 'F'], 4: ['D', 'F'], 5: ['A', 'L'], 6: ['C', 'E'] }, "5-6": { 1: ['A', 'C', 'L'], 2: ['C', 'G', 'K'], 3: ['D', 'H', 'I'], 4: ['C', 'E', 'M'], 5: ['A', 'B', 'M'], 6: ['E', 'I', 'K'] }},
+    { "2-4": { 1: ['F', 'K'], 2: ['F', 'H'], 3: ['A', 'C'], 4: ['D', 'K'], 5: ['D', 'G'], 6: ['E', 'H'] }, "5-6": { 1: ['B', 'G', 'L'], 2: ['B', 'L', 'M'], 3: ['C', 'I', 'M'], 4: ['A', 'D', 'M'], 5: ['A', 'G', 'K'], 6: ['B', 'F', 'M'] }},
+    { "2-4": { 1: ['C', 'M'], 2: ['F', 'L'], 3: ['H', 'K'], 4: ['E', 'K'], 5: ['D', 'I'], 6: ['B', 'L'] }, "5-6": { 1: ['C', 'G', 'M'], 2: ['G', 'H', 'L'], 3: ['C', 'D', 'M'], 4: ['A', 'E', 'I'], 5: ['D', 'F', 'I'], 6: ['E', 'K', 'L'] }},
+    { "2-4": { 1: ['B', 'I'], 2: ['B', 'M'], 3: ['D', 'M'], 4: ['E', 'I'], 5: ['B', 'H'], 6: ['F', 'I'] }, "5-6": { 1: ['C', 'D', 'I'], 2: ['E', 'G', 'I'], 3: ['D', 'H', 'K'], 4: ['H', 'K', 'L'], 5: ['A', 'E', 'L'], 6: ['A', 'B', 'L'] }},
+    { "2-4": { 1: ['B', 'D'], 2: ['B', 'E'], 3: ['B', 'G'], 4: ['H', 'L'], 5: ['A', 'M'], 6: ['A', 'D'] }, "5-6": { 1: ['F', 'I', 'K'], 2: ['F', 'H', 'K'], 3: ['G', 'M', 'L'], 4: ['E', 'F', 'K'], 5: ['E', 'H', 'K'], 6: ['B', 'F', 'I'] }},
+    { "2-4": { 1: ['C', 'I'], 2: ['G', 'K'], 3: ['E', 'G'], 4: ['C', 'H'], 5: ['H', 'M'], 6: ['A', 'G'] }, "5-6": { 1: ['F', 'H', 'K'], 2: ['C', 'F', 'I'], 3: ['B', 'H', 'L'], 4: ['D', 'I', 'M'], 5: ['A', 'L', 'M'], 6: ['B', 'F', 'I'] }},
 ]
 
-# --- Enums --- (Keep from Phase 0)
-class PlayerState(Enum): LAYING_TRACK = auto(); DRIVING = auto(); FINISHED = auto()
-class GamePhase(Enum): SETUP = auto(); LAYING_TRACK = auto(); DRIVING_TRANSITION = auto(); DRIVING = auto(); GAME_OVER = auto()
-class Direction(Enum): NORTH = (-1, 0); EAST  = (0, 1); SOUTH = (1, 0); WEST  = (0, -1)
+# --- Enums ---
+class PlayerState(Enum):
+    LAYING_TRACK = auto()
+    DRIVING = auto()
+    FINISHED = auto()
 
-# --- Data Classes --- (Keep TileType, PlacedTile, Board, LineCard, Player from previous version)
-# --- Make sure TileType uses is_swappable in __init__ and repr ---
+class GamePhase(Enum):
+    SETUP = auto()
+    LAYING_TRACK = auto()
+    DRIVING_TRANSITION = auto()
+    DRIVING = auto()
+    GAME_OVER = auto()
+
+class Direction(Enum):
+    N = (-1, 0)
+    E = (0, 1)
+    S = (1, 0)
+    W = (0, -1)
+
+    @staticmethod
+    def opposite(direction: 'Direction') -> 'Direction':
+        # Corrected: Clear if/elif/else structure
+        if direction == Direction.N:
+            return Direction.S
+        elif direction == Direction.S:
+            return Direction.N
+        elif direction == Direction.E:
+            return Direction.W
+        elif direction == Direction.W:
+            return Direction.E
+        else:
+             # Should technically be unreachable if input is Direction enum
+             raise ValueError("Invalid direction provided")
+
+    @staticmethod
+    def from_str(dir_str: str) -> 'Direction':
+        # Corrected: Accessing enum member directly
+        try:
+            return Direction[dir_str.upper()]
+        except KeyError:
+            raise ValueError(f"Invalid direction string: {dir_str}")
+
+# --- Data Classes ---
 class TileType:
-    def __init__(self, name: str, connections: List[List[str]], is_swappable: bool): # Corrected signature
+    def __init__(self, name: str, connections: List[List[str]], is_swappable: bool):
         self.name = name
         self.connections = self._process_connections(connections)
-        self.is_swappable = is_swappable # Use the corrected argument name
+        self.is_swappable = is_swappable
+
     def _process_connections(self, raw_connections: List[List[str]]) -> Dict[str, List[str]]:
         conn_map: Dict[str, List[str]] = {'N': [], 'E': [], 'S': [], 'W': []}
         for path in raw_connections:
             for i in range(len(path)):
                 current_node = path[i]
-                for j in range(len(path)):
-                    if i == j: continue
-                    other_node = path[j]
+                other_nodes = [path[j] for j in range(len(path)) if i != j]
+                for other_node in other_nodes:
+                    # Ensure no duplicates
                     if other_node not in conn_map[current_node]:
-                         conn_map[current_node].append(other_node)
+                        conn_map[current_node].append(other_node)
         return conn_map
+
     def __repr__(self) -> str:
-         return f"TileType({self.name}, Swappable={self.is_swappable})"
+        return f"TileType({self.name}, Swappable={self.is_swappable})"
 
-class PlacedTile: # Keep as is
+class PlacedTile:
     def __init__(self, tile_type: TileType, orientation: int = 0):
-        self.tile_type = tile_type; self.orientation = orientation % 360
+        self.tile_type = tile_type
+        # Ensure orientation is a multiple of 90
+        if orientation % 90 != 0:
+            raise ValueError(f"Orientation must be a multiple of 90, got {orientation}")
+        self.orientation = orientation % 360
         self.has_stop_sign: bool = False
-    def __repr__(self) -> str: return f"Placed({self.tile_type.name}, {self.orientation}deg, Stop:{self.has_stop_sign})"
 
-class Board: # Keep as is
+    def __repr__(self) -> str:
+        return f"Placed({self.tile_type.name}, {self.orientation}deg, Stop:{self.has_stop_sign})"
+
+class Board:
     def __init__(self, rows: int = GRID_ROWS, cols: int = GRID_COLS):
-        self.rows = rows; self.cols = cols
-        self.grid: List[List[Optional[PlacedTile]]] = [[None for _ in range(cols)] for _ in range(rows)]
+        self.rows = rows
+        self.cols = cols
+        self.grid: List[List[Optional[PlacedTile]]] = [
+            [None for _ in range(cols)] for _ in range(rows)
+        ]
         self.building_coords = BUILDING_COORDS
+        self.coord_to_building: Dict[Tuple[int, int], str] = {
+            v: k for k, v in BUILDING_COORDS.items()
+        }
         self.buildings_with_stops: Set[str] = set()
-    def __repr__(self) -> str: return f"Board({self.rows}x{self.cols})"
 
-class LineCard: # Keep as is
-    def __init__(self, line_number: int): self.line_number = line_number
-    def __repr__(self) -> str: return f"LineCard(Line {self.line_number})"
+    def is_valid_coordinate(self, row: int, col: int) -> bool:
+        return 0 <= row < self.rows and 0 <= col < self.cols
 
-# Modify RouteCard slightly - player_range is now implicit
+    def get_tile(self, row: int, col: int) -> Optional[PlacedTile]:
+        if self.is_valid_coordinate(row, col):
+            return self.grid[row][col]
+        return None
+
+    def set_tile(self, row: int, col: int, tile: Optional[PlacedTile]):
+        # Allow setting None to clear a tile during exchange testing later
+        if self.is_valid_coordinate(row, col):
+            self.grid[row][col] = tile
+        else:
+            # Optionally raise an error if trying to set outside bounds
+             raise IndexError(f"Coordinate ({row},{col}) is out of board bounds.")
+
+    def get_building_at(self, row: int, col: int) -> Optional[str]:
+        return self.coord_to_building.get((row, col))
+
+    def get_neighbors(self, row: int, col: int) -> Dict[Direction, Tuple[int, int]]:
+        neighbors = {}
+        for direction in Direction:
+            dr, dc = direction.value
+            nr, nc = row + dr, col + dc
+            if self.is_valid_coordinate(nr, nc):
+                neighbors[direction] = (nr, nc)
+        return neighbors
+
+    def simple_render(self, game=None) -> str:
+        # Using cleaner symbols
+        conn_symbols = {
+            frozenset(['N', 'S']): '│', frozenset(['E', 'W']): '─',
+            frozenset(['N', 'E']): '└', frozenset(['N', 'W']): '┘',
+            frozenset(['S', 'E']): '┌', frozenset(['S', 'W']): '┐',
+            frozenset(['N', 'S', 'W']): '┤', frozenset(['N', 'S', 'E']): '├',
+            frozenset(['E', 'W', 'N']): '┴', frozenset(['E', 'W', 'S']): '┬',
+            frozenset(['N', 'W', 'E']): 'V', # Representing Y shape pointing down
+            frozenset(['S', 'W', 'E']): 'Λ', # Representing Y shape pointing up
+            frozenset(['S', 'W', 'N', 'E']): 'X', # Diagonal / Roundabout
+            frozenset(['N', 'S', 'E', 'W']): '┼', # Crossroad
+            frozenset(): '.', # Should not happen for a placed tile
+        }
+        default_symbol = '?'
+        col_width = 5
+        separator = "│" # Use box drawing separator
+        cell_total_width = col_width + len(separator)
+
+        # --- Header Row ---
+        header_parts = [" " * 3] # Space for "R │"
+        for c in range(self.cols):
+            col_num_str = str(c)
+            padding_total = col_width - len(col_num_str)
+            padding_left = padding_total // 2
+            padding_right = padding_total - padding_left
+            header_parts.append(" " * padding_left + col_num_str + " " * padding_right + separator)
+        header = "".join(header_parts) + "\n"
+
+        # --- Top Border ---
+        h_line = "─" * col_width
+        top_connector = "┬"
+        top_border_line = h_line + (top_connector + h_line) * (self.cols - 1)
+        top_border = "  ╭" + top_border_line + "╮\n" # Start and end corners
+
+        board_str = header + top_border
+
+        # --- Board Rows ---
+        for r in range(self.rows):
+            row_str_parts = [f"{r:<2}{separator}"] # Row number and first separator
+            for c in range(self.cols):
+                cell_content = ""
+                tile = self.grid[r][c]
+                if tile:
+                    stop = "S" if tile.has_stop_sign else ""
+                    symbol = default_symbol
+                    if game:
+                        try:
+                            connections = game.get_effective_connections(tile.tile_type, tile.orientation)
+                            connected_dirs = set()
+                            for entry, exits in connections.items():
+                                if exits:
+                                    connected_dirs.add(entry)
+                                    connected_dirs.update(exits)
+                            symbol = conn_symbols.get(frozenset(connected_dirs), default_symbol)
+                            # Add fallback logic if needed, but try to map all base types
+                        except Exception:
+                            symbol = 'E' # Error during symbol lookup
+                    else:
+                        symbol = tile.tile_type.name[0] if tile.tile_type.name else '?'
+                    cell_content = f"{symbol}{stop}"
+                else:
+                    building = self.get_building_at(r, c)
+                    cell_content = f"[{building}]" if building else "·" # Use mid-dot for empty
+
+                padding_total = col_width - len(cell_content)
+                padding_left = padding_total // 2
+                padding_right = padding_total - padding_left
+                row_str_parts.append(" " * padding_left + cell_content + " " * padding_right + separator)
+
+            board_str += "".join(row_str_parts) + "\n"
+            # Row separator border
+            if r < self.rows - 1:
+                mid_connector = "┼"
+                mid_border_line = h_line + (mid_connector + h_line) * (self.cols - 1)
+                board_str += "  ├" + mid_border_line + "┤\n" # Start/end T connectors
+            else: # Bottom border
+                bot_connector = "┴"
+                bot_border_line = h_line + (bot_connector + h_line) * (self.cols - 1)
+                board_str += "  ╰" + bot_border_line + "╯\n" # Start/end bottom corners
+
+        return board_str
+
+class LineCard:
+    def __init__(self, line_number: int):
+        self.line_number = line_number
+    def __repr__(self) -> str:
+        return f"LineCard(Line {self.line_number})"
+
 class RouteCard:
     def __init__(self, stops: List[str], variant_index: int):
-        self.stops = stops # List of building IDs in ORDER
-        self.variant_index = variant_index # Store which of the 6 base cards it came from
-
+        self.stops = stops
+        self.variant_index = variant_index
     def __repr__(self) -> str:
-        # Player range is determined by game context, not stored here anymore
-        return f"RouteCard({'-'.join(self.stops)}, From Variant {self.variant_index})"
+        return f"RouteCard({'-'.join(self.stops)}, Var {self.variant_index})"
 
-class Player: # Keep as is
+class Player:
     def __init__(self, player_id: int):
-        self.player_id = player_id; self.hand: List[TileType] = []
-        self.line_card: Optional[LineCard] = None; self.route_card: Optional[RouteCard] = None
+        self.player_id = player_id
+        self.hand: List[TileType] = []
+        self.line_card: Optional[LineCard] = None
+        self.route_card: Optional[RouteCard] = None
         self.player_state: PlayerState = PlayerState.LAYING_TRACK
         self.streetcar_position: Optional[Tuple[int, int]] = None
         self.stops_visited_in_order: List[str] = []
-    def __repr__(self) -> str: return f"Player {self.player_id} (State: {self.player_state.name}, Hand: {len(self.hand)})"
+    def __repr__(self) -> str:
+        return f"Player {self.player_id} (State: {self.player_state.name}, Hand: {len(self.hand)})"
 
 class Game:
-    """Manages the overall game state and flow."""
     def __init__(self, num_players: int):
-        # ... (initialization checks, board, players as before) ...
         if not 2 <= num_players <= 6:
-            raise ValueError("Number of players must be between 2 and 6.")
+            raise ValueError("Players must be 2-6.")
         self.num_players = num_players
-
         self.board = Board()
         self.players = [Player(i) for i in range(num_players)]
-
         self.tile_types: Dict[str, TileType] = {
             name: TileType(name=name, **details)
             for name, details in TILE_DEFINITIONS.items()
         }
         self.tile_draw_pile: List[TileType] = []
         self.line_cards_pile: List[LineCard] = []
-        # No route card pile needed here anymore
-
         self.active_player_index: int = 0
         self.game_phase: GamePhase = GamePhase.SETUP
         self.current_turn: int = 0
         self.first_player_to_finish_route: Optional[int] = None
-
-        # --- Call Setup ---
-        self.setup_game()
+        self.actions_taken_this_turn: int = 0
+        self.setup_game() # Call setup
 
     def get_active_player(self) -> Player:
         return self.players[self.active_player_index]
 
     def __repr__(self) -> str:
-        return f"Game({self.num_players} players, Phase: {self.game_phase.name}, Turn: {self.current_turn}, Active: P{self.active_player_index})"
+        return (f"Game({self.num_players}p, Ph: {self.game_phase.name}, "
+                f"T: {self.current_turn}, P: {self.active_player_index}, "
+                f"Actions: {self.actions_taken_this_turn})")
 
-    # --- Phase 1: Setup Methods ---
+    def print_board(self):
+        print(self.board.simple_render(self))
 
     def setup_game(self):
-        """Orchestrates the game setup process."""
         if self.game_phase != GamePhase.SETUP:
-            print("Warning: Game setup already completed or in progress.")
             return
-
-        print("--- Starting Game Setup ---")
-        self._create_tile_and_line_piles() # Renamed
+        print("--- Starting Setup ---")
+        self._create_tile_and_line_piles()
         self._deal_starting_hands()
-        self._deal_player_cards() # Logic completely changed
-
+        self._deal_player_cards()
         self.game_phase = GamePhase.LAYING_TRACK
-        self.active_player_index = 0
+        self.active_player_index = 0 # Simplification: P0 always starts
         self.current_turn = 1
-        print("--- Game Setup Complete ---")
+        print("--- Setup Complete ---")
 
-    def _create_tile_and_line_piles(self): # Renamed, removed route pile creation
-        """Creates and shuffles the tile and line card draw piles."""
-        # 1. Tile Pile (Same as before)
+    def _create_tile_and_line_piles(self):
         tile_counts = TILE_COUNTS_BASE.copy()
         if self.num_players >= 5:
-            for tile_name, count in TILE_COUNTS_5_PLUS_ADD.items():
-                tile_counts[tile_name] = tile_counts.get(tile_name, 0) + count
+            for name, count in TILE_COUNTS_5_PLUS_ADD.items():
+                tile_counts[name] = tile_counts.get(name, 0) + count
         self.tile_draw_pile = []
-        for tile_name, count in tile_counts.items():
-            tile_type = self.tile_types.get(tile_name)
-            if tile_type: self.tile_draw_pile.extend([tile_type] * count)
-            else: print(f"Warning: Tile type '{tile_name}' not found.")
+        for name, count in tile_counts.items():
+            tile_type = self.tile_types.get(name)
+            if tile_type:
+                self.tile_draw_pile.extend([tile_type] * count)
         random.shuffle(self.tile_draw_pile)
-        print(f"Created tile draw pile with {len(self.tile_draw_pile)} tiles.")
-
-        # 2. Line Card Pile (Same as before)
+        # print(f"Tile pile: {len(self.tile_draw_pile)}")
         self.line_cards_pile = [LineCard(i) for i in range(1, 7)]
         random.shuffle(self.line_cards_pile)
-        print(f"Created line card pile with {len(self.line_cards_pile)} cards.")
+        # print(f"Line card pile: {len(self.line_cards_pile)}")
 
-    def _deal_starting_hands(self): # Same logic as before
-        """Deals starting tiles (3 Straight, 2 Curve) and removes them from draw pile."""
-        print("Dealing starting hands...")
+    def _deal_starting_hands(self):
+        print("Dealing start hands...")
         straight_type = self.tile_types['Straight']
         curve_type = self.tile_types['Curve']
+
+        # Pre-check (as before, important)
+        current_straights = sum(1 for tile in self.tile_draw_pile if tile == straight_type)
+        current_curves = sum(1 for tile in self.tile_draw_pile if tile == curve_type)
+        needed_straights_total = STARTING_HAND_TILES['Straight'] * self.num_players
+        needed_curves_total = STARTING_HAND_TILES['Curve'] * self.num_players
+
+        if current_straights < needed_straights_total or current_curves < needed_curves_total:
+             raise RuntimeError(f"FATAL: Draw pile doesn't contain enough starting tiles! "
+                                f"Need S:{needed_straights_total}/C:{needed_curves_total}, "
+                                f"Have S:{current_straights}/C:{current_curves}")
+
         for player in self.players:
-            player.hand = []
-            needed = STARTING_HAND_TILES.copy()
-            indices_to_remove = []
-            found_indices = {'Straight': [], 'Curve': []}
-            # Iterate through a copy to find indices in the original pile
-            for i, tile in enumerate(self.tile_draw_pile):
-                 if tile == straight_type and needed['Straight'] > 0:
-                      found_indices['Straight'].append(i)
-                      needed['Straight'] -= 1
-                 elif tile == curve_type and needed['Curve'] > 0:
-                      found_indices['Curve'].append(i)
-                      needed['Curve'] -= 1
-                 if needed['Straight'] == 0 and needed['Curve'] == 0: break
+            player.hand = [] # Start fresh
+            dealt_straights = 0
+            dealt_curves = 0
+            # Use a list to track indices for removal later, avoid modifying while iterating
+            indices_found = []
 
-            if needed['Straight'] > 0 or needed['Curve'] > 0:
-                 raise RuntimeError(f"Could not find enough starting tiles for Player {player.player_id}!")
+            # Iterate through the draw pile to find needed tiles
+            for i in range(len(self.tile_draw_pile)):
+                tile = self.tile_draw_pile[i]
+                found_this_pass = False
+                if tile == straight_type and dealt_straights < STARTING_HAND_TILES['Straight']:
+                    if i not in indices_found: # Make sure we don't select the same index twice
+                         player.hand.append(tile)
+                         indices_found.append(i)
+                         dealt_straights += 1
+                         found_this_pass = True
+                elif tile == curve_type and dealt_curves < STARTING_HAND_TILES['Curve']:
+                     if i not in indices_found:
+                          player.hand.append(tile)
+                          indices_found.append(i)
+                          dealt_curves += 1
+                          found_this_pass = True
 
-            indices_to_remove = sorted(found_indices['Straight'] + found_indices['Curve'], reverse=True)
-            if len(indices_to_remove) != sum(STARTING_HAND_TILES.values()):
-                 raise RuntimeError(f"Logic error finding start tiles for Player {player.player_id}!")
+                if dealt_straights == STARTING_HAND_TILES['Straight'] and dealt_curves == STARTING_HAND_TILES['Curve']:
+                    break # Found enough for this player
 
-            for index in indices_to_remove: player.hand.append(self.tile_draw_pile[index])
-            for index in indices_to_remove: del self.tile_draw_pile[index]
-        print(f"Finished dealing starting hands. Draw pile size: {len(self.tile_draw_pile)}")
+            # Verify (should pass due to pre-check)
+            if dealt_straights != STARTING_HAND_TILES['Straight'] or dealt_curves != STARTING_HAND_TILES['Curve']:
+                 raise RuntimeError(f"Logic Error: Couldn't deal correct start hand for P{player.player_id}")
 
+            # Remove the dealt tiles from the main pile efficiently AFTER finding all
+            # Sort indices in reverse order for safe deletion
+            indices_found.sort(reverse=True)
+            for index in indices_found:
+                del self.tile_draw_pile[index]
 
-    def _deal_player_cards(self): # *** ENTIRELY NEW LOGIC ***
-        """Deals LineCard and determines RouteCard based on unique variants."""
-        print("Dealing Line and Route cards...")
-        if len(self.line_cards_pile) < self.num_players:
-            raise RuntimeError("Not enough Line cards to deal to all players!")
+        print(f"Finished dealing start hands. Draw pile size: {len(self.tile_draw_pile)}")
 
-        # Shuffle the indices representing the 6 unique Route Card variants
+    def _deal_player_cards(self):
+        print("Dealing player cards...")
         available_variant_indices = list(range(len(ROUTE_CARD_VARIANTS)))
         random.shuffle(available_variant_indices)
-
-        if len(available_variant_indices) < self.num_players:
-             raise RuntimeError("Not enough Route Card variants for the number of players!") # Should not happen with 6 variants
-
-        # Determine player range string once
         player_range = "2-4" if self.num_players <= 4 else "5-6"
-
-        dealt_variants = [] # For tracking in tests
-
+        dealt_variants = []
         for player in self.players:
-            # 1. Deal Line Card
+            if not self.line_cards_pile: raise RuntimeError("Ran out of Line cards!")
+            if not available_variant_indices: raise RuntimeError("Ran out of Route card variants!")
+
             player.line_card = self.line_cards_pile.pop()
-
-            # 2. Deal a unique Route Card variant index
             variant_index = available_variant_indices.pop()
-            dealt_variants.append(variant_index) # Track for testing
-
-            # 3. Look up the specific stops based on Line#, variant index, and player range
+            dealt_variants.append(variant_index)
             try:
-                variant_data = ROUTE_CARD_VARIANTS[variant_index]
-                stops = variant_data[player_range][player.line_card.line_number]
+                stops = ROUTE_CARD_VARIANTS[variant_index][player_range][player.line_card.line_number]
             except (KeyError, IndexError) as e:
-                raise RuntimeError(f"Error looking up route card stops: Variant={variant_index}, Range={player_range}, Line={player.line_card.line_number}. Error: {e}")
-
-            # 4. Create and assign the RouteCard
+                raise RuntimeError(f"Error lookup route stops: Var={variant_index}, Range={player_range}, Line={player.line_card.line_number}. Err: {e}")
             player.route_card = RouteCard(stops, variant_index)
+        # print(f"Finished dealing cards. Dealt Route Variants: {sorted(dealt_variants)}")
 
-            # print(f"  Player {player.player_id}: {player.line_card}, {player.route_card}") # Detailed check
+    def _rotate_direction(self, direction: str, angle: int) -> str:
+        directions = ['N', 'E', 'S', 'W']
+        try:
+            current_index = directions.index(direction)
+        except ValueError:
+             raise ValueError(f"Invalid direction string: {direction}")
+        angle = angle % 360
+        if angle % 90 != 0:
+            raise ValueError(f"Invalid rotation angle: {angle}. Must be multiple of 90.")
+        steps = angle // 90
+        new_index = (current_index + steps) % 4
+        return directions[new_index]
 
-        print(f"Finished dealing cards. Dealt Route Variants: {sorted(dealt_variants)}")
+    def get_effective_connections(self, tile_type: TileType, orientation: int) -> Dict[str, List[str]]:
+        if orientation == 0:
+            return tile_type.connections # Optimization for common case
+
+        rotated_connections: Dict[str, List[str]] = {'N': [], 'E': [], 'S': [], 'W': []}
+        base_connections = tile_type.connections
+
+        for base_entry_dir, base_exit_dirs in base_connections.items():
+            actual_entry_dir = self._rotate_direction(base_entry_dir, orientation)
+            for base_exit_dir in base_exit_dirs:
+                actual_exit_dir = self._rotate_direction(base_exit_dir, orientation)
+                # Avoid adding duplicates if multiple base paths lead to same rotated connection
+                if actual_exit_dir not in rotated_connections.get(actual_entry_dir, []):
+                     if actual_entry_dir not in rotated_connections:
+                          rotated_connections[actual_entry_dir] = []
+                     rotated_connections[actual_entry_dir].append(actual_exit_dir)
+        return rotated_connections
+
+    def check_placement_validity(self, tile_type: TileType, orientation: int, row: int, col: int) -> Tuple[bool, str]:
+        """ Checks rules for placing a NEW tile onto an EMPTY space. Returns (isValid, message)."""
+        if not self.board.is_valid_coordinate(row, col):
+            return False, f"Placement Error ({row},{col}): Off board."
+        if self.board.get_tile(row, col) is not None:
+            return False, f"Placement Error ({row},{col}): Space occupied."
+
+        effective_connections = self.get_effective_connections(tile_type, orientation)
+
+        for direction in Direction:
+            dir_str = direction.name
+            opposite_dir_str = Direction.opposite(direction).name
+            dr, dc = direction.value
+            nr, nc = row + dr, col + dc
+
+            neighbor_tile = self.board.get_tile(nr, nc)
+            is_neighbor_on_board = self.board.is_valid_coordinate(nr, nc)
+            neighbor_building = self.board.get_building_at(nr, nc) if is_neighbor_on_board else None
+
+            # Does the *new* tile connect *out* towards this neighbor direction?
+            new_tile_connects_out_dir = dir_str in [
+                exit_dir for exits in effective_connections.values() for exit_dir in exits
+            ]
+
+            if neighbor_tile:
+                # --- Check Connection to Existing Neighbor Tile ---
+                neighbor_effective_connections = self.get_effective_connections(
+                    neighbor_tile.tile_type, neighbor_tile.orientation
+                )
+                # Does the *neighbor* connect *back* towards the new tile's location?
+                neighbor_connects_back = opposite_dir_str in [
+                    exit_dir for exits in neighbor_effective_connections.values() for exit_dir in exits
+                ]
+
+                # *** CORRECTED Rule D Check ***
+                # Placement is INVALID only if one connects and the other doesn't.
+                if new_tile_connects_out_dir != neighbor_connects_back:
+                    reason = "connects" if new_tile_connects_out_dir else "doesn't connect"
+                    neighbor_reason = "doesn't connect back" if not neighbor_connects_back else "connects back"
+                    msg = (f"Placement Error ({row},{col}): Tile {tile_type.name}({orientation}°) "
+                           f"{reason} {dir_str}, but neighbor {neighbor_tile.tile_type.name}"
+                           f"({neighbor_tile.orientation}°) at ({nr},{nc}) {neighbor_reason} {opposite_dir_str} (Mismatch/Blocking).")
+                    return False, msg
+                # If both connect OR neither connect, it's valid on this side.
+
+            else:
+                # --- Check Connection to non-tile neighbor ---
+                if new_tile_connects_out_dir: # Tile points this way...
+                    if not is_neighbor_on_board: # ...off the board
+                        is_terminal_spot = False # TODO: Terminal check
+                        if not is_terminal_spot:
+                             msg = (f"Placement Error ({row},{col}): Tile {tile_type.name}({orientation}°) "
+                                   f"leads off board towards {direction.name} (not a valid terminal).")
+                             return False, msg
+                    elif neighbor_building: # ...into a building
+                        msg = (f"Placement Error ({row},{col}): Tile {tile_type.name}({orientation}°) "
+                               f"leads directly into building {neighbor_building} at ({nr},{nc}).")
+                        return False, msg
+                    # else: points into empty space on board -> VALID
+
+        # If all neighbor checks pass
+        return True, "Placement appears valid."
+
+    def _check_and_place_stop_sign(self, placed_tile: PlacedTile, row: int, col: int):
+        placed_tile.has_stop_sign = False
+        for direction in Direction:
+            dr, dc = direction.value
+            nr, nc = row + dr, col + dc
+            building_id = self.board.get_building_at(nr, nc)
+            if building_id and building_id not in self.board.buildings_with_stops:
+                placed_tile.has_stop_sign = True
+                self.board.buildings_with_stops.add(building_id)
+                print(f"--> Placed stop sign on tile ({row},{col}) for Building {building_id}")
+                break
+
+    def draw_tile(self, player: Player) -> bool:
+        if not self.tile_draw_pile:
+            print("Warning: Draw pile empty!")
+            return False
+        tile = self.tile_draw_pile.pop()
+        player.hand.append(tile)
+        return True
+
+    def player_action_place_tile(self, player: Player, tile_type: TileType, orientation: int, row: int, col: int) -> bool:
+        """Player attempts to place a tile as one of their actions."""
+        print(f"\nAttempting P{player.player_id} place: {tile_type.name}({orientation}°) at ({row},{col})")
+
+        if tile_type not in player.hand:
+            print(f"--> Action Error: Player {player.player_id} does not have {tile_type.name} in hand.")
+            return False
+
+        is_valid, message = self.check_placement_validity(tile_type, orientation, row, col)
+
+        if not is_valid:
+            print(f"--> {message}") # Print reason for failure
+            return False
+
+        # --- If valid, perform placement ---
+        player.hand.remove(tile_type)
+        placed_tile = PlacedTile(tile_type, orientation)
+        self.board.set_tile(row, col, placed_tile)
+        self._check_and_place_stop_sign(placed_tile, row, col) # Check for stops
+
+        self.actions_taken_this_turn += 1
+        print(f"--> SUCCESS placing {tile_type.name} at ({row},{col}). Actions taken: {self.actions_taken_this_turn}/{2}")
+
+        return True
+
+    # TODO: Implement player_action_exchange_tile
+
+    def end_player_turn(self):
+        """Handles drawing tiles and advancing to the next player."""
+        active_player = self.get_active_player()
+        if active_player.player_state != PlayerState.LAYING_TRACK:
+            print(f"Warning: Cannot end turn for Player {active_player.player_id} in state {active_player.player_state}")
+            # TODO: Handle driving phase turn end later
+            return
+
+        # Draw tiles back up to 5
+        draw_count = 0
+        while len(active_player.hand) < 5 and self.tile_draw_pile:
+             if self.draw_tile(active_player):
+                  draw_count += 1
+        if draw_count > 0:
+             print(f"Player {active_player.player_id} drew {draw_count} tiles (Hand: {len(active_player.hand)}).")
+
+        # Advance turn
+        self.active_player_index = (self.active_player_index + 1) % self.num_players
+        if self.active_player_index == 0:
+            self.current_turn += 1
+        self.actions_taken_this_turn = 0 # Reset action count
+
+        print(f"\n--- End Turn - Starting Turn {self.current_turn} for Player {self.active_player_index} ---")
 
 
-# --- Example Initialization and Testing Phase 1 (Adjusted Tests) ---
+# --- Example Initialization and Testing ---
 if __name__ == "__main__":
-    print("--- Testing Phase 1 (Corrected Route Card Logic) ---\n")
-
+    print("\n--- Testing Phase 2: Tile Placement (Corrected Rules Understanding) ---\n")
     try:
-        # Test with 4 players (should use 2-stop routes from unique variants)
-        print("== Test Case: 4 Players ==")
-        game4 = Game(num_players=4)
-        print(game4)
-        total_starting_tiles = sum(STARTING_HAND_TILES.values()) * game4.num_players
-        expected_draw_pile_size = sum(TILE_COUNTS_BASE.values()) - total_starting_tiles
-        print(f"Expected Draw Pile Size: {expected_draw_pile_size}")
-        print(f"Actual Draw Pile Size: {len(game4.tile_draw_pile)}")
-        assert len(game4.tile_draw_pile) == expected_draw_pile_size, "Draw pile size mismatch!"
+        game = Game(num_players=2)
+        player0 = game.players[0]
+        player1 = game.players[1]
+        straight = game.tile_types['Straight']
+        curve = game.tile_types['Curve']
+        t_junction = game.tile_types['StraightLeftCurve']
 
-        assigned_lines = set()
-        assigned_variants = set()
-        for i, p in enumerate(game4.players):
-            print(f" Player {i}: Hand Size={len(p.hand)}, Line={p.line_card}, Route={p.route_card}")
-            assert len(p.hand) == sum(STARTING_HAND_TILES.values()), f"Player {i} hand size wrong!"
-            assert p.line_card is not None
-            assert p.route_card is not None
-            assert len(p.route_card.stops) == 2 # 2-4 players -> 2 stops
-            assigned_lines.add(p.line_card.line_number)
-            assigned_variants.add(p.route_card.variant_index)
-        assert len(assigned_lines) == game4.num_players, "Line numbers not unique!"
-        assert len(assigned_variants) == game4.num_players, "Route card variants not unique!"
-        print("4 Player Test OK\n")
+        # Force hands AFTER setup deals initial ones
+        player0.hand = [straight, straight, curve, curve, t_junction]
+        player1.hand = [curve, curve, curve, curve, curve] # P1 only has curves
 
-        # Test with 5 players (should use 3-stop routes from unique variants)
-        print("== Test Case: 5 Players ==")
-        game5 = Game(num_players=5)
-        print(game5)
-        total_starting_tiles_5p = sum(STARTING_HAND_TILES.values()) * game5.num_players
-        base_tiles = sum(TILE_COUNTS_BASE.values())
-        extra_tiles = sum(TILE_COUNTS_5_PLUS_ADD.values())
-        expected_draw_pile_size_5p = base_tiles + extra_tiles - total_starting_tiles_5p
-        print(f"Expected Draw Pile Size: {expected_draw_pile_size_5p}")
-        print(f"Actual Draw Pile Size: {len(game5.tile_draw_pile)}")
-        assert len(game5.tile_draw_pile) == expected_draw_pile_size_5p, "Draw pile size mismatch!"
+        print(f"Initial Board (Turn {game.current_turn}, P{game.active_player_index}):")
+        game.print_board()
+        print(f"Player 0 Hand: {[t.name for t in player0.hand]}")
+        print(f"Player 1 Hand: {[t.name for t in player1.hand]}")
 
-        assigned_lines_5p = set()
-        assigned_variants_5p = set()
-        for i, p in enumerate(game5.players):
-            print(f" Player {i}: Hand Size={len(p.hand)}, Line={p.line_card}, Route={p.route_card}")
-            assert len(p.hand) == sum(STARTING_HAND_TILES.values()), f"Player {i} hand size wrong!"
-            assert p.line_card is not None
-            assert p.route_card is not None
-            assert len(p.route_card.stops) == 3 # 5-6 players -> 3 stops
-            assigned_lines_5p.add(p.line_card.line_number)
-            assigned_variants_5p.add(p.route_card.variant_index)
-        assert len(assigned_lines_5p) == game5.num_players, "Line numbers not unique!"
-        assert len(assigned_variants_5p) == game5.num_players, "Route card variants not unique!"
-        print("5 Player Test OK\n")
+        # --- Test Valid Placement (Action 1) ---
+        success = game.player_action_place_tile(player0, straight, 0, 5, 5) # N-S Straight
+        assert success, "Test Fail: Valid placement 1"
+        assert game.board.get_tile(5, 5) is not None, "Test Fail: Board tile at (5,5) is None after placement 1!"
+        assert game.actions_taken_this_turn == 1, "Test Fail: Action count after place 1"
+        game.print_board()
 
-    except (ValueError, RuntimeError) as e:
-        print(f"Error during setup test: {e}")
+        # --- Test Valid Connection (Action 2) ---
+        success = game.player_action_place_tile(player0, straight, 0, 6, 5) # N-S Straight connecting South
+        assert success, "Test Fail: Valid connection placement 2"
+        assert game.board.get_tile(6, 5) is not None, "Test Fail: Tile not placed at (6,5)"
+        assert game.actions_taken_this_turn == 2, "Test Fail: Action count after place 2"
+        game.print_board()
+
+        # --- End Turn P0 ---
+        game.end_player_turn()
+        assert len(player0.hand) == 5, f"Test Fail: P0 hand size {len(player0.hand)} != 5"
+        assert game.active_player_index == 1, "Test Fail: Active player index after P0 turn"
+        assert game.actions_taken_this_turn == 0, "Test Fail: Action count reset for P1"
+
+        # --- P1 Turn ---
+        print(f"\nPlayer 1 Turn Start (Hand: {[t.name for t in player1.hand]})")
+        game.print_board() # Show board at start of P1's turn
+
+        # --- Test Invalid Connection (Blocking N-S) ---
+        # Place N-E curve at (4,5), north of N-S straight at (5,5). Fails D2.
+        success = game.player_action_place_tile(player1, curve, 0, 4, 5)
+        assert not success, "Test Fail: Invalid placement (blocking N-S) should have failed but succeeded!"
+        assert game.actions_taken_this_turn == 0, "Test Fail: Action count after failed block"
+
+        # --- Test Invalid Placement (Into Building M) ---
+        # Place N-E curve at (4,5). Connects N. Neighbor N is (3,5)=M. Fails Rule B.
+        success = game.player_action_place_tile(player1, curve, 0, 4, 5) # Same attempt
+        assert not success, "Test Fail: Invalid placement (into Building M) should have failed but succeeded!"
+        assert game.actions_taken_this_turn == 0, "Test Fail: Action count after failed building place"
+
+        # --- Test INVALID Placement (Stop Sign Attempt - Mismatched Connection) (Action 1 attempt) ---
+        # Place E-S curve at (6,4), East of L(6,3).
+        # This placement connects East. Neighbor at (6,5) is N-S Straight, doesn't connect West. INVALID.
+        success = game.player_action_place_tile(player1, curve, 90, 6, 4)
+        # *** CORRECTED ASSERTION ***
+        assert not success, "Test Fail: Placement near building L (Rule D fail) should have failed but succeeded!"
+        # Verify tile was NOT placed and no stop sign added
+        assert game.board.get_tile(6, 4) is None, "Test Fail: Tile incorrectly placed at (6,4) despite Rule D fail!"
+        assert 'L' not in game.board.buildings_with_stops, "Test Fail: Stop sign added despite invalid placement!"
+        assert game.actions_taken_this_turn == 0 # Action count should remain 0
+        game.print_board()
+
+        # --- Need a *valid* placement for P1 Action 1 to test Stop Sign ---
+        # Let's place a curve at (7,4) pointing S and E. South of (6,4) - connects to nothing yet. Valid.
+        print("\nAttempting VALID placement for P1 Action 1: Curve(90) at (7,4)")
+        success = game.player_action_place_tile(player1, curve, 90, 7, 4) # E-S Curve at (7,4)
+        assert success, "Test Fail: Valid placement for P1 Action 1"
+        assert game.board.get_tile(7, 4) is not None, "Test Fail: Tile not placed at (7,4)"
+        # Check if this placement triggered a stop sign (is it next to a building?)
+        # Neighbors of (7,4): N(6,4) empty, E(7,5) empty, S(8,4) empty, W(7,3) empty. No stop sign.
+        assert not game.board.get_tile(7, 4).has_stop_sign, "Test Fail: Stop sign incorrectly added at (7,4)"
+        assert game.actions_taken_this_turn == 1
+        game.print_board()
+
+        # --- Test Valid Placement adjacent to L for Stop Sign (Action 2) ---
+        # Place N-E curve at (5,3), North of L(6,3). Valid placement. Should add Stop Sign for L.
+        print("\nAttempting VALID placement for P1 Action 2 to get Stop Sign: Curve(0) at (5,3)")
+        success = game.player_action_place_tile(player1, curve, 0, 5, 3)
+        assert success, "Test Fail: Second placement near building L"
+        placed2 = game.board.get_tile(5, 3)
+        assert placed2 is not None, "Test Fail: Tile not placed at (5,3)"
+        assert placed2.has_stop_sign, "Test Fail: Stop sign NOT placed for L at (5,3)!"
+        assert 'L' in game.board.buildings_with_stops, "Test Fail: Building L not marked with stop after valid placement!"
+        assert len(game.board.buildings_with_stops) == 1, "Test Fail: Stop sign count wrong after valid placement"
+        assert game.actions_taken_this_turn == 2, "Test Fail: Action count after second place near L"
+        game.print_board()
+
+
+        # --- End Turn P1 ---
+        game.end_player_turn()
+        assert len(player1.hand) == 5, f"Test Fail: P1 hand size {len(player1.hand)} != 5"
+        assert game.active_player_index == 0, "Test Fail: Active player index after P1 turn"
+        assert game.actions_taken_this_turn == 0, "Test Fail: Action count reset for P0"
+
+        print("\n--- Phase 2 Basic Tests OK (Rules Corrected) ---")
+
+    except (ValueError, RuntimeError, AssertionError) as e:
+        print(f"\n--- ERROR during Phase 2 Test ---")
+        print(e)
+        import traceback
+        traceback.print_exc()
+    except Exception as e: # Catch any other unexpected errors
+        print(f"\n--- UNEXPECTED ERROR during Phase 2 Test ---")
+        print(e)
+        import traceback
+        traceback.print_exc()
