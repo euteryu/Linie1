@@ -482,9 +482,107 @@ class Game:
         self._check_and_place_stop_sign(placed_tile, row, col); self.actions_taken_this_turn += 1
         print(f"--> SUCCESS placing {tile_type.name} at ({row},{col}). Actions: {self.actions_taken_this_turn}/{MAX_PLAYER_ACTIONS}"); return True
 
-    # --- Keep check_exchange_validity and player_action_exchange_tile ---
     def check_exchange_validity(self, player: Player, new_tile_type: TileType, new_orientation: int, row: int, col: int) -> Tuple[bool, str]:
-        if not self.board.is_playable_coordinate(row, col): return False, f"Exchange Error ({row},{col}): Cannot exchange border/terminal."
+        """Checks if exchanging the tile at (row, col) is valid based on revised rules."""
+        # Checks 1-5 (Playable, Exists, Not Terminal, Swappable, No Stop Sign, In Hand)
+        if not self.board.is_playable_coordinate(row, col): return False, f"Exchange Error ({row},{col}): Cannot exchange border."
+        old_placed_tile = self.board.get_tile(row, col);
+        if not old_placed_tile: return False, f"Exchange Error ({row},{col}): No tile exists."
+        if old_placed_tile.is_terminal: return False, f"Exchange Error ({row},{col}): Cannot exchange terminal."
+        if not old_placed_tile.tile_type.is_swappable: return False, f"Exchange Error ({row},{col}): Tile {old_placed_tile.tile_type.name} not swappable."
+        if old_placed_tile.has_stop_sign: return False, f"Exchange Error ({row},{col}): Cannot exchange tile with stop."
+        if new_tile_type not in player.hand: return False, f"Exchange Error: Player lacks {new_tile_type.name}."
+
+        # --- Connection Checks ---
+        old_connections = self.get_effective_connections(old_placed_tile.tile_type, old_placed_tile.orientation)
+        new_connections = self.get_effective_connections(new_tile_type, new_orientation)
+
+        # Helper to get frozenset pairs
+        def get_connection_pairs(conn_dict):
+            return { frozenset((entry, exit_dir)) for entry, exits in conn_dict.items() for exit_dir in exits }
+
+        old_connected_pairs = get_connection_pairs(old_connections)
+        new_connected_pairs = get_connection_pairs(new_connections)
+
+        # Check 6: Preservation of OLD connections
+        if not old_connected_pairs.issubset(new_connected_pairs):
+            missing = old_connected_pairs - new_connected_pairs
+            msg = (f"Exchange Error ({row},{col}): New tile does not preserve old connections. Missing: {missing}"); return False, msg
+
+        # Check 7: Validity of NEW connections added
+        added_connection_pairs = new_connected_pairs - old_connected_pairs
+        if added_connection_pairs:
+            # Determine the directions where *new exits* are being added by the new tile
+            # An exit exists in a direction if that direction appears in *any* value list
+            old_exits = {ex for exits in old_connections.values() for ex in exits}
+            new_exits = {ex for exits in new_connections.values() for ex in exits}
+            added_exit_directions = new_exits - old_exits
+
+            for direction_str in added_exit_directions:
+                 direction_enum = Direction.from_str(direction_str)
+                 # Check only the neighbor in the direction of the new exit
+                 is_valid, message = self._check_single_neighbor_validity_for_exchange(
+                      new_tile_type, new_orientation, row, col, direction_enum
+                 )
+                 if not is_valid:
+                      # Add context that this was during an exchange check
+                      return False, f"Exchange Error ({row},{col}): Added connection {direction_str} is invalid. Reason: {message}"
+
+        # If all checks pass
+        return True, "Exchange appears valid."
+
+    # --- Helper for Exchange Validity ---
+    def _check_single_neighbor_validity_for_exchange(
+        self,
+        new_tile_type: TileType, # Type being placed
+        new_orientation: int,    # Its orientation
+        row: int, col: int,      # Location of placement/exchange
+        direction_to_neighbor: Direction # Direction from (r,c) to neighbor being checked
+        ) -> Tuple[bool, str]:
+        """Checks validity of a single connection pointing towards a neighbor during exchange."""
+        # Assume the new tile DOES have an exit in direction_to_neighbor
+        new_tile_has_exit = True
+        dir_str = direction_to_neighbor.name
+        opposite_dir = Direction.opposite(direction_to_neighbor)
+        opposite_dir_str = opposite_dir.name
+        dr, dc = direction_to_neighbor.value
+        nr, nc = row + dr, col + dc # Neighbor coordinate
+
+        if not self.board.is_valid_coordinate(nr, nc):
+            # TODO: Terminal Check needed if pointing off grid
+            is_terminal_spot = False # Placeholder
+            if not is_terminal_spot:
+                 return False, f"Points {dir_str} completely off grid edge."
+            return True, "" # Valid connection to terminal edge
+
+        neighbor_tile = self.board.get_tile(nr, nc)
+        neighbor_building = self.board.get_building_at(nr, nc)
+
+        if neighbor_tile:
+            neighbor_effective_connections = self.get_effective_connections(neighbor_tile.tile_type, neighbor_tile.orientation)
+            neighbor_has_exit_back = opposite_dir_str in [ex for exits in neighbor_effective_connections.values() for ex in exits]
+            # Invalid if neighbor doesn't connect back to match the new exit
+            if not neighbor_has_exit_back:
+                msg = (f"New connection {dir_str} invalid, neighbor tile at ({nr},{nc}) "
+                       f"({neighbor_tile.tile_type.name}/{neighbor_tile.orientation}°) "
+                       f"doesn't connect back {opposite_dir_str}.")
+                return False, msg
+        elif neighbor_building:
+            # Invalid if new connection points into building
+            msg = (f"New connection {dir_str} points directly into building "
+                   f"{neighbor_building} at ({nr},{nc}).")
+            return False, msg
+        else: # Empty neighbor square
+             if not self.board.is_playable_coordinate(nr, nc): # Is it empty border?
+                  msg = (f"New connection {dir_str} points into empty border square ({nr},{nc}).")
+                  return False, msg
+             # Else: points into empty playable square -> VALID
+
+        return True, "" # Connection to this neighbor is valid
+
+    # --- Keep check_exchange_validity (ensure it uses the helper above) ---
+    def check_exchange_validity(self, player: Player, new_tile_type: TileType, new_orientation: int, row: int, col: int) -> Tuple[bool, str]:
+        if not self.board.is_playable_coordinate(row, col): return False, f"Exchange Error ({row},{col}): Cannot exchange border."
         old_placed_tile = self.board.get_tile(row, col);
         if not old_placed_tile: return False, f"Exchange Error ({row},{col}): No tile exists."
         if old_placed_tile.is_terminal: return False, f"Exchange Error ({row},{col}): Cannot exchange terminal."
@@ -492,19 +590,28 @@ class Game:
         if old_placed_tile.has_stop_sign: return False, f"Exchange Error ({row},{col}): Cannot exchange tile with stop."
         if new_tile_type not in player.hand: return False, f"Exchange Error: Player lacks {new_tile_type.name}."
         old_connections = self.get_effective_connections(old_placed_tile.tile_type, old_placed_tile.orientation); new_connections = self.get_effective_connections(new_tile_type, new_orientation)
-        old_connected_pairs = set();
-        for entry, exits in old_connections.items():
-            for exit_dir in exits: old_connected_pairs.add(tuple(sorted((entry, exit_dir))))
-        new_connected_pairs = set();
-        for entry, exits in new_connections.items():
-            for exit_dir in exits: new_connected_pairs.add(tuple(sorted((entry, exit_dir))))
+        def get_connection_pairs(conn_dict): return { frozenset((entry, exit_dir)) for entry, exits in conn_dict.items() for exit_dir in exits }
+        old_connected_pairs = get_connection_pairs(old_connections); new_connected_pairs = get_connection_pairs(new_connections)
         if not old_connected_pairs.issubset(new_connected_pairs): missing = old_connected_pairs - new_connected_pairs; msg = (f"Exchange Error ({row},{col}): Doesn't preserve old connections. Missing: {missing}"); return False, msg
-        # Re-check validity of the *new* tile configuration
-        self.board.set_tile(row, col, None) # Temp clear
-        is_valid_check, placement_msg = self.check_placement_validity(new_tile_type, new_orientation, row, col)
-        self.board.set_tile(row, col, old_placed_tile) # Put back
-        if not is_valid_check: return False, f"Exchange Error ({row},{col}): New tile invalid. Reason: {placement_msg}"
+
+        # --- Check validity of NEW connections added ---
+        added_connection_pairs = new_connected_pairs - old_connected_pairs
+        if added_connection_pairs:
+            # Determine directions where new EXITS appear
+            old_exits = {ex for exits in old_connections.values() for ex in exits}
+            new_exits = {ex for exits in new_connections.values() for ex in exits}
+            added_exit_directions = new_exits - old_exits
+
+            for direction_str in added_exit_directions:
+                 direction_enum = Direction.from_str(direction_str)
+                 # Check the neighbor in the direction of the new exit
+                 is_valid, message = self._check_single_neighbor_validity_for_exchange(
+                      new_tile_type, new_orientation, row, col, direction_enum
+                 )
+                 if not is_valid:
+                      return False, f"Exchange Error ({row},{col}): Added connection {direction_str} invalid. Reason: {message}"
         return True, "Exchange appears valid."
+
     def player_action_exchange_tile(self, player: Player, new_tile_type: TileType, new_orientation: int, row: int, col: int) -> bool:
         print(f"\nAttempting P{player.player_id} exchange: {new_tile_type.name}({new_orientation}°) at ({row},{col})")
         is_valid, message = self.check_exchange_validity(player, new_tile_type, new_orientation, row, col);
