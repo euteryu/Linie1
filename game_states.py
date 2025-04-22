@@ -1,5 +1,6 @@
 # game_states.py
 # ... (imports) ...
+from typing import Optional, TypeVar
 import pygame
 from game_logic import Game, Player, TileType, PlayerState, GamePhase, Direction
 import constants as C
