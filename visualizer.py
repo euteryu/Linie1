@@ -10,33 +10,93 @@ import constants as C # Use alias
 import copy
 from collections import deque
 
-# --- Keep create_tile_surface (Assumed correct from previous step) ---
 def create_tile_surface(tile_type: TileType, size: int) -> pygame.Surface:
-    surf = pygame.Surface((size, size), pygame.SRCALPHA); surf.fill((0, 0, 0, 0))
-    line_width = max(2, int(size * 0.1)); track_color = C.COLOR_TRACK
-    half_size_f = size / 2.0; ptN = (int(half_size_f), 0); ptS = (int(half_size_f), size); ptE = (size, int(half_size_f)); ptW = (0, int(half_size_f))
-    radius = size // 2; rect_centered_TR = pygame.Rect(int(size/2.0), int(-size/2.0), size, size); rect_centered_TL = pygame.Rect(int(-size/2.0), int(-size/2.0), size, size); rect_centered_BR = pygame.Rect(int(size/2.0), int(size/2.0), size, size); rect_centered_BL = pygame.Rect(int(-size/2.0), int(size/2.0), size, size)
+    """Creates a Pygame Surface using lines and correctly positioned quadrant arcs."""
+    surf = pygame.Surface((size, size), pygame.SRCALPHA)
+    surf.fill((0, 0, 0, 0))
+
+    line_width = max(2, int(size * 0.1))
+    track_color = C.COLOR_TRACK
+
+    half_size_f = size / 2.0
+    ptN = (int(half_size_f), 0); ptS = (int(half_size_f), size)
+    ptE = (size, int(half_size_f)); ptW = (0, int(half_size_f))
+
+    radius = size // 2
+    rect_centered_TR = pygame.Rect(int(size/2.0), int(-size/2.0), size, size)
+    rect_centered_TL = pygame.Rect(int(-size/2.0), int(-size/2.0), size, size)
+    rect_centered_BR = pygame.Rect(int(size/2.0), int(size/2.0), size, size)
+    rect_centered_BL = pygame.Rect(int(-size/2.0), int(size/2.0), size, size)
+
     angle_N = math.pi / 2; angle_W = math.pi; angle_S = 3 * math.pi / 2; angle_E = 0
-    temp_size = int(size + line_width * 2.0); temp_surf = pygame.Surface((temp_size, temp_size), pygame.SRCALPHA); temp_surf.fill((0,0,0,0))
+
+    temp_size = int(size + line_width * 2.0)
+    temp_surf = pygame.Surface((temp_size, temp_size), pygame.SRCALPHA)
+    temp_surf.fill((0,0,0,0))
     temp_offset_x_f = float(line_width); temp_offset_y_f = float(line_width)
     ptN_temp = (int(size / 2.0 + temp_offset_x_f), int(0 + temp_offset_y_f)); ptS_temp = (int(size / 2.0 + temp_offset_x_f), int(size + temp_offset_y_f)); ptE_temp = (int(size + temp_offset_x_f), int(size / 2.0 + temp_offset_y_f)); ptW_temp = (int(0 + temp_offset_x_f), int(size / 2.0 + temp_offset_y_f))
     rect_centered_TR_temp = pygame.Rect(int(size/2.0 + temp_offset_x_f), int(-size/2.0 + temp_offset_y_f), size, size); rect_centered_TL_temp = pygame.Rect(int(-size/2.0 + temp_offset_x_f), int(-size/2.0 + temp_offset_y_f), size, size); rect_centered_BR_temp = pygame.Rect(int(size/2.0 + temp_offset_x_f), int(size/2.0 + temp_offset_y_f), size, size); rect_centered_BL_temp = pygame.Rect(int(-size/2.0 + temp_offset_x_f), int(size/2.0 + temp_offset_y_f), size, size)
+
     tile_name = tile_type.name
-    if tile_name == "Straight": pygame.draw.line(temp_surf, track_color, ptN_temp, ptS_temp, line_width)
-    elif tile_name == "Curve": pygame.draw.arc(temp_surf, track_color, rect_centered_TR_temp, angle_N, angle_E + 2*math.pi, line_width)
-    elif tile_name == "StraightLeftCurve": pygame.draw.line(temp_surf, track_color, ptN_temp, ptS_temp, line_width); pygame.draw.arc(temp_surf, track_color, rect_centered_BL_temp, angle_W, angle_S, line_width)
-    elif tile_name == "StraightRightCurve": pygame.draw.line(temp_surf, track_color, ptN_temp, ptS_temp, line_width); pygame.draw.arc(temp_surf, track_color, rect_centered_BR_temp, angle_E, angle_S, line_width)
-    elif tile_name == "DoubleCurveY": pygame.draw.arc(temp_surf, track_color, rect_centered_TL_temp, angle_N, angle_W, line_width); pygame.draw.arc(temp_surf, track_color, rect_centered_TR_temp, angle_N, angle_E + 2*math.pi, line_width)
-    elif tile_name == "DiagonalCurve": pygame.draw.arc(temp_surf, track_color, rect_centered_BL_temp, angle_W, angle_S, line_width); pygame.draw.arc(temp_surf, track_color, rect_centered_TR_temp, angle_N, angle_E + 2*math.pi, line_width)
-    elif tile_name == "Tree_JunctionTop": pygame.draw.line(temp_surf, track_color, ptW_temp, ptE_temp, line_width); pygame.draw.arc(temp_surf, track_color, rect_centered_TL_temp, angle_N, angle_W, line_width); pygame.draw.arc(temp_surf, track_color, rect_centered_TR_temp, angle_N, angle_E + 2*math.pi, line_width)
-    elif tile_name == "Tree_JunctionRight": pygame.draw.line(temp_surf, track_color, ptW_temp, ptE_temp, line_width); pygame.draw.arc(temp_surf, track_color, rect_centered_TR_temp, angle_N, angle_E + 2*math.pi, line_width); pygame.draw.arc(temp_surf, track_color, rect_centered_BR_temp, angle_E, angle_S, line_width)
-    elif tile_name == "Tree_Roundabout": pygame.draw.arc(temp_surf, track_color, rect_centered_TL_temp, angle_N, angle_W, line_width); pygame.draw.arc(temp_surf, track_color, rect_centered_TR_temp, angle_N, angle_E + 2*math.pi, line_width); pygame.draw.arc(temp_surf, track_color, rect_centered_BR_temp, angle_E, angle_S, line_width); pygame.draw.arc(temp_surf, track_color, rect_centered_BL_temp, angle_W, angle_S, line_width)
-    elif tile_name == "Tree_Crossroad": pygame.draw.line(temp_surf, track_color, ptN_temp, ptS_temp, line_width); pygame.draw.line(temp_surf, track_color, ptW_temp, ptE_temp, line_width)
-    elif tile_name == "Tree_StraightDiagonal1": pygame.draw.line(temp_surf, track_color, ptN_temp, ptS_temp, line_width); pygame.draw.arc(temp_surf, track_color, rect_centered_BL_temp, angle_W, angle_S, line_width); pygame.draw.arc(temp_surf, track_color, rect_centered_TR_temp, angle_N, angle_E + 2*math.pi, line_width)
-    elif tile_name == "Tree_StraightDiagonal2": pygame.draw.line(temp_surf, track_color, ptN_temp, ptS_temp, line_width); pygame.draw.arc(temp_surf, track_color, rect_centered_TL_temp, angle_N, angle_W, line_width); pygame.draw.arc(temp_surf, track_color, rect_centered_BR_temp, angle_E, angle_S, line_width)
-    else: print(f"FATAL ERROR: Unknown tile type to draw: {tile_name}")
+
+    # --- Draw based on Tile Type Name ---
+    tile_name = tile_type.name
+
+    if tile_name == "Straight": # N-S
+        pygame.draw.line(temp_surf, track_color, ptN_temp, ptS_temp, line_width)
+    elif tile_name == "Curve": # N-E
+        pygame.draw.arc(temp_surf, track_color, rect_centered_TR_temp, angle_N, angle_E + 2*math.pi, line_width) # OK (pi/2 -> 2pi)
+    elif tile_name == "StraightLeftCurve": # N-S, S-W
+        pygame.draw.line(temp_surf, track_color, ptN_temp, ptS_temp, line_width)
+        # S-W Curve: Centered BL. Start=S(3pi/2), Stop=W(pi+2pi=3pi)
+        pygame.draw.arc(temp_surf, track_color, rect_centered_BL_temp, angle_S, angle_W + 2*math.pi, line_width) # << CORRECTED S-W
+    elif tile_name == "StraightRightCurve": # N-S, S-E
+        pygame.draw.line(temp_surf, track_color, ptN_temp, ptS_temp, line_width)
+        pygame.draw.arc(temp_surf, track_color, rect_centered_BR_temp, angle_E, angle_S, line_width) # S-E (Fixed Previously: 0 -> 3pi/2)
+    elif tile_name == "DoubleCurveY": # N-W, N-E
+        # N-W Curve: Centered TL. Start=W(pi), Stop=N(pi/2+2pi=5pi/2)
+        pygame.draw.arc(temp_surf, track_color, rect_centered_TL_temp, angle_W, angle_N + 2*math.pi, line_width) # << CORRECTED N-W
+        pygame.draw.arc(temp_surf, track_color, rect_centered_TR_temp, angle_N, angle_E + 2*math.pi, line_width) # N-E
+    elif tile_name == "DiagonalCurve": # S-W, N-E
+        # S-W Curve: Centered BL. Start=S(3pi/2), Stop=W(pi+2pi=3pi)
+        pygame.draw.arc(temp_surf, track_color, rect_centered_BL_temp, angle_S, angle_W + 2*math.pi, line_width) # << CORRECTED S-W
+        pygame.draw.arc(temp_surf, track_color, rect_centered_TR_temp, angle_N, angle_E + 2*math.pi, line_width) # N-E
+    elif tile_name == "Tree_JunctionTop": # E-W, W-N, N-E
+        pygame.draw.line(temp_surf, track_color, ptW_temp, ptE_temp, line_width)
+        # N-W Curve (W-N): Centered TL. Start=W(pi), Stop=N(pi/2+2pi=5pi/2)
+        pygame.draw.arc(temp_surf, track_color, rect_centered_TL_temp, angle_W, angle_N + 2*math.pi, line_width) # << CORRECTED N-W
+        pygame.draw.arc(temp_surf, track_color, rect_centered_TR_temp, angle_N, angle_E + 2*math.pi, line_width) # N-E
+    elif tile_name == "Tree_JunctionRight": # E-W, N-E, S-E
+        pygame.draw.line(temp_surf, track_color, ptW_temp, ptE_temp, line_width)
+        pygame.draw.arc(temp_surf, track_color, rect_centered_TR_temp, angle_N, angle_E + 2*math.pi, line_width) # N-E
+        pygame.draw.arc(temp_surf, track_color, rect_centered_BR_temp, angle_E, angle_S, line_width) # S-E (Fixed Previously)
+    elif tile_name == "Tree_Roundabout": # W-N, N-E, E-S, S-W
+        # N-W Curve: Centered TL. Start=W(pi), Stop=N(pi/2+2pi=5pi/2)
+        pygame.draw.arc(temp_surf, track_color, rect_centered_TL_temp, angle_W, angle_N + 2*math.pi, line_width) # << CORRECTED N-W
+        pygame.draw.arc(temp_surf, track_color, rect_centered_TR_temp, angle_N, angle_E + 2*math.pi, line_width) # N-E
+        pygame.draw.arc(temp_surf, track_color, rect_centered_BR_temp, angle_E, angle_S, line_width) # S-E (Fixed Previously)
+        # S-W Curve: Centered BL. Start=S(3pi/2), Stop=W(pi+2pi=3pi)
+        pygame.draw.arc(temp_surf, track_color, rect_centered_BL_temp, angle_S, angle_W + 2*math.pi, line_width) # << CORRECTED S-W
+    elif tile_name == "Tree_Crossroad": # N-S, E-W
+        pygame.draw.line(temp_surf, track_color, ptN_temp, ptS_temp, line_width)
+        pygame.draw.line(temp_surf, track_color, ptW_temp, ptE_temp, line_width)
+    elif tile_name == "Tree_StraightDiagonal1": # N-S, S-W, N-E
+        pygame.draw.line(temp_surf, track_color, ptN_temp, ptS_temp, line_width)
+        # S-W Curve: Centered BL. Start=S(3pi/2), Stop=W(pi+2pi=3pi)
+        pygame.draw.arc(temp_surf, track_color, rect_centered_BL_temp, angle_S, angle_W + 2*math.pi, line_width) # << CORRECTED S-W
+        pygame.draw.arc(temp_surf, track_color, rect_centered_TR_temp, angle_N, angle_E + 2*math.pi, line_width) # N-E
+    elif tile_name == "Tree_StraightDiagonal2": # N-S, N-W, S-E
+        pygame.draw.line(temp_surf, track_color, ptN_temp, ptS_temp, line_width)
+        # N-W Curve: Centered TL. Start=W(pi), Stop=N(pi/2+2pi=5pi/2)
+        pygame.draw.arc(temp_surf, track_color, rect_centered_TL_temp, angle_W, angle_N + 2*math.pi, line_width) # << CORRECTED N-W
+        pygame.draw.arc(temp_surf, track_color, rect_centered_BR_temp, angle_E, angle_S, line_width) # S-E (Fixed Previously)
+    else:
+        print(f"FATAL ERROR: Unknown tile type to draw: {tile_name}")
+
+    # --- Blit the center part ---
     blit_rect_on_temp = pygame.Rect(int(temp_offset_x_f), int(temp_offset_y_f), size, size)
     surf.blit(temp_surf, (0, 0), blit_rect_on_temp)
+
     return surf
 
 # --- Main Visualizer Class ---
