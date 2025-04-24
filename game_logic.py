@@ -5,7 +5,6 @@ from enum import Enum, auto
 from typing import List, Dict, Tuple, Optional, Set, Any
 import copy
 from collections import deque
-
 # Import constants needed for game logic
 from constants import (GRID_ROWS, GRID_COLS, PLAYABLE_ROWS, PLAYABLE_COLS,
                        BUILDING_COORDS, TILE_DEFINITIONS, TILE_COUNTS_BASE,
@@ -34,6 +33,7 @@ class Direction(Enum):
 
     @staticmethod
     def opposite(direction: 'Direction') -> 'Direction':
+        # *** CORRECTED: One statement per line ***
         if direction == Direction.N:
             return Direction.S
         elif direction == Direction.S:
@@ -43,16 +43,19 @@ class Direction(Enum):
         elif direction == Direction.W:
             return Direction.E
         else:
+             # This path should be unreachable if input is always a Direction enum member
              raise ValueError("Invalid direction provided to opposite()")
 
     @staticmethod
     def from_str(dir_str: str) -> 'Direction':
         try:
+            # Directly access enum member using bracket notation after converting input to uppercase
             return Direction[dir_str.upper()]
         except KeyError:
+            # Raise a ValueError if the input string doesn't match any enum member name
             raise ValueError(f"Invalid direction string: '{dir_str}'")
 
-# --- Data Classes (Define BEFORE Game class) ---
+# --- Data Classes ---
 class TileType:
     def __init__(self, name: str, connections: List[List[str]], is_swappable: bool):
         self.name = name
@@ -112,73 +115,88 @@ class Board:
         }
         self.buildings_with_stops: Set[str] = set()
         self.building_stop_locations: Dict[str, Tuple[int, int]] = {}
-        # Terminals are initialized by Game after TileTypes exist
+        # _initialize_terminals called from Game.__init__
 
     def _initialize_terminals(self, tile_types: Dict[str, TileType]):
-        """Places fixed Terminal Curve tiles onto the border grid cells."""
         print("Initializing Terminals by placing tiles...")
         curve_tile = tile_types.get("Curve")
         if not curve_tile:
             print("FATAL ERROR: Could not find 'Curve' TileType.")
             return
-
         if not TERMINAL_DATA:
              print("Warning: TERMINAL_DATA dictionary is empty.")
              return
 
         for line_num, entrances in TERMINAL_DATA.items():
-            # Basic validation of structure
+            # Validate structure before unpacking
             if not isinstance(entrances, tuple) or len(entrances) != 2:
-                 print(f"Warning: Invalid entrance structure for Line {line_num}. Skipping."); continue
+                 print(f"Warning: Invalid entrance structure Line {line_num}."); continue
             entrance_a, entrance_b = entrances
             if not isinstance(entrance_a, tuple) or len(entrance_a) != 2 or \
                not isinstance(entrance_b, tuple) or len(entrance_b) != 2:
-                 print(f"Warning: Invalid entrance pair structure for Line {line_num}. Skipping."); continue
+                 print(f"Warning: Invalid pair structure Line {line_num}."); continue
 
             for entrance_pair in [entrance_a, entrance_b]:
                 if not isinstance(entrance_pair, tuple) or len(entrance_pair) != 2:
-                     print(f"Warning: Invalid cell info structure in entrance for Line {line_num}. Skipping pair."); continue
+                     print(f"Warning: Invalid cell info structure pair L{line_num}."); continue
                 cell1_info, cell2_info = entrance_pair
                 if not isinstance(cell1_info, tuple) or len(cell1_info) != 2 or \
                    not isinstance(cell2_info, tuple) or len(cell2_info) != 2:
-                      print(f"Warning: Invalid cell info structure in pair for Line {line_num}. Skipping pair."); continue
+                      print(f"Warning: Invalid cell info structure pair L{line_num}."); continue
 
                 coord1, orient1 = cell1_info
                 coord2, orient2 = cell2_info
 
-                # Validate coordinates and orientation before placing
+                # Place first curve of pair
                 if isinstance(coord1, tuple) and len(coord1) == 2 and isinstance(orient1, int):
                     if self.is_valid_coordinate(coord1[0], coord1[1]):
                         if self.grid[coord1[0]][coord1[1]] is None:
-                             self.grid[coord1[0]][coord1[1]] = PlacedTile(curve_tile, orient1, is_terminal=True)
-                        else: print(f"Warning: Terminal coord {coord1} occupied Line {line_num}.")
-                    else: print(f"Warning: Terminal coord {coord1} out of bounds Line {line_num}.")
-                else: print(f"Warning: Invalid cell1 data {cell1_info} for Line {line_num}.")
+                            self.grid[coord1[0]][coord1[1]] = PlacedTile(curve_tile, orient1, is_terminal=True)
+                        # else: Optional warning if already occupied
+                    # else: Optional warning if out of bounds
+                # else: Optional warning about invalid data format
 
+                # Place second curve of pair
                 if isinstance(coord2, tuple) and len(coord2) == 2 and isinstance(orient2, int):
                     if self.is_valid_coordinate(coord2[0], coord2[1]):
                          if self.grid[coord2[0]][coord2[1]] is None:
                              self.grid[coord2[0]][coord2[1]] = PlacedTile(curve_tile, orient2, is_terminal=True)
-                         else: print(f"Warning: Terminal coord {coord2} occupied Line {line_num}.")
-                    else: print(f"Warning: Terminal coord {coord2} out of bounds Line {line_num}.")
-                else: print(f"Warning: Invalid cell2 data {cell2_info} for Line {line_num}.")
-
+                         # else: Optional warning if already occupied
+                    # else: Optional warning if out of bounds
+                # else: Optional warning about invalid data format
         print("Finished placing terminal tiles.")
 
-    # --- Keep remaining Board methods ---
-    def is_valid_coordinate(self, row: int, col: int) -> bool: return 0 <= row < self.rows and 0 <= col < self.cols
-    def is_playable_coordinate(self, row: int, col: int) -> bool: return (PLAYABLE_ROWS[0] <= row <= PLAYABLE_ROWS[1] and PLAYABLE_COLS[0] <= col <= PLAYABLE_COLS[1])
-    def get_tile(self, row: int, col: int) -> Optional[PlacedTile]: return self.grid[row][col] if self.is_valid_coordinate(row, col) else None
+    def is_valid_coordinate(self, row: int, col: int) -> bool:
+        return 0 <= row < self.rows and 0 <= col < self.cols
+
+    def is_playable_coordinate(self, row: int, col: int) -> bool:
+        return (PLAYABLE_ROWS[0] <= row <= PLAYABLE_ROWS[1] and
+                PLAYABLE_COLS[0] <= col <= PLAYABLE_COLS[1])
+
+    def get_tile(self, row: int, col: int) -> Optional[PlacedTile]:
+        if self.is_valid_coordinate(row, col):
+            return self.grid[row][col]
+        return None
+
     def set_tile(self, row: int, col: int, tile: Optional[PlacedTile]):
-        if not self.is_valid_coordinate(row, col): raise IndexError(f"Coord ({row},{col}) out of bounds.")
-        existing = self.grid[row][col];
-        if existing and existing.is_terminal and tile is not None and not tile.is_terminal: print(f"Warning: Attempted to overwrite terminal at ({row},{col})."); return
+        if not self.is_valid_coordinate(row, col):
+            raise IndexError(f"Coordinate ({row},{col}) out of bounds.")
+        existing = self.grid[row][col]
+        if existing and existing.is_terminal and tile is not None and not tile.is_terminal:
+             print(f"Warning: Cannot overwrite terminal at ({row},{col}).")
+             return
         self.grid[row][col] = tile
-    def get_building_at(self, row: int, col: int) -> Optional[str]: return self.coord_to_building.get((row, col))
+
+    def get_building_at(self, row: int, col: int) -> Optional[str]:
+        return self.coord_to_building.get((row, col))
+
     def get_neighbors(self, row: int, col: int) -> Dict[Direction, Tuple[int, int]]:
-        neighbors = {};
-        for direction in Direction: dr, dc = direction.value; nr, nc = row + dr, col + dc
-        if self.is_valid_coordinate(nr, nc): neighbors[direction] = (nr, nc)
+        neighbors = {}
+        for direction in Direction:
+            dr, dc = direction.value
+            nr, nc = row + dr, col + dc
+            if self.is_valid_coordinate(nr, nc):
+                neighbors[direction] = (nr, nc)
         return neighbors
 
 class LineCard:
@@ -210,181 +228,129 @@ class Player: # DEFINED BEFORE Game
 # --- Game Class ---
 class Game:
     def __init__(self, num_players: int):
-        """Initializes the game components."""
         if not 2 <= num_players <= 6:
             raise ValueError("Players must be 2-6.")
         self.num_players = num_players
-
-        # 1. Create TileType instances from definitions
-        self.tile_types: Dict[str, TileType] = {}
-        for name, details in TILE_DEFINITIONS.items():
-            self.tile_types[name] = TileType(name=name, **details)
-
-        # 2. Create the Board
+        self.tile_types: Dict[str, TileType] = {
+            name: TileType(name=name, **details)
+            for name, details in TILE_DEFINITIONS.items()
+        }
         self.board = Board()
-
-        # 3. Initialize Terminals ON the board, passing the created tile types
-        self.board._initialize_terminals(self.tile_types)
-
-        # 4. Create Players
+        self.board._initialize_terminals(self.tile_types) # Init terminals now
         self.players = [Player(i) for i in range(num_players)]
-
-        # 5. Initialize other game state attributes
-        self.tile_draw_pile: List[TileType] = [] # Populated by setup_game
-        self.line_cards_pile: List[LineCard] = [] # Populated by setup_game
+        self.tile_draw_pile: List[TileType] = []
+        self.line_cards_pile: List[LineCard] = []
         self.active_player_index: int = 0
         self.game_phase: GamePhase = GamePhase.SETUP
         self.current_turn: int = 0
         self.first_player_to_finish_route: Optional[int] = None
         self.actions_taken_this_turn: int = 0
-
-        # 6. Call setup to populate piles and deal cards/hands
         self.setup_game()
 
     def get_active_player(self) -> Player:
-        """Returns the currently active player object."""
         return self.players[self.active_player_index]
 
     def __repr__(self) -> str:
-        """String representation of the game state."""
         return (f"Game({self.num_players}p, Ph: {self.game_phase.name}, "
                 f"T: {self.current_turn}, P: {self.active_player_index}, "
                 f"Actions: {self.actions_taken_this_turn})")
 
     def setup_game(self):
-        """Initializes piles, hands, cards AFTER board and tile types exist."""
         if self.game_phase != GamePhase.SETUP:
-            # Avoid re-running setup if game already started
             return
-
         print("--- Starting Setup Steps 2+ ---")
-        # Create the draw pile and line cards
         self._create_tile_and_line_piles()
-        # Deal starting hands from the created pile
         self._deal_starting_hands()
-        # Deal player-specific line and route cards
         self._deal_player_cards()
-
-        # Finalize setup state
         self.game_phase = GamePhase.LAYING_TRACK
-        self.active_player_index = 0 # Player 0 starts
+        self.active_player_index = 0
         self.current_turn = 1
         print("--- Setup Complete ---")
 
     def _create_tile_and_line_piles(self):
-        """Creates the full tile pile and line card pile."""
-        # Calculate counts based on player number
         tile_counts = TILE_COUNTS_BASE.copy()
         if self.num_players >= 5:
             for name, count in TILE_COUNTS_5_PLUS_ADD.items():
                 tile_counts[name] = tile_counts.get(name, 0) + count
-
-        # Populate the draw pile
-        self.tile_draw_pile = [] # Ensure fresh start
+        self.tile_draw_pile = []
         for name, count in tile_counts.items():
             tile_type = self.tile_types.get(name)
             if tile_type:
-                # Add 'count' copies of the TileType OBJECT
                 self.tile_draw_pile.extend([tile_type] * count)
-            else:
-                print(f"FATAL WARNING: Tile type '{name}' in counts not found.")
-
-        # Verification
         expected_total = sum(tile_counts.values())
         actual_total = len(self.tile_draw_pile)
         if actual_total != expected_total:
-             raise RuntimeError(f"Logic Error: Tile pile count! Expected {expected_total}, got {actual_total}")
-
+             raise RuntimeError(f"Tile pile count error! Expected {expected_total}, got {actual_total}")
         random.shuffle(self.tile_draw_pile)
         print(f"Created tile draw pile with {len(self.tile_draw_pile)} tiles.")
-
-        # Create and shuffle line cards
-        self.line_cards_pile = [LineCard(i) for i in range(1, 7)] # Lines 1-6
+        self.line_cards_pile = [LineCard(i) for i in range(1, 7)]
         random.shuffle(self.line_cards_pile)
 
     def _deal_starting_hands(self):
-        """Deals starting hands from the created tile pile."""
         print("Dealing start hands...")
-        straight_type = self.tile_types.get('Straight') # Use .get for safety
+        straight_type = self.tile_types.get('Straight')
         curve_type = self.tile_types.get('Curve')
         if not straight_type or not curve_type:
-            raise RuntimeError("FATAL: Could not find Straight/Curve TileType definitions.")
-
-        needed_s_total = STARTING_HAND_TILES['Straight'] * self.num_players
-        needed_c_total = STARTING_HAND_TILES['Curve'] * self.num_players
-
-        # Check AFTER pile creation
+            raise RuntimeError("Straight/Curve TileType missing.")
+        needed_s = STARTING_HAND_TILES['Straight'] * self.num_players
+        needed_c = STARTING_HAND_TILES['Curve'] * self.num_players
         current_s = sum(1 for tile in self.tile_draw_pile if tile == straight_type)
         current_c = sum(1 for tile in self.tile_draw_pile if tile == curve_type)
-
-        # Add debug prints for clarity
-        print(f"DEBUG: Checking start hand needs: S={needed_s_total}, C={needed_c_total}")
-        print(f"DEBUG: Available in pile: S={current_s}, C={current_c}")
-
-        if current_s < needed_s_total or current_c < needed_c_total:
-             raise RuntimeError(f"FATAL: Draw pile insufficient for starting hands!")
-
-        # Deal cards
+        # print(f"DEBUG: Need S={needed_s}, C={needed_c}. Have S={current_s}, C={current_c}") # Optional
+        if current_s < needed_s or current_c < needed_c:
+             raise RuntimeError(f"FATAL: Draw pile insufficient!")
         for player in self.players:
             player.hand = []
-            dealt_s = 0
-            dealt_c = 0
+            dealt_s = 0; dealt_c = 0
             indices_to_remove = []
-
-            # Iterate backwards for safe removal by index later
-            for i in range(len(self.tile_draw_pile) - 1, -1, -1):
-                # Check if we already found enough for this player
+            available_indices = list(range(len(self.tile_draw_pile)))
+            random.shuffle(available_indices)
+            for i in available_indices:
                 if dealt_s == STARTING_HAND_TILES['Straight'] and dealt_c == STARTING_HAND_TILES['Curve']:
                     break
-
-                tile = self.tile_draw_pile[i]
-
-                # Check if we still need this type and haven't marked this index
-                # (No need to check if index already marked if we break early)
-                if tile == straight_type and dealt_s < STARTING_HAND_TILES['Straight']:
-                    indices_to_remove.append(i)
-                    dealt_s += 1
-                elif tile == curve_type and dealt_c < STARTING_HAND_TILES['Curve']:
-                    indices_to_remove.append(i)
-                    dealt_c += 1
-
-            # Verify count found matches needed
+                # Ensure index is valid before accessing
+                if i < len(self.tile_draw_pile):
+                    tile = self.tile_draw_pile[i]
+                    if i not in indices_to_remove: # Check before processing
+                        if tile == straight_type and dealt_s < STARTING_HAND_TILES['Straight']:
+                            indices_to_remove.append(i)
+                            dealt_s += 1
+                        elif tile == curve_type and dealt_c < STARTING_HAND_TILES['Curve']:
+                            indices_to_remove.append(i)
+                            dealt_c += 1
+            # Verification
             if dealt_s != STARTING_HAND_TILES['Straight'] or dealt_c != STARTING_HAND_TILES['Curve']:
-                 raise RuntimeError(f"Logic Error: Couldn't find required start tiles for P{player.player_id}.")
-
-            # Populate hand and remove from pile
-            # indices_to_remove is already effectively reversed due to backward iteration
+                 raise RuntimeError(f"Logic Error: Couldn't find start tiles for P{player.player_id}.")
+            # Add to hand and remove from pile
+            indices_to_remove.sort(reverse=True)
             temp_hand = []
             for index in indices_to_remove:
-                 temp_hand.append(self.tile_draw_pile.pop(index))
+                 if index < len(self.tile_draw_pile): # Double check index before pop
+                     temp_hand.append(self.tile_draw_pile.pop(index))
+                 else: raise RuntimeError(f"Logic Error: Invalid index {index} removing start hand P{player.player_id}.")
             player.hand = temp_hand
-            # No need to reverse temp_hand if order doesn't matter initially
-
+            player.hand.reverse()
         print(f"Finished dealing start hands. Draw pile size: {len(self.tile_draw_pile)}")
 
     def _deal_player_cards(self):
-        """Deals Line and Route cards."""
         print("Dealing player cards...")
         available_variant_indices = list(range(len(ROUTE_CARD_VARIANTS)))
         random.shuffle(available_variant_indices)
         player_range = "2-4" if self.num_players <= 4 else "5-6"
-
-        # Check sufficiency
         if len(self.line_cards_pile) < self.num_players:
             raise RuntimeError("Not enough Line cards!")
         if len(available_variant_indices) < self.num_players:
              raise RuntimeError("Not enough Route card variants!")
-
         for player in self.players:
             player.line_card = self.line_cards_pile.pop()
             variant_index = available_variant_indices.pop()
             try:
                 stops = ROUTE_CARD_VARIANTS[variant_index][player_range][player.line_card.line_number]
             except (KeyError, IndexError) as e:
-                raise RuntimeError(f"Error lookup route stops: Var={variant_index}, Range={player_range}, Line={player.line_card.line_number}. Err: {e}")
+                raise RuntimeError(f"Error lookup route stops: Var={variant_index}, Rng={player_range}, Line={player.line_card.line_number}. Err: {e}")
             player.route_card = RouteCard(stops, variant_index)
 
-    # --- Keep Helper Methods (_rotate_direction, get_effective_connections, _has_ns/_ew_straight) ---
+    # --- Keep Helper Methods ---
     def _rotate_direction(self, direction: str, angle: int) -> str:
         directions = ['N', 'E', 'S', 'W'];
         try: current_index = directions.index(direction)
@@ -408,9 +374,9 @@ class Game:
     def _has_ns_straight(self, effective_connections: Dict[str, List[str]]) -> bool: return 'S' in effective_connections.get('N', [])
     def _has_ew_straight(self, effective_connections: Dict[str, List[str]]) -> bool: return 'W' in effective_connections.get('E', [])
 
-    # --- Keep Placement Validity Check (Simplified Terminal Logic) ---
+    # --- Keep Placement Validity Check ---
     def check_placement_validity(self, tile_type: TileType, orientation: int, row: int, col: int) -> Tuple[bool, str]:
-        if not self.board.is_playable_coordinate(row, col): return False, f"Placement Error ({row},{col}): Cannot place on border area."
+        if not self.board.is_playable_coordinate(row, col): return False, f"Placement Error ({row},{col}): Cannot place on border."
         building = self.board.get_building_at(row, col)
         if building is not None: return False, f"Placement Error ({row},{col}): Cannot place on Building {building}."
         existing_tile = self.board.get_tile(row, col)
@@ -421,7 +387,7 @@ class Game:
             dr, dc = direction.value; nr, nc = row + dr, col + dc
             if not self.board.is_valid_coordinate(nr, nc):
                 has_exit_this_way = dir_str in [ex for exits in effective_connections.values() for ex in exits]
-                if has_exit_this_way: return False, f"Placement Error ({row},{col}): Tile points {dir_str} off grid edge."
+                if has_exit_this_way: return False, f"Placement Error ({row},{col}): Tile points {dir_str} off grid."
                 continue
             neighbor_tile = self.board.get_tile(nr, nc); neighbor_building = self.board.get_building_at(nr, nc)
             new_tile_has_exit_towards_neighbor = dir_str in [ex for exits in effective_connections.values() for ex in exits]
@@ -432,7 +398,7 @@ class Game:
                     reason = "has exit" if new_tile_has_exit_towards_neighbor else "no exit"; neighbor_reason = "has exit back" if neighbor_has_exit_back else "no exit back"
                     msg = (f"Placement Error ({row},{col}): Mismatch neighbor tile ({nr},{nc}). New:{reason} {dir_str}, Neighbor:{neighbor_reason} {opposite_dir_str}."); return False, msg
             elif neighbor_building:
-                if new_tile_has_exit_towards_neighbor: msg = (f"Placement Error ({row},{col}): Tile track points {dir_str} into building {neighbor_building} at ({nr},{nc})."); return False, msg
+                if new_tile_has_exit_towards_neighbor: msg = (f"Placement Error ({row},{col}): Tile points {dir_str} into building {neighbor_building} at ({nr},{nc})."); return False, msg
             else: # Empty neighbor square
                 if new_tile_has_exit_towards_neighbor:
                      if not self.board.is_playable_coordinate(nr, nc): msg = (f"Placement Error ({row},{col}): Tile points {dir_str} into empty border square ({nr},{nc})."); return False, msg
@@ -456,20 +422,21 @@ class Game:
                     placed_tile.has_stop_sign = True; self.board.buildings_with_stops.add(building_id); self.board.building_stop_locations[building_id] = (row, col); building_that_got_stop = building_id
                     print(f"--> Placed stop sign on tile ({row},{col}) for Building {building_id}."); break
 
+    # *** ADD draw_tile METHOD DEFINITION ***
     def draw_tile(self, player: Player) -> bool:
         """Player draws one tile from the draw pile into their hand."""
         if not self.tile_draw_pile:
             print("Warning: Draw pile empty!")
             return False # Cannot draw
-        # Check if hand is full (optional, depends on exact rules)
+        # Optional: Check if hand is full
         # if len(player.hand) >= HAND_TILE_LIMIT:
         #    print(f"Warning: Player {player.player_id} hand is full.")
-        #    return False # Cannot draw
+        #    return False
 
-        # Take tile from end of pile (pop is efficient)
+        # Take tile from end of pile
         tile = self.tile_draw_pile.pop()
         player.hand.append(tile)
-        # print(f"Debug: Player {player.player_id} drew {tile.name}. Hand size: {len(player.hand)}") # Optional debug
+        # print(f"Debug: Player {player.player_id} drew {tile.name}. Hand size: {len(player.hand)}") # Optional
         return True # Successfully drew
 
     # --- Keep player_action_place_tile ---
@@ -482,136 +449,46 @@ class Game:
         self._check_and_place_stop_sign(placed_tile, row, col); self.actions_taken_this_turn += 1
         print(f"--> SUCCESS placing {tile_type.name} at ({row},{col}). Actions: {self.actions_taken_this_turn}/{MAX_PLAYER_ACTIONS}"); return True
 
-    def check_exchange_validity(self, player: Player, new_tile_type: TileType, new_orientation: int, row: int, col: int) -> Tuple[bool, str]:
-        """Checks if exchanging the tile at (row, col) is valid based on revised rules."""
-        # Checks 1-5 (Playable, Exists, Not Terminal, Swappable, No Stop Sign, In Hand)
-        if not self.board.is_playable_coordinate(row, col): return False, f"Exchange Error ({row},{col}): Cannot exchange border."
-        old_placed_tile = self.board.get_tile(row, col);
-        if not old_placed_tile: return False, f"Exchange Error ({row},{col}): No tile exists."
-        if old_placed_tile.is_terminal: return False, f"Exchange Error ({row},{col}): Cannot exchange terminal."
-        if not old_placed_tile.tile_type.is_swappable: return False, f"Exchange Error ({row},{col}): Tile {old_placed_tile.tile_type.name} not swappable."
-        if old_placed_tile.has_stop_sign: return False, f"Exchange Error ({row},{col}): Cannot exchange tile with stop."
-        if new_tile_type not in player.hand: return False, f"Exchange Error: Player lacks {new_tile_type.name}."
-
-        # --- Connection Checks ---
-        old_connections = self.get_effective_connections(old_placed_tile.tile_type, old_placed_tile.orientation)
-        new_connections = self.get_effective_connections(new_tile_type, new_orientation)
-
-        # Helper to get frozenset pairs
-        def get_connection_pairs(conn_dict):
-            return { frozenset((entry, exit_dir)) for entry, exits in conn_dict.items() for exit_dir in exits }
-
-        old_connected_pairs = get_connection_pairs(old_connections)
-        new_connected_pairs = get_connection_pairs(new_connections)
-
-        # Check 6: Preservation of OLD connections
-        if not old_connected_pairs.issubset(new_connected_pairs):
-            missing = old_connected_pairs - new_connected_pairs
-            msg = (f"Exchange Error ({row},{col}): New tile does not preserve old connections. Missing: {missing}"); return False, msg
-
-        # Check 7: Validity of NEW connections added
-        added_connection_pairs = new_connected_pairs - old_connected_pairs
-        if added_connection_pairs:
-            # Determine the directions where *new exits* are being added by the new tile
-            # An exit exists in a direction if that direction appears in *any* value list
-            old_exits = {ex for exits in old_connections.values() for ex in exits}
-            new_exits = {ex for exits in new_connections.values() for ex in exits}
-            added_exit_directions = new_exits - old_exits
-
-            for direction_str in added_exit_directions:
-                 direction_enum = Direction.from_str(direction_str)
-                 # Check only the neighbor in the direction of the new exit
-                 is_valid, message = self._check_single_neighbor_validity_for_exchange(
-                      new_tile_type, new_orientation, row, col, direction_enum
-                 )
-                 if not is_valid:
-                      # Add context that this was during an exchange check
-                      return False, f"Exchange Error ({row},{col}): Added connection {direction_str} is invalid. Reason: {message}"
-
-        # If all checks pass
-        return True, "Exchange appears valid."
-
-    # --- Helper for Exchange Validity ---
-    def _check_single_neighbor_validity_for_exchange(
-        self,
-        new_tile_type: TileType, # Type being placed
-        new_orientation: int,    # Its orientation
-        row: int, col: int,      # Location of placement/exchange
-        direction_to_neighbor: Direction # Direction from (r,c) to neighbor being checked
-        ) -> Tuple[bool, str]:
-        """Checks validity of a single connection pointing towards a neighbor during exchange."""
-        # Assume the new tile DOES have an exit in direction_to_neighbor
-        new_tile_has_exit = True
-        dir_str = direction_to_neighbor.name
-        opposite_dir = Direction.opposite(direction_to_neighbor)
-        opposite_dir_str = opposite_dir.name
-        dr, dc = direction_to_neighbor.value
-        nr, nc = row + dr, col + dc # Neighbor coordinate
-
+    # --- Keep _check_single_neighbor_validity_for_exchange and check_exchange_validity ---
+    def _check_single_neighbor_validity_for_exchange( self, new_tile_type: TileType, new_orientation: int, row: int, col: int, direction_to_neighbor: Direction ) -> Tuple[bool, str]:
+        new_tile_has_exit = True; dir_str = direction_to_neighbor.name; opposite_dir = Direction.opposite(direction_to_neighbor); opposite_dir_str = opposite_dir.name
+        dr, dc = direction_to_neighbor.value; nr, nc = row + dr, col + dc
         if not self.board.is_valid_coordinate(nr, nc):
-            # TODO: Terminal Check needed if pointing off grid
-            is_terminal_spot = False # Placeholder
-            if not is_terminal_spot:
-                 return False, f"Points {dir_str} completely off grid edge."
-            return True, "" # Valid connection to terminal edge
-
-        neighbor_tile = self.board.get_tile(nr, nc)
-        neighbor_building = self.board.get_building_at(nr, nc)
-
+            is_terminal_spot = False # TODO: Terminal check
+            if not is_terminal_spot: return False, f"Points {dir_str} off grid edge."
+            return True, ""
+        neighbor_tile = self.board.get_tile(nr, nc); neighbor_building = self.board.get_building_at(nr, nc)
         if neighbor_tile:
             neighbor_effective_connections = self.get_effective_connections(neighbor_tile.tile_type, neighbor_tile.orientation)
             neighbor_has_exit_back = opposite_dir_str in [ex for exits in neighbor_effective_connections.values() for ex in exits]
-            # Invalid if neighbor doesn't connect back to match the new exit
-            if not neighbor_has_exit_back:
-                msg = (f"New connection {dir_str} invalid, neighbor tile at ({nr},{nc}) "
-                       f"({neighbor_tile.tile_type.name}/{neighbor_tile.orientation}°) "
-                       f"doesn't connect back {opposite_dir_str}.")
-                return False, msg
-        elif neighbor_building:
-            # Invalid if new connection points into building
-            msg = (f"New connection {dir_str} points directly into building "
-                   f"{neighbor_building} at ({nr},{nc}).")
-            return False, msg
+            if not neighbor_has_exit_back: msg = (f"New conn {dir_str} invalid, neighbor ({nr},{nc}) no exit back {opposite_dir_str}."); return False, msg
+        elif neighbor_building: msg = (f"New conn {dir_str} points into building {neighbor_building} at ({nr},{nc})."); return False, msg
         else: # Empty neighbor square
-             if not self.board.is_playable_coordinate(nr, nc): # Is it empty border?
-                  msg = (f"New connection {dir_str} points into empty border square ({nr},{nc}).")
-                  return False, msg
-             # Else: points into empty playable square -> VALID
-
-        return True, "" # Connection to this neighbor is valid
-
-    # --- Keep check_exchange_validity (ensure it uses the helper above) ---
+             if not self.board.is_playable_coordinate(nr, nc): msg = (f"New conn {dir_str} points into empty border square ({nr},{nc})."); return False, msg
+        return True, ""
     def check_exchange_validity(self, player: Player, new_tile_type: TileType, new_orientation: int, row: int, col: int) -> Tuple[bool, str]:
         if not self.board.is_playable_coordinate(row, col): return False, f"Exchange Error ({row},{col}): Cannot exchange border."
         old_placed_tile = self.board.get_tile(row, col);
-        if not old_placed_tile: return False, f"Exchange Error ({row},{col}): No tile exists."
+        if not old_placed_tile: return False, f"Exchange Error ({row},{col}): No tile."
         if old_placed_tile.is_terminal: return False, f"Exchange Error ({row},{col}): Cannot exchange terminal."
-        if not old_placed_tile.tile_type.is_swappable: return False, f"Exchange Error ({row},{col}): Tile {old_placed_tile.tile_type.name} not swappable."
-        if old_placed_tile.has_stop_sign: return False, f"Exchange Error ({row},{col}): Cannot exchange tile with stop."
+        if not old_placed_tile.tile_type.is_swappable: return False, f"Exchange Error ({row},{col}): Not swappable."
+        if old_placed_tile.has_stop_sign: return False, f"Exchange Error ({row},{col}): Has stop sign."
         if new_tile_type not in player.hand: return False, f"Exchange Error: Player lacks {new_tile_type.name}."
         old_connections = self.get_effective_connections(old_placed_tile.tile_type, old_placed_tile.orientation); new_connections = self.get_effective_connections(new_tile_type, new_orientation)
         def get_connection_pairs(conn_dict): return { frozenset((entry, exit_dir)) for entry, exits in conn_dict.items() for exit_dir in exits }
         old_connected_pairs = get_connection_pairs(old_connections); new_connected_pairs = get_connection_pairs(new_connections)
         if not old_connected_pairs.issubset(new_connected_pairs): missing = old_connected_pairs - new_connected_pairs; msg = (f"Exchange Error ({row},{col}): Doesn't preserve old connections. Missing: {missing}"); return False, msg
-
-        # --- Check validity of NEW connections added ---
         added_connection_pairs = new_connected_pairs - old_connected_pairs
         if added_connection_pairs:
-            # Determine directions where new EXITS appear
-            old_exits = {ex for exits in old_connections.values() for ex in exits}
-            new_exits = {ex for exits in new_connections.values() for ex in exits}
+            old_exits = {ex for exits in old_connections.values() for ex in exits}; new_exits = {ex for exits in new_connections.values() for ex in exits}
             added_exit_directions = new_exits - old_exits
-
             for direction_str in added_exit_directions:
                  direction_enum = Direction.from_str(direction_str)
-                 # Check the neighbor in the direction of the new exit
-                 is_valid, message = self._check_single_neighbor_validity_for_exchange(
-                      new_tile_type, new_orientation, row, col, direction_enum
-                 )
-                 if not is_valid:
-                      return False, f"Exchange Error ({row},{col}): Added connection {direction_str} invalid. Reason: {message}"
+                 is_valid, message = self._check_single_neighbor_validity_for_exchange(new_tile_type, new_orientation, row, col, direction_enum)
+                 if not is_valid: return False, f"Exchange Error ({row},{col}): Added connection {direction_str} invalid. Reason: {message}"
         return True, "Exchange appears valid."
 
+    # --- Keep player_action_exchange_tile ---
     def player_action_exchange_tile(self, player: Player, new_tile_type: TileType, new_orientation: int, row: int, col: int) -> bool:
         print(f"\nAttempting P{player.player_id} exchange: {new_tile_type.name}({new_orientation}°) at ({row},{col})")
         is_valid, message = self.check_exchange_validity(player, new_tile_type, new_orientation, row, col);
@@ -622,36 +499,88 @@ class Game:
         self.actions_taken_this_turn += 1; print(f"--> SUCCESS exchanging {old_placed_tile.tile_type.name}({old_placed_tile.orientation}°) for {new_tile_type.name}({new_orientation}°) at ({row},{col}). Actions: {self.actions_taken_this_turn}/{MAX_PLAYER_ACTIONS}"); return True
 
     # --- Keep Pathfinding & Route Completion ---
-    def find_path_exists(self, start_row: int, start_col: int, end_row: int, end_col: int) -> bool: # Keep corrected version
-        if not self.board.is_valid_coordinate(start_row, start_col) or not self.board.is_valid_coordinate(end_row, end_col): return False
-        if (start_row, start_col) == (end_row, end_col): return True
-        start_tile = self.board.get_tile(start_row, start_col);
-        if not start_tile: return False
-        queue = deque([(start_row, start_col)]); visited: Set[Tuple[int, int]] = {(start_row, start_col)}
+    def find_path_exists(self, start_row: int, start_col: int, end_row: int, end_col: int) -> bool:
+        """Checks if a continuous track path exists between two coordinates using BFS."""
+        # 1. Validate Start/End Coordinates
+        if not self.board.is_valid_coordinate(start_row, start_col) or \
+           not self.board.is_valid_coordinate(end_row, end_col):
+            # print(f"BFS Debug: Invalid Start/End Coord ({start_row},{start_col})->({end_row},{end_col})") # Optional debug
+            return False
+
+        # 2. Handle Trivial Case (Path to self)
+        if (start_row, start_col) == (end_row, end_col):
+            return True # Path always exists if start and end are the same valid coordinate
+
+        # 3. Check if Start Tile Exists
+        start_tile = self.board.get_tile(start_row, start_col)
+        if not start_tile:
+            # print(f"BFS Debug: No tile at Start ({start_row},{start_col})") # Optional debug
+            return False # Cannot start path from an empty square
+
+        # 4. Initialize BFS
+        queue = deque([(start_row, start_col)])
+        visited: Set[Tuple[int, int]] = {(start_row, start_col)}
+
+        # 5. BFS Loop
         while queue:
-            curr_row, curr_col = queue.popleft(); current_tile = self.board.get_tile(curr_row, curr_col);
-            if not current_tile: continue
+            curr_row, curr_col = queue.popleft()
+
+            # --- Optimization: Check if we dequeued the destination ---
+            # (Can sometimes find the path faster than waiting to explore from its neighbor)
+            # if (curr_row, curr_col) == (end_row, end_col):
+            #     return True # Reached destination
+
+            current_tile = self.board.get_tile(curr_row, curr_col)
+            # This check should ideally not be needed if only valid tiles are added, but good safety.
+            if not current_tile:
+                continue
+
             current_connections = self.get_effective_connections(current_tile.tile_type, current_tile.orientation)
-            all_connected_dirs_out = set();
-            for entry_dir, exit_dirs in current_connections.items():
-                 if exit_dirs: all_connected_dirs_out.add(entry_dir); all_connected_dirs_out.update(exit_dirs)
-            for direction_str in all_connected_dirs_out:
-                direction = Direction.from_str(direction_str); opposite_dir = Direction.opposite(direction); opposite_dir_str = opposite_dir.name
-                dr, dc = direction.value; nr, nc = curr_row + dr, curr_col + dc
-                if (nr, nc) == (end_row, end_col):
-                     neighbor_tile = self.board.get_tile(nr, nc)
-                     if neighbor_tile:
-                          neighbor_connections = self.get_effective_connections(neighbor_tile.tile_type, neighbor_tile.orientation)
-                          neighbor_all_connected_dirs = set(d for exits in neighbor_connections.values() for d in exits) | set(neighbor_connections.keys())
-                          if opposite_dir_str in neighbor_all_connected_dirs: return True
-                     continue
-                if self.board.is_valid_coordinate(nr, nc) and (nr, nc) not in visited:
-                    neighbor_tile = self.board.get_tile(nr, nc)
-                    if neighbor_tile:
-                         neighbor_connections = self.get_effective_connections(neighbor_tile.tile_type, neighbor_tile.orientation)
-                         neighbor_all_connected_dirs = set(d for exits in neighbor_connections.values() for d in exits) | set(neighbor_connections.keys())
-                         if opposite_dir_str in neighbor_all_connected_dirs: visited.add((nr, nc)); queue.append((nr, nc))
+            # Determine all directions this tile has an *explicit* exit towards
+            current_exit_dirs_str = {exit_dir for exits in current_connections.values() for exit_dir in exits}
+
+            # 6. Explore Neighbors
+            for direction in Direction: # Iterate through N, E, S, W
+                dir_str = direction.name # e.g., "N"
+                opposite_dir = Direction.opposite(direction)
+                opposite_dir_str = opposite_dir.name # e.g., "S"
+
+                dr, dc = direction.value
+                nr, nc = curr_row + dr, curr_col + dc
+
+                # 7. Check Neighbor Validity & Visited Status
+                if not self.board.is_valid_coordinate(nr, nc):
+                    continue # Skip coordinates outside the board grid
+                if (nr, nc) in visited:
+                    continue # Skip already processed nodes
+
+                neighbor_tile = self.board.get_tile(nr, nc)
+                if not neighbor_tile:
+                    continue # Skip empty squares - cannot path through them
+
+                # --- 8. THE CRUCIAL TWO-WAY CONNECTION CHECK ---
+                # Check 1: Does the CURRENT tile have an exit pointing TOWARDS the neighbor?
+                current_connects_towards_neighbor = dir_str in current_exit_dirs_str
+
+                # Check 2: Does the NEIGHBOR tile have an exit pointing BACK towards the current tile?
+                neighbor_connections = self.get_effective_connections(neighbor_tile.tile_type, neighbor_tile.orientation)
+                neighbor_exit_dirs_str = {exit_dir for exits in neighbor_connections.values() for exit_dir in exits}
+                neighbor_connects_back_to_current = opposite_dir_str in neighbor_exit_dirs_str
+
+                # 9. Add to Queue if Valid Connection
+                if current_connects_towards_neighbor and neighbor_connects_back_to_current:
+                    # A valid track segment exists between (curr_row, curr_col) and (nr, nc)
+                    visited.add((nr, nc))
+                    queue.append((nr, nc))
+
+                    # --- Optimization: Check if the added neighbor IS the destination ---
+                    if (nr, nc) == (end_row, end_col):
+                        return True # Found the path!
+
+        # 10. Queue is empty, destination not reached
+        # print(f"BFS Debug: Path not found from ({start_row},{start_col}) to ({end_row},{end_col})") # Optional debug
         return False
+
     def get_terminal_coords(self, line_number: int) -> Tuple[Optional[Tuple[int, int]], Optional[Tuple[int, int]]]: # Keep as is
         coords = TERMINAL_COORDS.get(line_number);
         if coords: return coords[0], coords[1]
@@ -684,18 +613,28 @@ class Game:
         else: print(f"Error: Could not determine start terminal for Player {player.player_id}")
         if self.first_player_to_finish_route is None: self.first_player_to_finish_route = player.player_id; self.game_phase = GamePhase.DRIVING; print(f"Game Phase changing to DRIVING.")
 
-    # --- Keep End Turn Logic ---
+    # --- Keep End Turn Logic (Corrected draw_tile call) ---
     def end_player_turn(self):
         active_player = self.get_active_player(); route_just_completed = False
         if active_player.player_state == PlayerState.LAYING_TRACK:
-            if self.check_player_route_completion(active_player): self.handle_route_completion(active_player); route_just_completed = True
+            if self.check_player_route_completion(active_player):
+                 self.handle_route_completion(active_player);
+                 route_just_completed = True
+
         if active_player.player_state == PlayerState.LAYING_TRACK and not route_just_completed:
             draw_count = 0
             while len(active_player.hand) < HAND_TILE_LIMIT and self.tile_draw_pile:
-                 if self.draw_tile(active_player): draw_count += 1
-            if draw_count > 0: print(f"Player {active_player.player_id} drew {draw_count} tiles (Hand: {len(active_player.hand)}).")
-        elif route_just_completed: print(f"Player {active_player.player_id} completed route, does not draw.")
+                 # *** Use the correct method name ***
+                 if self.draw_tile(active_player):
+                      draw_count += 1
+            if draw_count > 0:
+                 print(f"Player {active_player.player_id} drew {draw_count} tiles (Hand: {len(active_player.hand)}).")
+        elif route_just_completed:
+             print(f"Player {active_player.player_id} completed route, does not draw.")
+
         self.active_player_index = (self.active_player_index + 1) % self.num_players
-        if self.active_player_index == 0: self.current_turn += 1
-        self.actions_taken_this_turn = 0; next_player = self.get_active_player()
+        if self.active_player_index == 0:
+            self.current_turn += 1
+        self.actions_taken_this_turn = 0 # Reset action count
+        next_player = self.get_active_player()
         print(f"\n--- End Turn - Starting Turn {self.current_turn} for Player {self.active_player_index} ({next_player.player_state.name}) ---")
