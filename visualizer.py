@@ -7,11 +7,19 @@ import pygame
 import sys
 import math
 from typing import List, Dict, Tuple, Optional, Any
-from game_logic import Game, PlacedTile, TileType, GamePhase, Direction, Player
 from game_states import GameState, LayingTrackState, DrivingState, GameOverState
 import constants as C # Use alias
 import copy
 from collections import deque
+
+# from game_logic import Game, PlacedTile, TileType, GamePhase, Direction, Player
+from game_logic.game import Game # Import main Game class
+from game_logic.player import Player # Import Player if needed directly
+from game_logic.tile import PlacedTile, TileType # Import tile classes if needed
+from game_logic.enums import GamePhase, PlayerState, Direction # Import enums
+
+# Constants import remains the same
+import constants as C
 
 def create_tile_surface(tile_type: TileType, size: int) -> pygame.Surface:
     """Creates a Pygame Surface using lines and correctly positioned quadrant arcs."""
@@ -207,10 +215,13 @@ class Linie1Visualizer:
             for c in range(C.GRID_COLS):
                 if not (C.PLAYABLE_ROWS[0]-1 <= r <= C.PLAYABLE_ROWS[1]+1 and C.PLAYABLE_COLS[0]-1 <= c <= C.PLAYABLE_COLS[1]+1): continue
                 screen_x = C.BOARD_X_OFFSET + (c - C.PLAYABLE_COLS[0]) * self.TILE_SIZE; screen_y = C.BOARD_Y_OFFSET + (r - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE; rect = pygame.Rect(screen_x, screen_y, self.TILE_SIZE, self.TILE_SIZE)
-                placed_tile = self.game.board.get_tile(r, c); is_playable = self.game.board.is_playable_coordinate(r, c); is_terminal = placed_tile is not None and placed_tile.is_terminal
+                placed_tile = self.game.board.get_tile(r, c)
+                is_playable = self.game.board.is_playable_coordinate(r, c)
+                is_terminal = placed_tile is not None and placed_tile.is_terminal
                 bg_color = C.COLOR_BOARD_BG;
                 if is_terminal: bg_color = C.COLOR_TERMINAL_BG
-                elif not is_playable: bg_color = tuple(max(0, val - 40) for val in C.COLOR_BOARD_BG)
+                elif not is_playable:
+                    bg_color = tuple(max(0, val - 40) for val in C.COLOR_BOARD_BG)
                 pygame.draw.rect(screen, bg_color, rect); pygame.draw.rect(screen, C.COLOR_GRID, rect, 1)
                 if placed_tile:
                     tile_surf = self.tile_surfaces.get(placed_tile.tile_type.name)

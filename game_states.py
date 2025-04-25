@@ -2,10 +2,15 @@
 # ... (imports) ...
 from typing import Optional, TypeVar, Dict, Any # Keep existing imports
 import pygame
-from game_logic import Game, Player, TileType, PlayerState, GamePhase, Direction
 import constants as C
 import tkinter as tk               # Import tkinter
 from tkinter import filedialog     # <--- IMPORT filedialog HERE
+
+# from game_logic import Game, Player, TileType, PlayerState, GamePhase, Direction
+from game_logic.game import Game # Import main Game class
+from game_logic.player import Player # Import Player if needed directly
+from game_logic.tile import PlacedTile, TileType # Import tile classes if needed
+from game_logic.enums import GamePhase, PlayerState, Direction # Import enums
 
 class GameState:
     def __init__(self, visualizer): self.visualizer = visualizer; self.game = visualizer.game
