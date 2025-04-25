@@ -1,5 +1,8 @@
 # visualizer.py
 # -*- coding: utf-8 -*-
+import tkinter as tk
+from tkinter import filedialog
+
 import pygame
 import sys
 import math
@@ -110,6 +113,8 @@ class Linie1Visualizer:
         self.game = Game(num_players=2)
         self.TILE_SIZE = C.TILE_SIZE; self.HAND_TILE_SIZE = C.HAND_TILE_SIZE
 
+        print("--visualizer.py : WELCOME TO LINIE 1--")
+
         # Debug Mode Attributes
         self.debug_mode = C.DEBUG_MODE
         # Store TileType objects directly for debug selection
@@ -126,11 +131,30 @@ class Linie1Visualizer:
         )
 
         # Main Surfaces
+        print("")
         print("Generating main tile surfaces...");
         self.tile_surfaces = { name: create_tile_surface(ttype, self.TILE_SIZE) for name, ttype in self.game.tile_types.items()}
         self.hand_tile_surfaces = { name: create_tile_surface(ttype, self.HAND_TILE_SIZE) for name, ttype in self.game.tile_types.items()}
         print("Tile surfaces generated.")
+        print("")
         self.current_state: GameState = LayingTrackState(self)
+
+        self.clock = pygame.time.Clock()
+        # Initialize Tkinter root ONLY for file dialogs
+        try:
+            self.tk_root = tk.Tk()
+            self.tk_root.withdraw() # Hide the main tkinter window
+        except tk.TclError:
+             print("Warning: Tkinter not available or display not found. File dialogs disabled.")
+             self.tk_root = None
+
+        # UI Button Rects (adjust positions as needed)
+        button_width = 100
+        button_height = 30
+        button_y = C.UI_PANEL_Y + C.UI_PANEL_HEIGHT - button_height - 15
+        self.save_button_rect = pygame.Rect(C.UI_PANEL_X + 15, button_y, button_width, button_height)
+        self.load_button_rect = pygame.Rect(C.UI_PANEL_X + 15 + button_width + 10, button_y, button_width, button_height)
+        self.debug_toggle_button_rect = pygame.Rect( C.DEBUG_BUTTON_X, C.DEBUG_BUTTON_Y, C.DEBUG_BUTTON_WIDTH, C.DEBUG_BUTTON_HEIGHT )
 
     # --- run() method ---
     def run(self):
@@ -190,10 +214,48 @@ class Linie1Visualizer:
                 pygame.draw.rect(screen, bg_color, rect); pygame.draw.rect(screen, C.COLOR_GRID, rect, 1)
                 if placed_tile:
                     tile_surf = self.tile_surfaces.get(placed_tile.tile_type.name)
-                    if tile_surf: rotated_surf = pygame.transform.rotate(tile_surf, -placed_tile.orientation); new_rect = rotated_surf.get_rect(center=rect.center); screen.blit(rotated_surf, new_rect.topleft)
+                    if tile_surf:
+                        rotated_surf = pygame.transform.rotate(tile_surf, -placed_tile.orientation)
+                        new_rect = rotated_surf.get_rect(center=rect.center)
+                        # --- Add Debug Print ---
+                        # print(f"Drawing tile at {(r,c)}: {placed_tile}, Surf:{tile_surf.get_size()}, Rot:{placed_tile.orientation}, BlitRect:{new_rect}")
+                        screen.blit(rotated_surf, new_rect.topleft)
+                    else: print(f"Warning: No surface found for {placed_tile.tile_type.name}") # Check if surface exists
                     if placed_tile.has_stop_sign and is_playable: pygame.draw.circle(screen, C.COLOR_STOP, rect.center, self.TILE_SIZE // 4)
+                # --- Draw Building if present ---
                 building_id = self.game.board.get_building_at(r, c)
-                if building_id and is_playable: b_font = pygame.font.SysFont(None, 20); b_surf = b_font.render(building_id, True, C.COLOR_BUILDING); screen.blit(b_surf, (screen_x + 2, screen_y + 2))
+                # Ensure drawing only happens on playable grid squares for buildings too
+                if building_id and is_playable:
+                    # Dark Green Background for the whole tile
+                    pygame.draw.rect(screen, C.COLOR_BUILDING_BG, rect)
+
+                    # Larger Font for Centered Letter
+                    # Calculate font size based on tile size for better scaling
+                    font_size = int(self.TILE_SIZE * 0.7) # Adjust multiplier as needed
+                    try:
+                        b_font = pygame.font.SysFont(None, font_size)
+                    except:
+                        b_font = pygame.font.Font(None, font_size) # Fallback
+
+                    # Render letter with light green color
+                    b_surf = b_font.render(building_id, True, C.COLOR_BUILDING_FG)
+
+                    # Get rect and center it within the tile's rect
+                    b_rect = b_surf.get_rect(center=rect.center)
+
+                    # Blit the centered letter onto the screen
+                    screen.blit(b_surf, b_rect.topleft)
+
+                    # Draw the grid border again over the building bg
+                    pygame.draw.rect(screen, C.COLOR_GRID, rect, 1)
+
+
+                # --- Draw Stop Sign if present (draw AFTER tile/building) ---
+                if placed_tile and placed_tile.has_stop_sign and is_playable:
+                    pygame.draw.circle(screen, C.COLOR_STOP, rect.center, self.TILE_SIZE // 4)
+                    # Optional: Add black border to stop sign
+                    pygame.draw.circle(screen, C.COLOR_BLACK, rect.center, self.TILE_SIZE // 4, 1)
+
         terminal_font = pygame.font.SysFont(None, int(self.TILE_SIZE * 0.5))
         for line_num, entrances in C.TERMINAL_DATA.items():
              if line_num in drawn_terminal_labels: continue
@@ -243,6 +305,28 @@ class Linie1Visualizer:
         self.draw_text(screen, turn_text, C.UI_TEXT_X, C.UI_TURN_INFO_Y)
         action_text = f"Actions: {self.game.actions_taken_this_turn}/{C.MAX_PLAYER_ACTIONS}"
         font_to_use = self.font if self.font else pygame.font.Font(None, 24)
+
+
+        # Save Button
+        pygame.draw.rect(screen, C.COLOR_WHITE, self.save_button_rect)
+        pygame.draw.rect(screen, C.COLOR_WHITE, self.save_button_rect, 1)
+        self.draw_text(screen, "Save Game", self.save_button_rect.x + 10, self.save_button_rect.y + 7, size=18)
+
+        # Load Button
+        pygame.draw.rect(screen, C.COLOR_WHITE, self.load_button_rect)
+        pygame.draw.rect(screen, C.COLOR_WHITE, self.load_button_rect, 1)
+        self.draw_text(screen, "Load Game", self.load_button_rect.x + 10, self.load_button_rect.y + 7, size=18)
+
+        # Debug Toggle Button
+        pygame.draw.rect(screen, C.COLOR_GRID, self.debug_toggle_button_rect)
+        pygame.draw.rect(screen, C.COLOR_BLACK, self.debug_toggle_button_rect, 1)
+        debug_btn_text = "Debug: ON" if self.debug_mode else "Debug: OFF"
+        btn_font = pygame.font.SysFont(None, 20)
+        btn_surf = btn_font.render(debug_btn_text, True, C.COLOR_WHITE)
+        btn_rect = btn_surf.get_rect(center=self.debug_toggle_button_rect.center)
+        screen.blit(btn_surf, btn_rect)
+
+
         try:
             action_surf = font_to_use.render(action_text, True, C.COLOR_UI_TEXT)
             action_text_width = action_surf.get_width()
@@ -285,6 +369,21 @@ class Linie1Visualizer:
         btn_surf = btn_font.render(debug_btn_text, True, C.COLOR_WHITE)
         btn_rect = btn_surf.get_rect(center=self.debug_toggle_button_rect.center)
         screen.blit(btn_surf, btn_rect)
+
+        player = self.game.get_active_player()
+        turn_text = f"Turn {self.game.current_turn} - Player {player.player_id} ({player.player_state.name})" # ... (rest of top info) ...
+
+        # --- Draw based on mode (Debug vs Normal) ---
+        if isinstance(self.current_state, LayingTrackState):
+            # ... (draw debug title or hand title) ...
+            pass # placeholder
+        elif isinstance(self.current_state, DrivingState):
+             # Draw Driving Specific UI (like last roll) - Already in DrivingState.draw
+             pass
+        elif isinstance(self.current_state, GameOverState):
+             # Draw Game Over Specific UI - Already in GameOverState.draw
+             pass
+
 
 
     def draw_debug_panel(self, screen, selected_debug_tile_type):

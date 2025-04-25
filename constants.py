@@ -47,11 +47,36 @@ DEBUG_TILE_SPACING: int = 5
 DEBUG_TILES_PER_ROW: int = 4
 DEBUG_BUTTON_WIDTH: int = 150; DEBUG_BUTTON_HEIGHT: int = 30
 DEBUG_BUTTON_X: int = UI_PANEL_X + (UI_PANEL_WIDTH - DEBUG_BUTTON_WIDTH) // 2 # Center button
-DEBUG_BUTTON_Y: int = UI_PANEL_Y + UI_PANEL_HEIGHT - DEBUG_BUTTON_HEIGHT - 15 # Bottom of panel
+DEBUG_BUTTON_Y: int = UI_PANEL_Y + UI_PANEL_HEIGHT - DEBUG_BUTTON_HEIGHT - 97 # Bottom of panel
 
 
 # --- Colors ---
-COLOR_WHITE: Tuple[int, int, int] = (255, 255, 255); COLOR_BLACK: Tuple[int, int, int] = (0, 0, 0); COLOR_GRID: Tuple[int, int, int] = (100, 100, 100); COLOR_BOARD_BG: Tuple[int, int, int] = (180, 180, 180); COLOR_TRACK: Tuple[int, int, int] = (50, 50, 50); COLOR_STOP: Tuple[int, int, int] = (255, 0, 0); COLOR_BUILDING: Tuple[int, int, int] = (0, 100, 0); COLOR_HIGHLIGHT: Tuple[int, int, int, int] = (255, 255, 0, 150); COLOR_SELECTED: Tuple[int, int, int] = (0, 150, 255); COLOR_UI_BG: Tuple[int, int, int] = (200, 200, 220); COLOR_UI_TEXT: Tuple[int, int, int] = (10, 10, 50); COLOR_TERMINAL_BG: Tuple[int, int, int] = (160, 160, 190); COLOR_TERMINAL_TEXT: Tuple[int, int, int] = COLOR_WHITE
+COLOR_WHITE: Tuple[int, int, int] = (255, 255, 255)
+COLOR_BLACK: Tuple[int, int, int] = (0, 0, 0)
+COLOR_GRID: Tuple[int, int, int] = (100, 100, 100)
+COLOR_BOARD_BG: Tuple[int, int, int] = (180, 180, 180)
+COLOR_TRACK: Tuple[int, int, int] = (50, 50, 50)
+COLOR_STOP: Tuple[int, int, int] = (255, 0, 0)
+COLOR_BUILDING_BG: Tuple[int, int, int] = (0, 80, 0)  # Dark Green for background
+COLOR_BUILDING_FG: Tuple[int, int, int] = (144, 238, 144) # Light Green for letter (like lightgreen)
+COLOR_HIGHLIGHT: Tuple[int, int, int, int] = (255, 255, 0, 150)
+COLOR_SELECTED: Tuple[int, int, int] = (0, 150, 255)
+COLOR_UI_BG: Tuple[int, int, int] = (200, 200, 220)
+COLOR_UI_TEXT: Tuple[int, int, int] = (10, 10, 50)
+COLOR_TERMINAL_BG: Tuple[int, int, int] = (160, 160, 190)
+COLOR_TERMINAL_TEXT: Tuple[int, int, int] = COLOR_WHITE
 
 # --- Game Rules ---
 MAX_PLAYER_ACTIONS: int = 2; HAND_TILE_LIMIT: int = 5
+
+
+COLOR_P0: Tuple[int, int, int] = (200, 0, 0)    # Red
+COLOR_P1: Tuple[int, int, int] = (0, 0, 200)    # Blue
+COLOR_P2: Tuple[int, int, int] = (0, 150, 0)    # Green
+COLOR_P3: Tuple[int, int, int] = (200, 200, 0)  # Yellow
+COLOR_P4: Tuple[int, int, int] = (150, 0, 150)  # Purple
+COLOR_P5: Tuple[int, int, int] = (0, 150, 150)  # Cyan
+PLAYER_COLORS: List[Tuple[int, int, int]] = [COLOR_P0, COLOR_P1, COLOR_P2, COLOR_P3, COLOR_P4, COLOR_P5]
+
+STOP_SYMBOL = 'H' # Define the symbol used for the 'Stop' face of the die
+DIE_FACES: Tuple[Any, ...] = (1, 2, 3, 4, STOP_SYMBOL, STOP_SYMBOL)

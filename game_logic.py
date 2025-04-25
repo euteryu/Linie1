@@ -1,16 +1,19 @@
-# game_logic.py
-# -*- coding: utf-8 -*-
 import random
 from enum import Enum, auto
 from typing import List, Dict, Tuple, Optional, Set, Any
 import copy
 from collections import deque
+import json # <--- Import json
+import traceback # For detailed error printing
+
 # Import constants needed for game logic
 from constants import (GRID_ROWS, GRID_COLS, PLAYABLE_ROWS, PLAYABLE_COLS,
                        BUILDING_COORDS, TILE_DEFINITIONS, TILE_COUNTS_BASE,
                        TILE_COUNTS_5_PLUS_ADD, STARTING_HAND_TILES,
                        ROUTE_CARD_VARIANTS, TERMINAL_DATA, TERMINAL_COORDS,
-                       HAND_TILE_LIMIT, MAX_PLAYER_ACTIONS)
+                       HAND_TILE_LIMIT, MAX_PLAYER_ACTIONS,
+                       DIE_FACES, STOP_SYMBOL)
+
 
 # --- Enums ---
 class PlayerState(Enum):
@@ -101,6 +104,35 @@ class PlacedTile:
         term_str = " Term" if self.is_terminal else ""
         stop_str = " Stop" if self.has_stop_sign else ""
         return f"Placed({self.tile_type.name}, {self.orientation}deg{term_str}{stop_str})"
+    
+    # --- Methods for Save/Load ---
+    def to_dict(self) -> Dict:
+        """Converts PlacedTile state to a JSON-serializable dictionary."""
+        return {
+            "type_name": self.tile_type.name,
+            "orientation": self.orientation,
+            "has_stop_sign": self.has_stop_sign,
+            "is_terminal": self.is_terminal,
+        }
+
+    @staticmethod
+    def from_dict(data: Optional[Dict], tile_types: Dict[str, 'TileType']) -> Optional['PlacedTile']:
+        """Creates a PlacedTile instance from a dictionary, or returns None."""
+        if data is None:
+            return None
+        tile_type = tile_types.get(data.get("type_name"))
+        if not tile_type:
+             print(f"Warning: Tile type '{data.get('type_name')}' not found during load.")
+             return None # Or raise error?
+        try:
+             orientation = int(data.get("orientation", 0))
+             if orientation % 90 != 0: raise ValueError("Invalid orientation")
+             tile = PlacedTile(tile_type, orientation, data.get("is_terminal", False))
+             tile.has_stop_sign = data.get("has_stop_sign", False)
+             return tile
+        except Exception as e:
+            print(f"Error creating PlacedTile from dict {data}: {e}")
+            return None
 
 class Board:
     def __init__(self, rows: int = GRID_ROWS, cols: int = GRID_COLS):
@@ -198,6 +230,43 @@ class Board:
             if self.is_valid_coordinate(nr, nc):
                 neighbors[direction] = (nr, nc)
         return neighbors
+    
+    # --- Methods for Save/Load ---
+    def to_dict(self) -> Dict:
+        """Converts Board state to a JSON-serializable dictionary."""
+        grid_data = [
+            [(tile.to_dict() if tile else None) for tile in row]
+            for row in self.grid
+        ]
+        return {
+            "rows": self.rows,
+            "cols": self.cols,
+            "grid": grid_data,
+            "buildings_with_stops": sorted(list(self.buildings_with_stops)), # Sort for consistency
+            "building_stop_locations": {k: list(v) for k, v in self.building_stop_locations.items()}, # Convert tuples to lists
+        }
+
+    @staticmethod
+    def from_dict(data: Dict, tile_types: Dict[str, 'TileType']) -> 'Board':
+        """Creates a Board instance from a dictionary."""
+        rows = data.get("rows", GRID_ROWS)
+        cols = data.get("cols", GRID_COLS)
+        board = Board(rows, cols) # Create board
+        board.grid = [[None for _ in range(cols)] for _ in range(rows)] # Initialize grid
+
+        grid_data = data.get("grid", [])
+        for r in range(min(len(grid_data), board.rows)):
+             row_data = grid_data[r]
+             for c in range(min(len(row_data), board.cols)):
+                  tile_data = row_data[c]
+                  board.grid[r][c] = PlacedTile.from_dict(tile_data, tile_types)
+
+        board.buildings_with_stops = set(data.get("buildings_with_stops", []))
+        # Convert lists back to tuples for coordinates
+        loaded_stop_locs = data.get("building_stop_locations", {})
+        board.building_stop_locations = {k: tuple(v) for k, v in loaded_stop_locs.items() if isinstance(v, list) and len(v) == 2}
+
+        return board
 
 class LineCard:
     def __init__(self, line_number: int):
@@ -221,8 +290,63 @@ class Player: # DEFINED BEFORE Game
         self.player_state: PlayerState = PlayerState.LAYING_TRACK
         self.streetcar_position: Optional[Tuple[int, int]] = None
         self.stops_visited_in_order: List[str] = []
+        self.validated_route: Optional[List[Tuple[int, int]]] = None # Stores the full path
+        self.current_route_target_index: int = 0 # Index into route_card.stops + end terminal
+
     def __repr__(self) -> str:
-        return f"Player {self.player_id} (State: {self.player_state.name}, Hand: {len(self.hand)})"
+        route_len = len(self.validated_route) if self.validated_route else 0
+        return (f"Player {self.player_id} (State: {self.player_state.name}, "
+                f"Hand: {len(self.hand)}, RouteIdx: {self.current_route_target_index}/{route_len})")
+    
+    # --- Methods for Save/Load ---
+    def to_dict(self) -> Dict:
+        """Converts Player state to a JSON-serializable dictionary."""
+        hand_data = [tile.name for tile in self.hand]
+        line_card_data = self.line_card.line_number if self.line_card else None
+        route_card_data = { "stops": self.route_card.stops, "variant": self.route_card.variant_index } if self.route_card else None
+        route_path_data = [list(coord) for coord in self.validated_route] if self.validated_route else None
+
+        return {
+            "player_id": self.player_id,
+            "hand": hand_data,
+            "line_card": line_card_data,
+            "route_card": route_card_data,
+            "player_state": self.player_state.name, # Save enum name
+            "streetcar_position": list(self.streetcar_position) if self.streetcar_position else None, # Tuple to list
+            "validated_route": route_path_data,
+            "current_route_target_index": self.current_route_target_index,
+        }
+
+    @staticmethod
+    def from_dict(data: Dict, tile_types: Dict[str, 'TileType']) -> 'Player':
+        """Creates a Player instance from a dictionary."""
+        player_id = data.get("player_id", -1)
+        if player_id == -1: raise ValueError("Missing player_id")
+        player = Player(player_id)
+
+        player.hand = [tile_types[name] for name in data.get("hand", []) if name in tile_types]
+
+        lc_num = data.get("line_card")
+        player.line_card = LineCard(lc_num) if lc_num is not None else None
+
+        rc_data = data.get("route_card")
+        if rc_data and isinstance(rc_data, dict):
+             player.route_card = RouteCard(rc_data.get("stops",[]), rc_data.get("variant", 0))
+
+        try:
+             player.player_state = PlayerState[data.get("player_state", "LAYING_TRACK")]
+        except KeyError:
+             print(f"Warning: Invalid player state '{data.get('player_state')}' found for P{player_id}. Defaulting to LAYING_TRACK.")
+             player.player_state = PlayerState.LAYING_TRACK
+
+        pos_list = data.get("streetcar_position")
+        player.streetcar_position = tuple(pos_list) if isinstance(pos_list, list) and len(pos_list) == 2 else None
+
+        route_list = data.get("validated_route")
+        player.validated_route = [tuple(coord) for coord in route_list if isinstance(coord, list) and len(coord) == 2] if route_list else None
+
+        player.current_route_target_index = data.get("current_route_target_index", 0)
+        return player
 
 
 # --- Game Class ---
@@ -236,16 +360,19 @@ class Game:
             for name, details in TILE_DEFINITIONS.items()
         }
         self.board = Board()
-        self.board._initialize_terminals(self.tile_types) # Init terminals now
+        # Initialize terminals *before* potentially loading a debug layout
+        self.board._initialize_terminals(self.tile_types)
         self.players = [Player(i) for i in range(num_players)]
         self.tile_draw_pile: List[TileType] = []
         self.line_cards_pile: List[LineCard] = []
         self.active_player_index: int = 0
         self.game_phase: GamePhase = GamePhase.SETUP
         self.current_turn: int = 0
-        self.first_player_to_finish_route: Optional[int] = None
+        self.winner: Optional[Player] = None # <--- ENSURE THIS IS HERE
         self.actions_taken_this_turn: int = 0
-        self.setup_game()
+        # Only call setup_game if not loading a debug layout later
+        # (Setup might be handled differently based on startup flags)
+        self.setup_game() # Defer this call maybe?
 
     def get_active_player(self) -> Player:
         return self.players[self.active_player_index]
@@ -258,6 +385,7 @@ class Game:
     def setup_game(self):
         if self.game_phase != GamePhase.SETUP:
             return
+        print("")
         print("--- Starting Setup Steps 2+ ---")
         self._create_tile_and_line_piles()
         self._deal_starting_hands()
@@ -266,6 +394,7 @@ class Game:
         self.active_player_index = 0
         self.current_turn = 1
         print("--- Setup Complete ---")
+        print("")
 
     def _create_tile_and_line_piles(self):
         tile_counts = TILE_COUNTS_BASE.copy()
@@ -498,143 +627,497 @@ class Game:
         player.hand.remove(new_tile_type); player.hand.append(old_placed_tile.tile_type); new_placed_tile = PlacedTile(new_tile_type, new_orientation); self.board.set_tile(row, col, new_placed_tile)
         self.actions_taken_this_turn += 1; print(f"--> SUCCESS exchanging {old_placed_tile.tile_type.name}({old_placed_tile.orientation}°) for {new_tile_type.name}({new_orientation}°) at ({row},{col}). Actions: {self.actions_taken_this_turn}/{MAX_PLAYER_ACTIONS}"); return True
 
-    # --- Keep Pathfinding & Route Completion ---
-    def find_path_exists(self, start_row: int, start_col: int, end_row: int, end_col: int) -> bool:
-        """Checks if a continuous track path exists between two coordinates using BFS."""
-        # 1. Validate Start/End Coordinates
+    def find_path(self, start_row: int, start_col: int, end_row: int, end_col: int) -> Optional[List[Tuple[int, int]]]:
+        """Finds a path using BFS and returns the list of coordinates, or None."""
         if not self.board.is_valid_coordinate(start_row, start_col) or \
            not self.board.is_valid_coordinate(end_row, end_col):
-            # print(f"BFS Debug: Invalid Start/End Coord ({start_row},{start_col})->({end_row},{end_col})") # Optional debug
-            return False
-
-        # 2. Handle Trivial Case (Path to self)
+            return None
         if (start_row, start_col) == (end_row, end_col):
-            return True # Path always exists if start and end are the same valid coordinate
-
-        # 3. Check if Start Tile Exists
+            return [(start_row, start_col)]
         start_tile = self.board.get_tile(start_row, start_col)
         if not start_tile:
-            # print(f"BFS Debug: No tile at Start ({start_row},{start_col})") # Optional debug
-            return False # Cannot start path from an empty square
+            return None
 
-        # 4. Initialize BFS
         queue = deque([(start_row, start_col)])
-        visited: Set[Tuple[int, int]] = {(start_row, start_col)}
+        # Store path predecessors: Key = coord, Value = predecessor_coord
+        predecessor: Dict[Tuple[int, int], Optional[Tuple[int, int]]] = {(start_row, start_col): None}
 
-        # 5. BFS Loop
+        path_found = False
         while queue:
             curr_row, curr_col = queue.popleft()
 
-            # --- Optimization: Check if we dequeued the destination ---
-            # (Can sometimes find the path faster than waiting to explore from its neighbor)
-            # if (curr_row, curr_col) == (end_row, end_col):
-            #     return True # Reached destination
+            if (curr_row, curr_col) == (end_row, end_col):
+                path_found = True
+                break # Found the end
 
             current_tile = self.board.get_tile(curr_row, curr_col)
-            # This check should ideally not be needed if only valid tiles are added, but good safety.
-            if not current_tile:
-                continue
+            if not current_tile: continue
 
             current_connections = self.get_effective_connections(current_tile.tile_type, current_tile.orientation)
-            # Determine all directions this tile has an *explicit* exit towards
             current_exit_dirs_str = {exit_dir for exits in current_connections.values() for exit_dir in exits}
 
-            # 6. Explore Neighbors
-            for direction in Direction: # Iterate through N, E, S, W
-                dir_str = direction.name # e.g., "N"
+            # Shuffle neighbors for potentially less predictable paths if multiple exist
+            directions_to_check = list(Direction)
+            random.shuffle(directions_to_check)
+
+            for direction in directions_to_check:
+                dir_str = direction.name
                 opposite_dir = Direction.opposite(direction)
-                opposite_dir_str = opposite_dir.name # e.g., "S"
+                opposite_dir_str = opposite_dir.name
 
                 dr, dc = direction.value
                 nr, nc = curr_row + dr, curr_col + dc
 
-                # 7. Check Neighbor Validity & Visited Status
-                if not self.board.is_valid_coordinate(nr, nc):
-                    continue # Skip coordinates outside the board grid
-                if (nr, nc) in visited:
-                    continue # Skip already processed nodes
+                neighbor_coord = (nr, nc)
+
+                if not self.board.is_valid_coordinate(nr, nc): continue
+                if neighbor_coord in predecessor: continue # Already visited/queued
 
                 neighbor_tile = self.board.get_tile(nr, nc)
-                if not neighbor_tile:
-                    continue # Skip empty squares - cannot path through them
+                if not neighbor_tile: continue
 
-                # --- 8. THE CRUCIAL TWO-WAY CONNECTION CHECK ---
-                # Check 1: Does the CURRENT tile have an exit pointing TOWARDS the neighbor?
+                # Two-way check
                 current_connects_towards_neighbor = dir_str in current_exit_dirs_str
-
-                # Check 2: Does the NEIGHBOR tile have an exit pointing BACK towards the current tile?
                 neighbor_connections = self.get_effective_connections(neighbor_tile.tile_type, neighbor_tile.orientation)
                 neighbor_exit_dirs_str = {exit_dir for exits in neighbor_connections.values() for exit_dir in exits}
                 neighbor_connects_back_to_current = opposite_dir_str in neighbor_exit_dirs_str
 
-                # 9. Add to Queue if Valid Connection
                 if current_connects_towards_neighbor and neighbor_connects_back_to_current:
-                    # A valid track segment exists between (curr_row, curr_col) and (nr, nc)
-                    visited.add((nr, nc))
-                    queue.append((nr, nc))
+                    predecessor[neighbor_coord] = (curr_row, curr_col)
+                    queue.append(neighbor_coord)
 
-                    # --- Optimization: Check if the added neighbor IS the destination ---
-                    if (nr, nc) == (end_row, end_col):
-                        return True # Found the path!
-
-        # 10. Queue is empty, destination not reached
-        # print(f"BFS Debug: Path not found from ({start_row},{start_col}) to ({end_row},{end_col})") # Optional debug
-        return False
+        # Reconstruct path if found
+        if path_found:
+            path: List[Tuple[int, int]] = []
+            curr = (end_row, end_col)
+            while curr is not None:
+                path.append(curr)
+                curr = predecessor[curr]
+            return path[::-1] # Reverse to get start -> end
+        else:
+            return None
 
     def get_terminal_coords(self, line_number: int) -> Tuple[Optional[Tuple[int, int]], Optional[Tuple[int, int]]]: # Keep as is
         coords = TERMINAL_COORDS.get(line_number);
         if coords: return coords[0], coords[1]
         else: print(f"Warning: Terminal coordinates not defined for Line {line_number}"); return None, None
-    def check_player_route_completion(self, player: Player) -> bool: # Keep as is
-        if not player.line_card or not player.route_card: print(f"Route Check Error: Player {player.player_id} missing cards."); return False
-        line_num = player.line_card.line_number; stops = player.route_card.stops
-        term1_coord, term2_coord = self.get_terminal_coords(line_num);
-        if not term1_coord or not term2_coord: print(f"Route Check Error: No terminal coords for Line {line_num}."); return False
-        stop_coords = [];
-        for stop_id in stops:
-            coord = self.board.building_stop_locations.get(stop_id)
-            if coord is None: return False
-            stop_coords.append(coord)
-        path1_possible = True; sequence1 = [term1_coord] + stop_coords + [term2_coord]
-        for i in range(len(sequence1) - 1):
-            start_node = sequence1[i]; end_node = sequence1[i+1]
-            if not self.find_path_exists(start_node[0], start_node[1], end_node[0], end_node[1]): path1_possible = False; print(f"Route Check P{player.player_id} Seq1 FAIL: {start_node} -> {end_node}"); break
-        if path1_possible: print(f"Route Check P{player.player_id}: COMPLETE via sequence 1."); return True
-        path2_possible = True; sequence2 = [term2_coord] + stop_coords + [term1_coord]
-        for i in range(len(sequence2) - 1):
-            start_node = sequence2[i]; end_node = sequence2[i+1]
-            if not self.find_path_exists(start_node[0], start_node[1], end_node[0], end_node[1]): path2_possible = False; print(f"Route Check P{player.player_id} Seq2 FAIL: {start_node} -> {end_node}"); break
-        if path2_possible: print(f"Route Check P{player.player_id}: COMPLETE via sequence 2."); return True
+
+    def _is_valid_stop_entry(self, stop_coord: Tuple[int, int], entry_direction: Direction) -> bool:
+        """Checks if entering the stop_coord from entry_direction is valid based on the parallel track rule."""
+        placed_tile = self.board.get_tile(stop_coord[0], stop_coord[1])
+        if not placed_tile or not placed_tile.has_stop_sign:
+            # This shouldn't be called if there's no stop sign, but safety check
+            # print(f"Debug: _is_valid_stop_entry called on non-stop tile {stop_coord}")
+            return False # Or maybe True if rule doesn't apply? Assume False.
+
+        tile_connections = self.get_effective_connections(placed_tile.tile_type, placed_tile.orientation)
+        valid_entry = False
+        # Stop sign requires a straight track parallel to the building edge.
+        # The entry must be via that straight track.
+        # If building is N/S, straight is E/W -> Entry must be E or W.
+        # If building is E/W, straight is N/S -> Entry must be N or S.
+
+        # Find which building caused the stop
+        building_id = None
+        for bid, bcoord in self.board.building_stop_locations.items():
+             if bcoord == stop_coord:
+                  building_id = bid
+                  break
+        if not building_id:
+             # print(f"Debug: Cannot find building ID for stop at {stop_coord}")
+             return False # Should not happen
+
+        building_actual_coord = self.board.building_coords[building_id]
+
+        # Determine building relative position (N/S or E/W of the stop tile)
+        building_is_north_south = building_actual_coord[0] != stop_coord[0]
+        building_is_east_west = building_actual_coord[1] != stop_coord[1]
+
+        if building_is_north_south: # Building is N or S, required straight is E-W
+             if self._has_ew_straight(tile_connections) and (entry_direction == Direction.E or entry_direction == Direction.W):
+                  valid_entry = True
+        elif building_is_east_west: # Building is E or W, required straight is N-S
+             if self._has_ns_straight(tile_connections) and (entry_direction == Direction.N or entry_direction == Direction.S):
+                  valid_entry = True
+        # Else: Diagonal placement - should not have generated a stop sign.
+
+        # print(f"Debug: Stop entry check at {stop_coord} from {entry_direction.name}. Valid: {valid_entry}")
+        return valid_entry
+
+    # Replace in Game class in game_logic.py
+
+    def check_player_route_completion(self, player: Player) -> Tuple[bool, Optional[List[Tuple[int, int]]]]:
+        """Checks if a player's route is complete, VALIDATING stop entries. Now with error handling."""
+        try: # Add try block here
+            if not player.line_card or not player.route_card:
+                # print(f"Route Check Error P{player.player_id}: Missing cards.") # Optional debug
+                return False, None
+            line_num = player.line_card.line_number
+            stops_ids = player.route_card.stops
+            term1_coord, term2_coord = self.get_terminal_coords(line_num)
+            if not term1_coord or not term2_coord:
+                print(f"Route Check Error P{player.player_id}: No terminal coords for Line {line_num}.")
+                return False, None
+
+            required_stop_coords: Dict[str, Tuple[int, int]] = {}
+            stop_coords_in_order: List[Tuple[int, int]] = []
+            for stop_id in stops_ids:
+                coord = self.board.building_stop_locations.get(stop_id)
+                if coord is None:
+                    # print(f"Route Check P{player.player_id}: Required stop {stop_id} not placed.") # Optional debug
+                    return False, None # Required stop sign not placed
+                required_stop_coords[stop_id] = coord
+                stop_coords_in_order.append(coord)
+
+            # --- Function to check a full sequence (remains the same internally) ---
+            def check_sequence(start_terminal, end_terminal, stops) -> Optional[List[Tuple[int, int]]]:
+                sequence = [start_terminal] + stops + [end_terminal]
+                full_path: List[Tuple[int, int]] = []
+                # print(f"Debug P{player.player_id}: Checking sequence {sequence}") # Debug print
+                for i in range(len(sequence) - 1):
+                    start_node = sequence[i]
+                    end_node = sequence[i+1]
+                    # print(f"Debug P{player.player_id}: Finding path segment {start_node} -> {end_node}") # Debug print
+                    segment_path = self.find_path(start_node[0], start_node[1], end_node[0], end_node[1])
+
+                    if not segment_path:
+                        # print(f"Debug P{player.player_id}: Segment FAILED {start_node} -> {end_node} (No path)") # Debug print
+                        return None # Segment failed
+
+                    # --- Validate Stop Entry IF end_node is a required stop ---
+                    is_required_stop = end_node in stop_coords_in_order
+                    if is_required_stop:
+                        if len(segment_path) < 2:
+                            # print(f"Debug P{player.player_id}: Segment FAILED {start_node} -> {end_node} (Path too short for entry check)") # Debug print
+                            return None # Cannot determine entry
+
+                        previous_coord = segment_path[-2]
+                        entry_direction = self._get_entry_direction(previous_coord, end_node)
+
+                        if not entry_direction:
+                            # print(f"Debug P{player.player_id}: Segment FAILED {start_node} -> {end_node} (Could not determine entry direction)") # Debug print
+                            return None
+
+                        if not self._is_valid_stop_entry(end_node, entry_direction):
+                            # print(f"Debug P{player.player_id}: Segment FAILED {start_node} -> {end_node} (INVALID stop entry at {end_node} from {entry_direction.name})") # Debug print
+                            return None # Stop entry validation failed
+                        # else:
+                            # print(f"Debug P{player.player_id}: Segment OK {start_node} -> {end_node} (VALID stop entry at {end_node} from {entry_direction.name})") # Debug print
+
+                    # Append segment (avoiding duplicate node)
+                    full_path.extend(segment_path if i == 0 else segment_path[1:])
+                    # print(f"Debug P{player.player_id}: Segment OK {start_node} -> {end_node}. Path length now: {len(full_path)}") # Debug print
+
+                # print(f"Debug P{player.player_id}: Full sequence check successful.") # Debug print
+                return full_path # Entire sequence valid
+
+            # --- Try both sequences ---
+            path1 = check_sequence(term1_coord, term2_coord, stop_coords_in_order)
+            if path1:
+                print(f"Route Check P{player.player_id}: COMPLETE via sequence 1 (Term1 start).")
+                return True, path1
+
+            path2 = check_sequence(term2_coord, term1_coord, stop_coords_in_order)
+            if path2:
+                print(f"Route Check P{player.player_id}: COMPLETE via sequence 2 (Term2 start).")
+                return True, path2
+
+            # print(f"Route Check P{player.player_id}: FAILED both sequences.") # Optional debug
+            return False, None
+
+        except Exception as e: # Add except block here
+             print(f"\n!!! EXCEPTION during check_player_route_completion for P{player.player_id} !!!")
+             print(f"Error: {e}")
+             import traceback
+             traceback.print_exc() # Print full traceback for debugging
+             return False, None # Ensure tuple return on error
+
+    # --- Modify handle_route_completion to store path ---
+    def handle_route_completion(self, player: Player, validated_path: List[Tuple[int, int]]):
+        print(f"\n*** ROUTE COMPLETE for Player {player.player_id}! Storing path. ***")
+        player.player_state = PlayerState.DRIVING
+        player.validated_route = validated_path
+        player.current_route_target_index = 0 # Index for the stops list + end terminal
+
+        # Start position is the first element of the stored path
+        if player.validated_route:
+             player.streetcar_position = player.validated_route[0]
+             print(f"Player {player.player_id} streetcar placed at {player.streetcar_position}.")
+        else:
+             print(f"Error: Route complete but no valid path stored for Player {player.player_id}")
+             # Handle error state? Revert player state?
+
+        # Check if game phase should change
+        if self.game_phase == GamePhase.LAYING_TRACK:
+             self.game_phase = GamePhase.DRIVING
+             print(f"Game Phase changing to DRIVING.")
+        # If already DRIVING, no change needed
+
+    # --- NEW Driving Methods (Step 6) ---
+    def roll_special_die(self) -> Any:
+        """Rolls the special Linie 1 die."""
+        return random.choice(C.DIE_FACES)
+
+    def trace_track_steps(self, player: Player, num_steps: int) -> Tuple[int, int]:
+        """Calculates the destination coordinate after moving num_steps along the validated route."""
+        if not player.validated_route or player.streetcar_position is None:
+            print("Error: Cannot trace steps without a validated route or current position.")
+            return player.streetcar_position if player.streetcar_position else (-1,-1) # Error case
+
+        try:
+            current_index_on_path = player.validated_route.index(player.streetcar_position)
+        except ValueError:
+            print(f"Error: Streetcar position {player.streetcar_position} not found in validated route.")
+            # Attempt to find nearest point? For now, return current position.
+            return player.streetcar_position
+
+        target_index = min(current_index_on_path + num_steps, len(player.validated_route) - 1)
+        return player.validated_route[target_index]
+
+    def find_next_feature_on_path(self, player: Player) -> Tuple[int, int]:
+        """Finds the coordinate of the next stop sign or the end terminal along the validated route."""
+        if not player.validated_route or player.streetcar_position is None:
+            print("Error: Cannot find next feature without route/position.")
+            return player.streetcar_position if player.streetcar_position else (-1,-1)
+
+        try:
+            current_index_on_path = player.validated_route.index(player.streetcar_position)
+        except ValueError:
+            print(f"Error: Streetcar position {player.streetcar_position} not found in validated route.")
+            return player.streetcar_position # Cannot proceed
+
+        # Iterate from the *next* step on the path
+        for i in range(current_index_on_path + 1, len(player.validated_route)):
+            coord = player.validated_route[i]
+
+            # Check if it's the final destination terminal
+            if i == len(player.validated_route) - 1:
+                return coord # Always stop at the end terminal
+
+            # Check if it's a stop sign location
+            tile = self.board.get_tile(coord[0], coord[1])
+            if tile and tile.has_stop_sign:
+                 return coord # Found the next stop sign
+
+            # Check if it's *any* terminal location (stops at other players' terminals too)
+            # This requires iterating through TERMINAL_COORDS values
+            for term_coords_pair in C.TERMINAL_COORDS.values():
+                 if coord in term_coords_pair:
+                      return coord # Found any terminal
+
+        # Should only reach here if already at the last step
+        return player.validated_route[-1]
+
+
+    def _get_entry_direction(self, from_coord: Tuple[int,int], to_coord: Tuple[int,int]) -> Optional[Direction]:
+         """ Determines the direction of entry INTO to_coord FROM from_coord. """
+         if from_coord is None or to_coord is None: # Add check for None coords
+              print("Warning: _get_entry_direction received None coordinate.")
+              return None
+
+         dr = to_coord[0] - from_coord[0]
+         dc = to_coord[1] - from_coord[1]
+         target_delta = (dr, dc) # The change we are looking for
+
+         # Iterate through the enum members
+         for dir_name, dir_enum_member in Direction.__members__.items():
+              # Access the .value tuple (dr, dc) from the enum member
+              r_change, c_change = dir_enum_member.value
+              if target_delta == (r_change, c_change):
+                   # We found the matching direction enum member
+                   return dir_enum_member
+
+         # If no match was found (e.g., coords not adjacent)
+         print(f"Warning: Could not determine entry direction from {from_coord} to {to_coord}. Delta: {target_delta}")
+         return None
+
+
+    def move_streetcar(self, player: Player, target_coord: Tuple[int, int]):
+        """Moves the streetcar and checks if a required stop was validly visited."""
+        if not player.validated_route or player.streetcar_position is None:
+             print("Error: Cannot move streetcar without route/position.")
+             return
+
+        previous_coord = player.streetcar_position
+        player.streetcar_position = target_coord
+        print(f"Player {player.player_id} moved from {previous_coord} to {target_coord}") # More debug info
+
+        # Check if the target is the *next required* stop
+        num_required_stops = len(player.route_card.stops) if player.route_card else 0
+
+        if player.current_route_target_index < num_required_stops:
+            required_stop_id = player.route_card.stops[player.current_route_target_index]
+            required_stop_coord = self.board.building_stop_locations.get(required_stop_id)
+
+            if target_coord == required_stop_coord:
+                print(f"Debug P{player.player_id}: Landed on required stop {required_stop_id} tile at {target_coord}.") # Debug print
+                entry_direction = self._get_entry_direction(previous_coord, target_coord)
+                if entry_direction:
+                    # Use the helper function now
+                    if self._is_valid_stop_entry(target_coord, entry_direction):
+                        print(f"--> VALID entry for stop {required_stop_id}. Advancing target.")
+                        player.current_route_target_index += 1
+                    else:
+                        print(f"--> INVALID entry direction ({entry_direction.name}) for stop {required_stop_id}. Target not advanced.")
+                else:
+                     print(f"Error: Could not determine entry direction from {previous_coord} to {target_coord}")
+            # else: Landed somewhere else, not the required stop. No index change.
+
+    # --- Add check_win_condition ---
+    def check_win_condition(self, player: Player) -> bool:
+        """Checks if the player has reached their destination terminal."""
+        if player.player_state != PlayerState.DRIVING:
+            return False
+        if not player.validated_route or player.streetcar_position is None:
+            return False
+
+        # Destination is the LAST coordinate in the validated route
+        destination_coord = player.validated_route[-1]
+
+        if player.streetcar_position == destination_coord:
+             # Check if all required stops were visited (target index should be beyond last stop)
+             num_required_stops = len(player.route_card.stops) if player.route_card else 0
+             if player.current_route_target_index >= num_required_stops:
+                  self.game_phase = GamePhase.GAME_OVER
+                  self.winner = player # Store the winning player object
+                  player.player_state = PlayerState.FINISHED # Mark player as finished
+                  print(f"Player {player.player_id} WINS!")
+                  return True
+             else:
+                  print(f"Player {player.player_id} reached end terminal but missed stops.")
+                  return False # Reached end but didn't visit required stops correctly
         return False
-    def handle_route_completion(self, player: Player): # Keep as is
-        print(f"\n*** ROUTE COMPLETE for Player {player.player_id}! ***"); player.player_state = PlayerState.DRIVING
-        term1_coord, term2_coord = self.get_terminal_coords(player.line_card.line_number)
-        if term1_coord: player.streetcar_position = term1_coord; print(f"Player {player.player_id} streetcar placed at {term1_coord}.")
-        else: print(f"Error: Could not determine start terminal for Player {player.player_id}")
-        if self.first_player_to_finish_route is None: self.first_player_to_finish_route = player.player_id; self.game_phase = GamePhase.DRIVING; print(f"Game Phase changing to DRIVING.")
 
-    # --- Keep End Turn Logic (Corrected draw_tile call) ---
+    # --- Modify end_player_turn for new start-of-turn check ---
     def end_player_turn(self):
-        active_player = self.get_active_player(); route_just_completed = False
-        if active_player.player_state == PlayerState.LAYING_TRACK:
-            if self.check_player_route_completion(active_player):
-                 self.handle_route_completion(active_player);
-                 route_just_completed = True
+        active_player = self.get_active_player()
+        was_driving = active_player.player_state == PlayerState.DRIVING
 
-        if active_player.player_state == PlayerState.LAYING_TRACK and not route_just_completed:
-            draw_count = 0
-            while len(active_player.hand) < HAND_TILE_LIMIT and self.tile_draw_pile:
-                 # *** Use the correct method name ***
-                 if self.draw_tile(active_player):
-                      draw_count += 1
-            if draw_count > 0:
-                 print(f"Player {active_player.player_id} drew {draw_count} tiles (Hand: {len(active_player.hand)}).")
-        elif route_just_completed:
-             print(f"Player {active_player.player_id} completed route, does not draw.")
+        # --- Draw tiles for LAYING_TRACK players (only if turn is truly over) ---
+        if active_player.player_state == PlayerState.LAYING_TRACK and self.actions_taken_this_turn >= MAX_PLAYER_ACTIONS:
+             draw_count = 0
+             while len(active_player.hand) < HAND_TILE_LIMIT and self.tile_draw_pile:
+                 if self.draw_tile(active_player): draw_count += 1
+             if draw_count > 0: print(f"Player {active_player.player_id} drew {draw_count} tiles (Hand: {len(active_player.hand)}).")
+        elif was_driving:
+             print(f"Player {active_player.player_id} finished driving move.")
+        # If LAYING_TRACK and actions < MAX_PLAYER_ACTIONS, don't draw yet.
 
+        # --- Advance Player Index ---
         self.active_player_index = (self.active_player_index + 1) % self.num_players
+
+        # --- Increment Turn Counter (only when wrapping around to Player 0) ---
         if self.active_player_index == 0:
-            self.current_turn += 1
-        self.actions_taken_this_turn = 0 # Reset action count
+             self.current_turn += 1
+
+        # --- Reset Actions for the NEW player ---
+        self.actions_taken_this_turn = 0
         next_player = self.get_active_player()
-        print(f"\n--- End Turn - Starting Turn {self.current_turn} for Player {self.active_player_index} ({next_player.player_state.name}) ---")
+        print(f"\n--- Starting Turn {self.current_turn} for Player {self.active_player_index} ({next_player.player_state.name}) ---")
+
+        # --- <<<<<< CHECK ROUTE COMPLETION AT START OF NEW TURN >>>>>>> ---
+        if next_player.player_state == PlayerState.LAYING_TRACK:
+             # Call the check function which now returns path
+             route_complete, path = self.check_player_route_completion(next_player)
+             if route_complete and path:
+                  # Call handler *with* the path
+                  self.handle_route_completion(next_player, path)
+                  # Player state is now DRIVING, their turn starts in DrivingState
+                  print(f"Player {next_player.player_id} state changed to DRIVING at turn start.")
+             # else: Route not complete, player continues in LAYING_TRACK state
+
+    # --- SAVE GAME METHOD ---
+    def save_game(self, filename: str):
+        """Saves the current game state to a JSON file."""
+        print(f"Saving game state to {filename}...")
+        try:
+            game_state_data = {
+                "num_players": self.num_players,
+                "board": self.board.to_dict(),
+                "players": [p.to_dict() for p in self.players],
+                "tile_draw_pile": [tile.name for tile in self.tile_draw_pile],
+                "active_player_index": self.active_player_index,
+                "game_phase": self.game_phase.name,
+                "current_turn": self.current_turn,
+                "actions_taken": self.actions_taken_this_turn,
+                "winner_id": self.winner.player_id if self.winner else None,
+                 # Save first_player_to_finish_route if needed for specific variants? Not currently used.
+            }
+            with open(filename, 'w') as f:
+                json.dump(game_state_data, f, indent=4)
+            print("Save successful.")
+            return True
+        except Exception as e:
+            print(f"!!! Error saving game to {filename}: {e} !!!")
+            traceback.print_exc()
+            return False
+
+    # --- LOAD GAME STATIC METHOD ---
+    @staticmethod
+    def load_game(filename: str, tile_types: Dict[str, 'TileType']) -> Optional['Game']:
+        """Loads a game state from a JSON file."""
+        print(f"Loading game state from {filename}...")
+        try:
+            with open(filename, 'r') as f:
+                game_state_data = json.load(f)
+
+            num_players = game_state_data.get("num_players")
+            if num_players is None or not isinstance(num_players, int) or not 2 <= num_players <= 6:
+                 raise ValueError("Invalid or missing 'num_players' in save file.")
+
+            # Create a blank Game instance without calling __init__ directly
+            # This avoids running the normal setup procedure.
+            loaded_game = Game.__new__(Game)
+
+            # Manually initialize necessary attributes before loading complex parts
+            loaded_game.num_players = num_players
+            loaded_game.tile_types = tile_types # Must pass in the global definitions
+
+            # Load simple attributes
+            loaded_game.active_player_index = game_state_data.get("active_player_index", 0)
+            try:
+                loaded_game.game_phase = GamePhase[game_state_data.get("game_phase", "LAYING_TRACK")]
+            except KeyError:
+                 print(f"Warning: Invalid game phase '{game_state_data.get('game_phase')}' found. Defaulting to LAYING_TRACK.")
+                 loaded_game.game_phase = GamePhase.LAYING_TRACK
+            loaded_game.current_turn = game_state_data.get("current_turn", 1)
+            loaded_game.actions_taken_this_turn = game_state_data.get("actions_taken", 0)
+            loaded_game.winner = None # Will be set below if applicable
+
+            # Load Board
+            board_data = game_state_data.get("board")
+            if not board_data: raise ValueError("Missing 'board' data in save file.")
+            loaded_game.board = Board.from_dict(board_data, tile_types)
+
+            # Load Players
+            players_data = game_state_data.get("players", [])
+            if len(players_data) != num_players:
+                 print(f"Warning: Number of players in save ({len(players_data)}) doesn't match 'num_players' field ({num_players}). Using loaded players.")
+                 loaded_game.num_players = len(players_data) # Adjust num_players? Or error?
+
+            loaded_game.players = [Player.from_dict(p_data, tile_types) for p_data in players_data]
+
+            # Assign winner object
+            winner_id = game_state_data.get("winner_id")
+            if winner_id is not None:
+                 for p in loaded_game.players:
+                      if p.player_id == winner_id:
+                           loaded_game.winner = p
+                           break
+
+            # Load Draw Pile
+            pile_data = game_state_data.get("tile_draw_pile", [])
+            loaded_game.tile_draw_pile = [tile_types[name] for name in pile_data if name in tile_types]
+            # Ensure line cards pile is empty - it's not saved/restored
+            loaded_game.line_cards_pile = []
+
+            print(f"Load successful. Phase: {loaded_game.game_phase.name}, Turn: {loaded_game.current_turn}, Active P: {loaded_game.active_player_index}")
+            return loaded_game
+
+        except FileNotFoundError:
+            print(f"Error: Save file not found at {filename}")
+            return None
+        except Exception as e:
+            print(f"!!! Error loading game from {filename}: {e} !!!")
+            traceback.print_exc()
+            return None
