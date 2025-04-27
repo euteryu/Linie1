@@ -137,6 +137,8 @@ class Linie1Visualizer:
             C.DEBUG_BUTTON_X, C.DEBUG_BUTTON_Y,
             C.DEBUG_BUTTON_WIDTH, C.DEBUG_BUTTON_HEIGHT
         )
+        # --- Add storage for original hand during debug ---
+        self.original_player_hand: Optional[List[TileType]] = None
 
         # Main Surfaces
         print("")
@@ -164,6 +166,72 @@ class Linie1Visualizer:
         self.load_button_rect = pygame.Rect(C.UI_PANEL_X + 15 + button_width + 10, button_y, button_width, button_height)
         self.debug_toggle_button_rect = pygame.Rect( C.DEBUG_BUTTON_X, C.DEBUG_BUTTON_Y, C.DEBUG_BUTTON_WIDTH, C.DEBUG_BUTTON_HEIGHT )
 
+        self.debug_die_surfaces: Dict[Any, pygame.Surface] = self._create_debug_die_surfaces()
+        # --- Add print to verify ---
+        print(f"Created debug die surfaces for keys: {list(self.debug_die_surfaces.keys())}")
+        self.debug_die_rects: Dict[Any, pygame.Rect] = {}
+
+    def _create_debug_die_surfaces(self) -> Dict[Any, pygame.Surface]:
+        # ... (logic as corrected before to build ordered_unique_faces) ...
+        unique_faces = set(C.DIE_FACES); ordered_unique_faces = []; # ... build list ...
+        if C.STOP_SYMBOL in unique_faces: ordered_unique_faces.append(C.STOP_SYMBOL)
+        numbers = sorted([f for f in unique_faces if isinstance(f, int)]); ordered_unique_faces.extend(numbers)
+
+        surfaces = {}
+        size = C.DEBUG_DIE_BUTTON_SIZE
+        font_size = int(size * 0.7)
+        try:
+            font = pygame.font.SysFont(None, font_size)
+        except Exception as e: # Catch specific errors if possible
+            print(f"SysFont loading error: {e}. Falling back.")
+            try:
+                 font = pygame.font.Font(None, font_size) # Fallback
+            except Exception as e2:
+                 print(f"Fallback font loading error: {e2}. Cannot create die surfaces.")
+                 return {} # Return empty if font fails completely
+
+        for face in ordered_unique_faces:
+             # ... (create surf, fill white, draw border) ...
+             surf = pygame.Surface((size, size)); surf.fill(C.COLOR_WHITE); pygame.draw.rect(surf, C.COLOR_BLACK, surf.get_rect(), 1)
+             try:
+                 text_surf = font.render(str(face), True, C.COLOR_BLACK)
+                 text_rect = text_surf.get_rect(center=(size // 2, size // 2))
+                 surf.blit(text_surf, text_rect)
+                 surfaces[face] = surf
+             except Exception as e:
+                 print(f"Error rendering/blitting text for die face {face}: {e}")
+        return surfaces
+
+    def draw_debug_die_panel(self, screen, selected_face):
+        """Draws the clickable die faces for debug mode in driving phase."""
+        self.debug_die_rects.clear()
+        x = C.DEBUG_DIE_AREA_X
+        y = C.DEBUG_DIE_AREA_Y
+
+        self.draw_text(screen, "DEBUG DIE SELECT:", x, y - C.UI_LINE_HEIGHT, size=18)
+
+        # --- Get the faces in the desired order ---
+        unique_faces = set(C.DIE_FACES)
+        ordered_unique_faces = []
+        if C.STOP_SYMBOL in unique_faces: ordered_unique_faces.append(C.STOP_SYMBOL)
+        numbers = sorted([f for f in unique_faces if isinstance(f, int)])
+        ordered_unique_faces.extend(numbers)
+        # --- End get faces ---
+
+        for face in ordered_unique_faces: # Iterate through the ordered list
+            face_surf = self.debug_die_surfaces.get(face)
+            if face_surf:
+                rect = pygame.Rect(x, y, C.DEBUG_DIE_BUTTON_SIZE, C.DEBUG_DIE_BUTTON_SIZE)
+                self.debug_die_rects[face] = rect # Store rect by face value
+                screen.blit(face_surf, rect.topleft)
+
+                # Optional highlight (can keep or remove)
+                # if selected_face == face:
+                #    pygame.draw.rect(screen, C.COLOR_SELECTED, rect, 3)
+
+                x += C.DEBUG_DIE_BUTTON_SIZE + C.DEBUG_DIE_SPACING
+                # Add logic here for wrapping if needed
+
     # --- run() method ---
     def run(self):
         running = True
@@ -188,7 +256,7 @@ class Linie1Visualizer:
                 self.current_state.handle_event(event)
 
             self.current_state.update(dt)
-            self.check_game_phase()
+            self.update_current_state_for_player()
 
             # Drawing
             self.screen.fill(C.COLOR_UI_BG)
@@ -198,84 +266,187 @@ class Linie1Visualizer:
         pygame.quit()
         sys.exit()
 
-    # --- check_game_phase(), draw_text() remain the same ---
-    def check_game_phase(self): # Keep as is
-        model_phase = self.game.game_phase
-        if model_phase == GamePhase.LAYING_TRACK and not isinstance(self.current_state, LayingTrackState): self.current_state = LayingTrackState(self)
-        elif model_phase == GamePhase.DRIVING and not isinstance(self.current_state, DrivingState): self.current_state = DrivingState(self)
-        elif model_phase == GamePhase.GAME_OVER and not isinstance(self.current_state, GameOverState): self.current_state = GameOverState(self)
+    def update_current_state_for_player(self):
+        """Sets the self.current_state object based on the ACTIVE player's state."""
+        try:
+            active_player = self.game.get_active_player()
+            player_state = active_player.player_state
+            game_phase = self.game.game_phase # Keep track of overall phase too
+
+            # Determine the correct state object type
+            target_state_class = None
+            if game_phase == GamePhase.GAME_OVER:
+                target_state_class = GameOverState
+            elif player_state == PlayerState.DRIVING:
+                target_state_class = DrivingState
+            elif player_state == PlayerState.LAYING_TRACK:
+                target_state_class = LayingTrackState
+            # Add FINISHED state if needed later
+            else:
+                # Fallback or error state?
+                print(f"Warning: Unknown player state {player_state} for P{active_player.player_id}. Defaulting to LayingTrackState.")
+                target_state_class = LayingTrackState # Safer default
+
+            # Switch state object ONLY if the class type is different
+            if not isinstance(self.current_state, target_state_class):
+                print(f"Visualizer State Changing: {type(self.current_state).__name__} -> {target_state_class.__name__} for Player {active_player.player_id}")
+                self.current_state = target_state_class(self)
+                # Optional: Call an init method on the new state if needed
+                # if hasattr(self.current_state, 'on_enter'): self.current_state.on_enter()
+
+        except (IndexError, AttributeError):
+             print("Error: Could not get active player to update visualizer state.")
+             # Perhaps default to a safe state or handle error
+             if not isinstance(self.current_state, LayingTrackState): # Avoid infinite loops if LayingTrackState fails
+                  self.current_state = LayingTrackState(self)
+
     def draw_text(self, surface, text, x, y, color=C.COLOR_UI_TEXT, size=24): # Keep as is
         try: font_to_use = pygame.font.SysFont(None, size) if size != 24 else self.font; text_surface = font_to_use.render(text, True, color); surface.blit(text_surface, (x, y))
         except Exception as e: print(f"Error rendering text '{text}': {e}")
 
-    # --- draw_board() remains the same (draws terminals as PlacedTiles) ---
-    def draw_board(self, screen): # Keep corrected terminal drawing logic
+    def draw_board(self, screen):
+        # --- Draw Board Background, Grid, Tiles, Buildings, Stop Signs ---
+        # (Keep existing logic for drawing the static board elements)
         drawn_terminal_labels = set()
         for r in range(C.GRID_ROWS):
             for c in range(C.GRID_COLS):
-                if not (C.PLAYABLE_ROWS[0]-1 <= r <= C.PLAYABLE_ROWS[1]+1 and C.PLAYABLE_COLS[0]-1 <= c <= C.PLAYABLE_COLS[1]+1): continue
-                screen_x = C.BOARD_X_OFFSET + (c - C.PLAYABLE_COLS[0]) * self.TILE_SIZE; screen_y = C.BOARD_Y_OFFSET + (r - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE; rect = pygame.Rect(screen_x, screen_y, self.TILE_SIZE, self.TILE_SIZE)
+                # Limit drawing range slightly for performance maybe?
+                # if not (C.PLAYABLE_ROWS[0]-1 <= r <= C.PLAYABLE_ROWS[1]+1 and C.PLAYABLE_COLS[0]-1 <= c <= C.PLAYABLE_COLS[1]+1): continue
+
+                screen_x = C.BOARD_X_OFFSET + (c - C.PLAYABLE_COLS[0]) * self.TILE_SIZE
+                screen_y = C.BOARD_Y_OFFSET + (r - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE
+                rect = pygame.Rect(screen_x, screen_y, self.TILE_SIZE, self.TILE_SIZE)
+
                 placed_tile = self.game.board.get_tile(r, c)
                 is_playable = self.game.board.is_playable_coordinate(r, c)
-                is_terminal = placed_tile is not None and placed_tile.is_terminal
-                bg_color = C.COLOR_BOARD_BG;
-                if is_terminal: bg_color = C.COLOR_TERMINAL_BG
-                elif not is_playable:
-                    bg_color = tuple(max(0, val - 40) for val in C.COLOR_BOARD_BG)
-                pygame.draw.rect(screen, bg_color, rect); pygame.draw.rect(screen, C.COLOR_GRID, rect, 1)
+                is_terminal = placed_tile is not None and hasattr(placed_tile, 'is_terminal') and placed_tile.is_terminal # Safer check
+
+                # Determine Background Color
+                bg_color = C.COLOR_BOARD_BG
+                if is_terminal:
+                    bg_color = C.COLOR_TERMINAL_BG
+                elif not is_playable and not (0 <= r < C.GRID_ROWS and 0 <= c < C.GRID_COLS): # Check if truly outside grid bounds
+                    bg_color = tuple(max(0, val - 40) for val in C.COLOR_BOARD_BG) # Dim outside area
+                elif not is_playable: # Border area inside grid bounds
+                     bg_color = C.COLOR_GRID # Use a specific border color maybe?
+
+                pygame.draw.rect(screen, bg_color, rect)
+                pygame.draw.rect(screen, C.COLOR_GRID, rect, 1) # Grid line
+
+                # Draw Placed Tile (Tracks)
                 if placed_tile:
                     tile_surf = self.tile_surfaces.get(placed_tile.tile_type.name)
                     if tile_surf:
                         rotated_surf = pygame.transform.rotate(tile_surf, -placed_tile.orientation)
                         new_rect = rotated_surf.get_rect(center=rect.center)
-                        # --- Add Debug Print ---
-                        # print(f"Drawing tile at {(r,c)}: {placed_tile}, Surf:{tile_surf.get_size()}, Rot:{placed_tile.orientation}, BlitRect:{new_rect}")
                         screen.blit(rotated_surf, new_rect.topleft)
-                    else: print(f"Warning: No surface found for {placed_tile.tile_type.name}") # Check if surface exists
-                    if placed_tile.has_stop_sign and is_playable: pygame.draw.circle(screen, C.COLOR_STOP, rect.center, self.TILE_SIZE // 4)
-                # --- Draw Building if present ---
+
+                # Draw Building (Letter over BG)
                 building_id = self.game.board.get_building_at(r, c)
-                # Ensure drawing only happens on playable grid squares for buildings too
                 if building_id and is_playable:
-                    # Dark Green Background for the whole tile
-                    pygame.draw.rect(screen, C.COLOR_BUILDING_BG, rect)
+                    # ... (keep updated building drawing logic) ...
+                    pygame.draw.rect(screen, C.COLOR_BUILDING_BG, rect) # Dark BG
+                    font_size = int(self.TILE_SIZE * 0.7); # ... get font ...
+                    try: b_font = pygame.font.SysFont(None, font_size)
+                    except: b_font = pygame.font.Font(None, font_size)
+                    b_surf = b_font.render(building_id, True, C.COLOR_BUILDING_FG); # Light FG
+                    b_rect = b_surf.get_rect(center=rect.center); screen.blit(b_surf, b_rect.topleft)
+                    pygame.draw.rect(screen, C.COLOR_GRID, rect, 1) # Redraw grid over building
 
-                    # Larger Font for Centered Letter
-                    # Calculate font size based on tile size for better scaling
-                    font_size = int(self.TILE_SIZE * 0.7) # Adjust multiplier as needed
-                    try:
-                        b_font = pygame.font.SysFont(None, font_size)
-                    except:
-                        b_font = pygame.font.Font(None, font_size) # Fallback
-
-                    # Render letter with light green color
-                    b_surf = b_font.render(building_id, True, C.COLOR_BUILDING_FG)
-
-                    # Get rect and center it within the tile's rect
-                    b_rect = b_surf.get_rect(center=rect.center)
-
-                    # Blit the centered letter onto the screen
-                    screen.blit(b_surf, b_rect.topleft)
-
-                    # Draw the grid border again over the building bg
-                    pygame.draw.rect(screen, C.COLOR_GRID, rect, 1)
-
-
-                # --- Draw Stop Sign if present (draw AFTER tile/building) ---
-                if placed_tile and placed_tile.has_stop_sign and is_playable:
+                # Draw Stop Sign (AFTER tile/building)
+                if placed_tile and hasattr(placed_tile, 'has_stop_sign') and placed_tile.has_stop_sign and is_playable:
                     pygame.draw.circle(screen, C.COLOR_STOP, rect.center, self.TILE_SIZE // 4)
-                    # Optional: Add black border to stop sign
                     pygame.draw.circle(screen, C.COLOR_BLACK, rect.center, self.TILE_SIZE // 4, 1)
 
-        terminal_font = pygame.font.SysFont(None, int(self.TILE_SIZE * 0.5))
+
+        # --- Draw Terminal Labels (AFTER all tiles) ---
+        drawn_terminal_labels = set() # Keep track to draw each line number only once per pair
+        terminal_font = pygame.font.SysFont(None, int(self.TILE_SIZE * 0.5)) # ...
         for line_num, entrances in C.TERMINAL_DATA.items():
-             if line_num in drawn_terminal_labels: continue
-             entrance_a, entrance_b = entrances; cell1_a_coord = entrance_a[0][0]; cell2_a_coord = entrance_a[1][0]; cell1_b_coord = entrance_b[0][0]; cell2_b_coord = entrance_b[1][0]
-             rect1_x1 = C.BOARD_X_OFFSET + (cell1_a_coord[1] - C.PLAYABLE_COLS[0]) * self.TILE_SIZE; rect1_y1 = C.BOARD_Y_OFFSET + (cell1_a_coord[0] - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE; rect2_x1 = C.BOARD_X_OFFSET + (cell2_a_coord[1] - C.PLAYABLE_COLS[0]) * self.TILE_SIZE; rect2_y1 = C.BOARD_Y_OFFSET + (cell2_a_coord[0] - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE; pair1_center_x = (rect1_x1 + rect2_x1 + self.TILE_SIZE) // 2; pair1_center_y = (rect1_y1 + rect2_y1 + self.TILE_SIZE) // 2
-             term_surf = terminal_font.render(str(line_num), True, C.COLOR_TERMINAL_TEXT); term_rect1 = term_surf.get_rect(center=(pair1_center_x, pair1_center_y)); bg_rect1 = term_rect1.inflate(6, 4); pygame.draw.rect(screen, C.COLOR_TRACK, bg_rect1, border_radius=3); screen.blit(term_surf, term_rect1)
-             rect1_x2 = C.BOARD_X_OFFSET + (cell1_b_coord[1] - C.PLAYABLE_COLS[0]) * self.TILE_SIZE; rect1_y2 = C.BOARD_Y_OFFSET + (cell1_b_coord[0] - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE; rect2_x2 = C.BOARD_X_OFFSET + (cell2_b_coord[1] - C.PLAYABLE_COLS[0]) * self.TILE_SIZE; rect2_y2 = C.BOARD_Y_OFFSET + (cell2_b_coord[0] - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE; pair2_center_x = (rect1_x2 + rect2_x2 + self.TILE_SIZE) // 2; pair2_center_y = (rect1_y2 + rect2_y2 + self.TILE_SIZE) // 2
-             term_rect2 = term_surf.get_rect(center=(pair2_center_x, pair2_center_y)); bg_rect2 = term_rect2.inflate(6, 4); pygame.draw.rect(screen, C.COLOR_TRACK, bg_rect2, border_radius=3); screen.blit(term_surf, term_rect2)
-             drawn_terminal_labels.add(line_num)
+             # Ensure we don't draw labels twice if data is duplicated somehow (unlikely)
+             # if line_num in drawn_terminal_labels: continue # Probably not needed
+
+             try: # Add error handling for potentially malformed TERMINAL_DATA
+                 # Unpack data for the two entrances (pairs of cells) for this line
+                 entrance_a, entrance_b = entrances
+                 cell1_a_info, cell2_a_info = entrance_a
+                 cell1_b_info, cell2_b_info = entrance_b
+                 cell1_a_coord, _ = cell1_a_info # We only need the coord for positioning label
+                 cell2_a_coord, _ = cell2_a_info
+                 cell1_b_coord, _ = cell1_b_info
+                 cell2_b_coord, _ = cell2_b_info
+
+                 # --- Calculate position and draw label for Entrance A ---
+                 # Convert grid coords to screen coords for the two cells of entrance A
+                 rect1_x1 = C.BOARD_X_OFFSET + (cell1_a_coord[1] - C.PLAYABLE_COLS[0]) * self.TILE_SIZE
+                 rect1_y1 = C.BOARD_Y_OFFSET + (cell1_a_coord[0] - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE
+                 rect2_x1 = C.BOARD_X_OFFSET + (cell2_a_coord[1] - C.PLAYABLE_COLS[0]) * self.TILE_SIZE
+                 rect2_y1 = C.BOARD_Y_OFFSET + (cell2_a_coord[0] - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE
+                 # Find the center point between the two cells for placing the label
+                 pair1_center_x = (rect1_x1 + rect2_x1 + self.TILE_SIZE) // 2
+                 pair1_center_y = (rect1_y1 + rect2_y1 + self.TILE_SIZE) // 2
+
+                 # Render the label text
+                 term_surf = terminal_font.render(str(line_num), True, C.COLOR_TERMINAL_TEXT) # Use defined text color
+                 term_rect1 = term_surf.get_rect(center=(pair1_center_x, pair1_center_y))
+                 # Optional: Draw a background rectangle behind the label for better visibility
+                 bg_rect1 = term_rect1.inflate(6, 4) # Add padding
+                 pygame.draw.rect(screen, C.COLOR_BLACK, bg_rect1, border_radius=3) # Use a label BG color
+                 # Draw the text itself
+                 screen.blit(term_surf, term_rect1)
+
+                 # --- Calculate position and draw label for Entrance B ---
+                 # Convert grid coords to screen coords for the two cells of entrance B
+                 rect1_x2 = C.BOARD_X_OFFSET + (cell1_b_coord[1] - C.PLAYABLE_COLS[0]) * self.TILE_SIZE
+                 rect1_y2 = C.BOARD_Y_OFFSET + (cell1_b_coord[0] - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE
+                 rect2_x2 = C.BOARD_X_OFFSET + (cell2_b_coord[1] - C.PLAYABLE_COLS[0]) * self.TILE_SIZE
+                 rect2_y2 = C.BOARD_Y_OFFSET + (cell2_b_coord[0] - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE
+                 # Find the center point between the two cells
+                 pair2_center_x = (rect1_x2 + rect2_x2 + self.TILE_SIZE) // 2
+                 pair2_center_y = (rect1_y2 + rect2_y2 + self.TILE_SIZE) // 2
+
+                 # Render the label text (can reuse term_surf)
+                 term_rect2 = term_surf.get_rect(center=(pair2_center_x, pair2_center_y))
+                 # Optional: Draw background
+                 bg_rect2 = term_rect2.inflate(6, 4)
+                 pygame.draw.rect(screen, C.COLOR_BLACK, bg_rect2, border_radius=3)
+                 # Draw the text
+                 screen.blit(term_surf, term_rect2)
+
+                 # Mark this line number as drawn (though likely unnecessary)
+                 # drawn_terminal_labels.add(line_num)
+
+             except (IndexError, TypeError, ValueError) as e:
+                  print(f"Error processing TERMINAL_DATA for Line {line_num}: {e}")
+                  # Continue to next line if data is malformed
+
+
+        # --- <<<< DRAW ALL ACTIVE STREETCARS >>>> ---
+        # Iterate through ALL players, not just the active one
+        for player in self.game.players:
+            # Draw if player is driving AND has a valid position
+            if player.player_state == PlayerState.DRIVING and player.streetcar_position:
+                 r, c = player.streetcar_position
+                 # Ensure position is valid before calculating screen coords
+                 if self.game.board.is_valid_coordinate(r, c):
+                     # Calculate center of the tile for the streetcar position
+                     screen_x = C.BOARD_X_OFFSET + (c - C.PLAYABLE_COLS[0]) * C.TILE_SIZE + C.TILE_SIZE // 2
+                     screen_y = C.BOARD_Y_OFFSET + (r - C.PLAYABLE_ROWS[0]) * C.TILE_SIZE + C.TILE_SIZE // 2
+
+                     # Simple circle representation
+                     radius = C.TILE_SIZE // 3
+                     # Use player-specific color (ensure PLAYER_COLORS has enough entries)
+                     p_color_index = player.player_id % len(C.PLAYER_COLORS)
+                     p_color = C.PLAYER_COLORS[p_color_index]
+
+                     pygame.draw.circle(screen, p_color, (screen_x, screen_y), radius)
+                     pygame.draw.circle(screen, C.COLOR_BLACK, (screen_x, screen_y), radius, 1) # Black border
+
+                     # Optional: Draw player ID number inside the circle
+                     id_font = pygame.font.SysFont(None, int(radius * 1.5)) # Adjust size
+                     id_surf = id_font.render(str(player.player_id), True, C.COLOR_WHITE) # White text
+                     id_rect = id_surf.get_rect(center=(screen_x, screen_y))
+                     screen.blit(id_surf, id_rect)
 
     # --- draw_hand() needs modification for debug mode ---
     def draw_hand(self, screen, player: Player):
@@ -307,94 +478,229 @@ class Linie1Visualizer:
                     pygame.draw.rect(screen, C.COLOR_SELECTED, rect, 3)
         return hand_rects
 
-    # --- draw_ui needs modification ---
-    def draw_ui(self, screen, message, selected_tile_type, orientation):
-        """Draws UI elements, conditionally showing debug info or hand info."""
-        player = self.game.get_active_player()
-        # --- Always Draw Top Info ---
-        turn_text = f"Turn {self.game.current_turn} - Player {player.player_id} ({player.player_state.name})"
-        self.draw_text(screen, turn_text, C.UI_TEXT_X, C.UI_TURN_INFO_Y)
-        action_text = f"Actions: {self.game.actions_taken_this_turn}/{C.MAX_PLAYER_ACTIONS}"
-        font_to_use = self.font if self.font else pygame.font.Font(None, 24)
-
-
-        # Save Button
-        pygame.draw.rect(screen, C.COLOR_WHITE, self.save_button_rect)
-        pygame.draw.rect(screen, C.COLOR_WHITE, self.save_button_rect, 1)
-        self.draw_text(screen, "Save Game", self.save_button_rect.x + 10, self.save_button_rect.y + 7, size=18)
-
-        # Load Button
-        pygame.draw.rect(screen, C.COLOR_WHITE, self.load_button_rect)
-        pygame.draw.rect(screen, C.COLOR_WHITE, self.load_button_rect, 1)
-        self.draw_text(screen, "Load Game", self.load_button_rect.x + 10, self.load_button_rect.y + 7, size=18)
-
-        # Debug Toggle Button
-        pygame.draw.rect(screen, C.COLOR_GRID, self.debug_toggle_button_rect)
-        pygame.draw.rect(screen, C.COLOR_BLACK, self.debug_toggle_button_rect, 1)
-        debug_btn_text = "Debug: ON" if self.debug_mode else "Debug: OFF"
-        btn_font = pygame.font.SysFont(None, 20)
-        btn_surf = btn_font.render(debug_btn_text, True, C.COLOR_WHITE)
-        btn_rect = btn_surf.get_rect(center=self.debug_toggle_button_rect.center)
-        screen.blit(btn_surf, btn_rect)
-
-
+    def draw_ui(self, screen, message, selected_tile_type,
+                orientation):
+        """
+        Draws all User Interface elements, adapting to the
+        current game state and debug mode.
+        """
+        # --- Get Current Player Info (Safely) ---
         try:
-            action_surf = font_to_use.render(action_text, True, C.COLOR_UI_TEXT)
+             player = self.game.get_active_player()
+             player_id = player.player_id
+             player_state_name = player.player_state.name
+             player_line_card = player.line_card
+             player_route_card = player.route_card
+        except (IndexError, AttributeError):
+             # Handle cases where player might be invalid
+             print("Warning: Could not get valid active player for UI.")
+             player_id = "?"
+             player_state_name = "Unknown"
+             player_line_card = None
+             player_route_card = None
+
+        # --- Draw Top Info Panel ---
+        # Turn and Player State
+        turn_text = (f"Turn {self.game.current_turn} - "
+                     f"Player {player_id} ({player_state_name})")
+        self.draw_text(screen, turn_text, C.UI_TEXT_X,
+                       C.UI_TURN_INFO_Y)
+
+        # Actions Taken (Right-aligned)
+        action_text = (f"Actions: {self.game.actions_taken_this_turn}/"
+                       f"{C.MAX_PLAYER_ACTIONS}")
+        try:
+            # Use default font unless specified otherwise
+            font_to_use = self.font if self.font else \
+                          pygame.font.Font(None, 24)
+            action_surf = font_to_use.render(
+                action_text, True, C.COLOR_UI_TEXT
+            )
             action_text_width = action_surf.get_width()
-            self.draw_text(screen, action_text, C.UI_PANEL_X + C.UI_PANEL_WIDTH - action_text_width - 15, C.UI_TURN_INFO_Y)
+            action_x = (C.UI_PANEL_X + C.UI_PANEL_WIDTH -
+                        action_text_width - 15)
+            self.draw_text(screen, action_text, action_x,
+                           C.UI_TURN_INFO_Y)
         except Exception as e:
             print(f"Error rendering action text: {e}")
-        line_info = "Line: ?"; stops_info = "Stops: ?"
-        if player.line_card: term1, term2 = self.game.get_terminal_coords(player.line_card.line_number); term1_str = f"T{player.line_card.line_number}a" if term1 else "?"; term2_str = f"T{player.line_card.line_number}b" if term2 else "?"; line_info = f"Line {player.line_card.line_number} ({term1_str}<->{term2_str})"
-        if player.route_card: stops_str = " -> ".join(player.route_card.stops); stops_info = f"Stops: {stops_str}"
+
+        # Player's Route Info (Line + Stops)
+        line_info = "Line: ?"
+        stops_info = "Stops: ?"
+        if player_line_card:
+             # Fetch terminal coordinates for display text
+             term1, term2 = self.game.get_terminal_coords(
+                 player_line_card.line_number
+             )
+             term1_str = f"T{player_line_card.line_number}a" if term1 else "?"
+             term2_str = f"T{player_line_card.line_number}b" if term2 else "?"
+             line_info = (f"Line {player_line_card.line_number} "
+                          f"({term1_str}<->{term2_str})")
+        if player_route_card:
+             stops_str = " -> ".join(player_route_card.stops)
+             stops_info = f"Stops: {stops_str}"
+
         self.draw_text(screen, line_info, C.UI_TEXT_X, C.UI_ROUTE_INFO_Y)
-        self.draw_text(screen, stops_info, C.UI_TEXT_X, C.UI_ROUTE_INFO_Y + C.UI_LINE_HEIGHT)
+        self.draw_text(screen, stops_info, C.UI_TEXT_X,
+                       C.UI_ROUTE_INFO_Y + C.UI_LINE_HEIGHT)
 
-        # --- Draw EITHER Normal UI Bottom OR Debug Panel Title ---
+
+        # --- Draw Middle Section Title (Hand or Debug Palette) ---
+        # Only relevant when laying tracks
         if isinstance(self.current_state, LayingTrackState):
+            title_y = C.UI_HAND_TITLE_Y
             if self.debug_mode:
-                 # Draw Debug Title where Hand Title would normally be
-                 self.draw_text(screen, "DEBUG TILE PALETTE", C.HAND_AREA_X, C.UI_HAND_TITLE_Y)
-                 # Draw message and selection below debug panel (adjust Y)
-                 debug_panel_end_y = C.DEBUG_PANEL_Y + ((len(self.debug_tile_types) + C.DEBUG_TILES_PER_ROW -1) // C.DEBUG_TILES_PER_ROW) * (C.DEBUG_TILE_SIZE + C.DEBUG_TILE_SPACING)
-                 sel_text = "Selected: None";
-                 if selected_tile_type: sel_text = f"Selected: {selected_tile_type.name} ({orientation}°)"
-                 self.draw_text(screen, sel_text, C.UI_TEXT_X, debug_panel_end_y + 10)
-                 self.draw_text(screen, f"Msg: {message}", C.UI_TEXT_X, debug_panel_end_y + 10 + C.UI_LINE_HEIGHT)
-                 # Instructions might be less relevant in debug, but draw anyway
-                 self.draw_text(screen, "[R] Rotate | [LMB] Place/Select | [Button] Toggle", C.UI_TEXT_X, C.UI_INSTRUCTIONS_Y, size=18)
+                 title_text = "DEBUG TILE PALETTE"
+            # Only draw hand title if player is valid & not debug
+            elif player_id != "?":
+                 title_text = f"Player {player_id}'s Hand:"
+            else:
+                 title_text = "" # No title if invalid player
 
-            else: # Normal Mode UI Bottom
-                 self.draw_text(screen, f"Player {player.player_id}'s Hand:", C.HAND_AREA_X, C.UI_HAND_TITLE_Y)
-                 sel_text = "Selected: None";
-                 if selected_tile_type: sel_text = f"Selected: {selected_tile_type.name} ({orientation}°)"
-                 self.draw_text(screen, sel_text, C.UI_TEXT_X, C.UI_SELECTED_TILE_Y)
-                 self.draw_text(screen, f"Msg: {message}", C.UI_TEXT_X, C.UI_MESSAGE_Y)
-                 self.draw_text(screen, "[RMB/R] Rotate | [LMB] Place/Select | [SPACE] End", C.UI_TEXT_X, C.UI_INSTRUCTIONS_Y, size=18)
+            if title_text:
+                 self.draw_text(screen, title_text, C.HAND_AREA_X, title_y)
 
-        # --- Always Draw Debug Toggle Button ---
-        pygame.draw.rect(screen, C.COLOR_GRID, self.debug_toggle_button_rect)
+        if self.debug_mode and isinstance(self.current_state, DrivingState):
+                self.draw_debug_die_panel(screen, self.current_state.last_roll) # Pass last roll
+
+
+        # --- Draw Lower Section (Selection, Message, Instructions) ---
+        # Calculate start Y pos based on state and mode
+        lower_ui_start_y = C.UI_SELECTED_TILE_Y # Default for normal mode
+        if isinstance(self.current_state, LayingTrackState):
+             if self.debug_mode:
+                  # Calculate Y below debug panel
+                  num_rows = (
+                      (len(self.debug_tile_types) + C.DEBUG_TILES_PER_ROW - 1) //
+                       C.DEBUG_TILES_PER_ROW
+                  )
+                  panel_h = num_rows * (C.DEBUG_TILE_SIZE + C.DEBUG_TILE_SPACING)
+                  lower_ui_start_y = C.DEBUG_PANEL_Y + panel_h + 10
+        elif isinstance(self.current_state, DrivingState):
+             # Driving state message/instructions start lower maybe?
+             # Or use standard positions if debug die panel is separate
+             lower_ui_start_y = C.UI_MESSAGE_Y # Start with message Y
+             if self.debug_mode:
+                 # If debug die panel exists, push lower UI further down
+                 # This assumes debug die panel is drawn before this section
+                 num_die_rows = 1 # Assuming horizontal layout
+                 panel_h = num_die_rows * (C.DEBUG_DIE_BUTTON_SIZE + C.DEBUG_DIE_SPACING)
+                 lower_ui_start_y = C.DEBUG_DIE_AREA_Y + panel_h + 10
+
+
+        # Draw Selected Tile Info (if applicable, mainly for LayingTrack)
+        if isinstance(self.current_state, LayingTrackState):
+            sel_text = "Selected: None"
+            if selected_tile_type: # Passed from GameState
+                sel_text = (f"Selected: {selected_tile_type.name} "
+                            f"({orientation}°)")
+            self.draw_text(screen, sel_text, C.UI_TEXT_X, lower_ui_start_y)
+            msg_y = lower_ui_start_y + C.UI_LINE_HEIGHT
+            instr_y = msg_y + C.UI_LINE_HEIGHT
+        else:
+             # No "Selected Tile" text in Driving/Game Over
+             msg_y = lower_ui_start_y
+             instr_y = msg_y + C.UI_LINE_HEIGHT
+
+
+        # Draw Message (passed in from GameState)
+        self.draw_text(screen, f"Msg: {message}", C.UI_TEXT_X, msg_y)
+
+        # Draw Instructions based on State and Mode
+        instr_text = ""
+        if isinstance(self.current_state, LayingTrackState):
+             instr_text = "[RMB/R] Rot | [LMB] Place/Select"
+             if not self.debug_mode:
+                  instr_text += " | [SPACE] End Turn"
+        elif isinstance(self.current_state, DrivingState):
+             instr_text = "[SPACE] Roll & Move (Normal)"
+             if self.debug_mode:
+                 instr_text += " | [Click Die Face]"
+        elif isinstance(self.current_state, GameOverState):
+             instr_text = "Game Over!"
+
+        # Add debug toggle instruction if not game over
+        if not isinstance(self.current_state, GameOverState):
+             instr_text += " | [Btn] Debug" if instr_text else "[Btn] Debug"
+
+        self.draw_text(screen, instr_text, C.UI_TEXT_X, instr_y, size=18)
+
+
+        # --- Always Draw Buttons (Save, Load, Debug Toggle) ---
+        btn_text_color = C.COLOR_UI_BUTTON_TEXT
+        btn_font_size = 18
+
+        # Save Button
+        pygame.draw.rect(screen, C.COLOR_UI_BUTTON_BG, self.save_button_rect)
+        pygame.draw.rect(screen, C.COLOR_BLACK, self.save_button_rect, 1)
+        self.draw_text(screen, "Save Game", self.save_button_rect.x + 10,
+                       self.save_button_rect.y + 7, btn_text_color,
+                       size=btn_font_size)
+
+        # Load Button
+        pygame.draw.rect(screen, C.COLOR_UI_BUTTON_BG, self.load_button_rect)
+        pygame.draw.rect(screen, C.COLOR_BLACK, self.load_button_rect, 1)
+        self.draw_text(screen, "Load Game", self.load_button_rect.x + 10,
+                       self.load_button_rect.y + 7, btn_text_color,
+                       size=btn_font_size)
+
+        # Debug Toggle Button
+        debug_btn_bg = C.COLOR_STOP if self.debug_mode else C.COLOR_UI_BUTTON_BG
+        pygame.draw.rect(screen, debug_btn_bg, self.debug_toggle_button_rect)
         pygame.draw.rect(screen, C.COLOR_BLACK, self.debug_toggle_button_rect, 1)
         debug_btn_text = "Debug: ON" if self.debug_mode else "Debug: OFF"
-        btn_font = pygame.font.SysFont(None, 20)
-        btn_surf = btn_font.render(debug_btn_text, True, C.COLOR_WHITE)
+        # Adjust font size for smaller button automatically?
+        dbg_btn_font_size = 18 if self.debug_toggle_button_rect.width < 80 else 20
+        try:
+             btn_font = pygame.font.SysFont(None, dbg_btn_font_size)
+        except:
+             btn_font = pygame.font.Font(None, dbg_btn_font_size) # Fallback
+        btn_surf = btn_font.render(debug_btn_text, True, btn_text_color)
         btn_rect = btn_surf.get_rect(center=self.debug_toggle_button_rect.center)
         screen.blit(btn_surf, btn_rect)
 
-        player = self.game.get_active_player()
-        turn_text = f"Turn {self.game.current_turn} - Player {player.player_id} ({player.player_state.name})" # ... (rest of top info) ...
 
-        # --- Draw based on mode (Debug vs Normal) ---
-        if isinstance(self.current_state, LayingTrackState):
-            # ... (draw debug title or hand title) ...
-            pass # placeholder
-        elif isinstance(self.current_state, DrivingState):
-             # Draw Driving Specific UI (like last roll) - Already in DrivingState.draw
-             pass
-        elif isinstance(self.current_state, GameOverState):
-             # Draw Game Over Specific UI - Already in GameOverState.draw
-             pass
+        def draw_debug_die_panel(self, screen, selected_face):
+            """Draws the clickable die faces for debug mode in driving phase."""
+            # --- Add print to confirm execution ---
+            # print("Drawing debug die panel...")
+            self.debug_die_rects.clear()
+            x = C.DEBUG_DIE_AREA_X
+            y = C.DEBUG_DIE_AREA_Y
 
+            # Simple check for visibility
+            if x > C.SCREEN_WIDTH or y > C.SCREEN_HEIGHT:
+                print(f"Warning: Debug die panel position ({x},{y}) is off-screen.")
+                return
+
+            self.draw_text(screen, "DEBUG DIE SELECT:", x, y - C.UI_LINE_HEIGHT, size=18)
+            y += 5 # Add small padding below title
+
+            # --- Get the faces in the desired order (same logic as creation) ---
+            unique_faces = set(C.DIE_FACES); ordered_unique_faces = [];
+            if C.STOP_SYMBOL in unique_faces: ordered_unique_faces.append(C.STOP_SYMBOL)
+            numbers = sorted([f for f in unique_faces if isinstance(f, int)]); ordered_unique_faces.extend(numbers)
+
+            for face in ordered_unique_faces:
+                face_surf = self.debug_die_surfaces.get(face)
+                if face_surf: # Check if surface exists
+                    rect = pygame.Rect(x, y, C.DEBUG_DIE_BUTTON_SIZE, C.DEBUG_DIE_BUTTON_SIZE)
+                    self.debug_die_rects[face] = rect # Store rect by face value
+
+                    # --- Add print before blitting ---
+                    # print(f"  Attempting to draw die face {face} at {rect.topleft}, Surface: {face_surf}")
+                    screen.blit(face_surf, rect.topleft)
+
+                    # Optional highlight
+                    # if selected_face == face: pygame.draw.rect(screen, C.COLOR_SELECTED, rect, 3)
+
+                    x += C.DEBUG_DIE_BUTTON_SIZE + C.DEBUG_DIE_SPACING
+                    # Basic wrapping if goes off edge (adjust condition as needed)
+                    if x + C.DEBUG_DIE_BUTTON_SIZE > C.SCREEN_WIDTH - 20:
+                        x = C.DEBUG_DIE_AREA_X
+                        y += C.DEBUG_DIE_BUTTON_SIZE + C.DEBUG_DIE_SPACING
+                else:
+                    print(f"Warning: Surface for die face {face} not found.")
 
 
     def draw_debug_panel(self, screen, selected_debug_tile_type):

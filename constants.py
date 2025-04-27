@@ -80,3 +80,12 @@ PLAYER_COLORS: List[Tuple[int, int, int]] = [COLOR_P0, COLOR_P1, COLOR_P2, COLOR
 
 STOP_SYMBOL = 'H' # Define the symbol used for the 'Stop' face of the die
 DIE_FACES: Tuple[Any, ...] = (1, 2, 3, 4, STOP_SYMBOL, STOP_SYMBOL)
+
+COLOR_UI_BUTTON_BG: Tuple[int, int, int] = (180, 180, 180) # Light grey
+COLOR_UI_BUTTON_TEXT: Tuple[int, int, int] = COLOR_BLACK
+
+# --- Add constants for Debug Die UI ---
+DEBUG_DIE_BUTTON_SIZE: int = 40
+DEBUG_DIE_SPACING: int = 10
+DEBUG_DIE_AREA_X: int = UI_PANEL_X + 15
+DEBUG_DIE_AREA_Y: int = UI_PANEL_Y + 250 # Adjust Y position as needed 

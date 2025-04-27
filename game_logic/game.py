@@ -608,7 +608,7 @@ class Game:
     # --- NEW Driving Methods (Step 6) ---
     def roll_special_die(self) -> Any:
         """Rolls the special Linie 1 die."""
-        return random.choice(C.DIE_FACES)
+        return random.choice(DIE_FACES)
 
     def trace_track_steps(self, player: Player, num_steps: int) -> Tuple[int, int]:
         """Calculates the destination coordinate after moving num_steps along the validated route."""
@@ -653,7 +653,7 @@ class Game:
 
             # Check if it's *any* terminal location (stops at other players' terminals too)
             # This requires iterating through TERMINAL_COORDS values
-            for term_coords_pair in C.TERMINAL_COORDS.values():
+            for term_coords_pair in TERMINAL_COORDS.values():
                  if coord in term_coords_pair:
                       return coord # Found any terminal
 
@@ -715,30 +715,46 @@ class Game:
                      print(f"Error: Could not determine entry direction from {previous_coord} to {target_coord}")
             # else: Landed somewhere else, not the required stop. No index change.
 
-    # --- Add check_win_condition ---
     def check_win_condition(self, player: Player) -> bool:
-        """Checks if the player has reached their destination terminal."""
+        """Checks if the player has reached their destination terminal AFTER visiting all stops."""
+        # --- Basic validity checks ---
         if player.player_state != PlayerState.DRIVING:
+            # Cannot win if not driving
             return False
         if not player.validated_route or player.streetcar_position is None:
+            # Cannot win without a calculated route and current position
+            # print(f"Debug Win Check P{player.player_id}: No route or position.") # Optional debug
             return False
 
-        # Destination is the LAST coordinate in the validated route
+        # --- Identify the destination ---
+        # The destination is the VERY LAST coordinate in the validated route list
         destination_coord = player.validated_route[-1]
+        # print(f"Debug Win Check P{player.player_id}: Pos={player.streetcar_position}, Dest={destination_coord}") # Optional debug
 
+
+        # --- Check if player is AT the destination ---
         if player.streetcar_position == destination_coord:
-             # Check if all required stops were visited (target index should be beyond last stop)
-             num_required_stops = len(player.route_card.stops) if player.route_card else 0
+             # print(f"Debug Win Check P{player.player_id}: At destination.") # Optional debug
+             # --- Check if all required stops have been accounted for ---
+             num_required_stops = 0
+             if player.route_card and player.route_card.stops:
+                 num_required_stops = len(player.route_card.stops)
+
+             # The target index should point *beyond* the last required stop index
              if player.current_route_target_index >= num_required_stops:
+                  print(f"Debug Win Check P{player.player_id}: All stops visited ({player.current_route_target_index}/{num_required_stops}). WIN!") # Optional debug
+                  # --- Conditions met: Set game over state ---
                   self.game_phase = GamePhase.GAME_OVER
                   self.winner = player # Store the winning player object
                   player.player_state = PlayerState.FINISHED # Mark player as finished
-                  print(f"Player {player.player_id} WINS!")
                   return True
              else:
-                  print(f"Player {player.player_id} reached end terminal but missed stops.")
-                  return False # Reached end but didn't visit required stops correctly
-        return False
+                  # Reached end terminal physically, but logic didn't register all stop visits correctly
+                  print(f"Debug Win Check P{player.player_id}: Reached end but stops mismatch ({player.current_route_target_index}/{num_required_stops}). No win.")
+                  return False
+        else:
+            # Not at the destination coordinate
+            return False
 
     # --- Modify end_player_turn for new start-of-turn check ---
     def end_player_turn(self):
