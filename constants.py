@@ -89,3 +89,14 @@ DEBUG_DIE_BUTTON_SIZE: int = 40
 DEBUG_DIE_SPACING: int = 10
 DEBUG_DIE_AREA_X: int = UI_PANEL_X + 15
 DEBUG_DIE_AREA_Y: int = UI_PANEL_Y + 250 # Adjust Y position as needed 
+
+COLOR_TRANSPARENT = (0, 0, 0, 0)
+TRACK_WIDTH_RATIO = 0.1 # Adjust for desired track thickness
+DEFAULT_FONT_SIZE = 24
+FPS = 60
+BUTTON_WIDTH = 80 # Adjusted size maybe
+BUTTON_HEIGHT = 25
+BUTTON_SPACING = 8
+BUTTON_MARGIN_X = 10
+BUTTON_MARGIN_Y = 10
+COLOR_CONFIRM_BG = (100, 200, 100) # Light green maybe
