@@ -355,9 +355,25 @@ class Linie1Visualizer:
 
                 # Draw Stop Sign (AFTER tile/building)
                 if placed_tile and hasattr(placed_tile, 'has_stop_sign') and placed_tile.has_stop_sign and is_playable:
-                    pygame.draw.circle(screen, C.COLOR_STOP, rect.center, self.TILE_SIZE // 4)
-                    pygame.draw.circle(screen, C.COLOR_BLACK, rect.center, self.TILE_SIZE // 4, 1)
+                    # Create a separate surface for the stop sign for alpha blending
+                    stop_radius = self.TILE_SIZE // 4
+                    # Diameter + 2 for safety margin if drawing border later
+                    stop_surface_size = stop_radius * 2 + 2
+                    stop_surf = pygame.Surface((stop_surface_size, stop_surface_size), pygame.SRCALPHA)
+                    stop_surf.fill((0,0,0,0)) # Fill with transparent background
 
+                    # Draw the circle onto the temporary surface
+                    center_pos = stop_surface_size // 2
+                    pygame.draw.circle(stop_surf, C.COLOR_STOP, (center_pos, center_pos), stop_radius)
+                    # Optional: Draw black border on the temp surface too
+                    pygame.draw.circle(stop_surf, C.COLOR_BLACK, (center_pos, center_pos), stop_radius, 1)
+
+                    # Set the overall alpha for the stop sign surface
+                    stop_surf.set_alpha(128) # Approx 50% transparent (0=transparent, 255=opaque)
+
+                    # Calculate the top-left position to blit the surface centered in the tile
+                    blit_rect = stop_surf.get_rect(center=rect.center)
+                    screen.blit(stop_surf, blit_rect.topleft)
 
         # --- Draw Terminal Labels (AFTER all tiles) ---
         drawn_terminal_labels = set() # Keep track to draw each line number only once per pair
@@ -422,31 +438,41 @@ class Linie1Visualizer:
 
 
         # --- <<<< DRAW ALL ACTIVE STREETCARS >>>> ---
-        # Iterate through ALL players, not just the active one
         for player in self.game.players:
-            # Draw if player is driving AND has a valid position
             if player.player_state == PlayerState.DRIVING and player.streetcar_position:
                  r, c = player.streetcar_position
-                 # Ensure position is valid before calculating screen coords
                  if self.game.board.is_valid_coordinate(r, c):
-                     # Calculate center of the tile for the streetcar position
-                     screen_x = C.BOARD_X_OFFSET + (c - C.PLAYABLE_COLS[0]) * C.TILE_SIZE + C.TILE_SIZE // 2
+                     # Calculate center screen coordinates
+                     screen_x = C.BOARD_X_OFFSET + (c - C.PLAYABLE_COLS[0]) * self.TILE_SIZE + C.TILE_SIZE // 2
                      screen_y = C.BOARD_Y_OFFSET + (r - C.PLAYABLE_ROWS[0]) * C.TILE_SIZE + C.TILE_SIZE // 2
 
-                     # Simple circle representation
-                     radius = C.TILE_SIZE // 3
-                     # Use player-specific color (ensure PLAYER_COLORS has enough entries)
+                     # Create a separate surface for the tram
+                     tram_radius = C.TILE_SIZE // 3
+                     tram_surface_size = tram_radius * 2 + 2
+                     tram_surf = pygame.Surface((tram_surface_size, tram_surface_size), pygame.SRCALPHA)
+                     tram_surf.fill((0,0,0,0)) # Transparent background
+
+                     # Draw tram circle onto the temporary surface
+                     center_pos = tram_surface_size // 2
                      p_color_index = player.player_id % len(C.PLAYER_COLORS)
                      p_color = C.PLAYER_COLORS[p_color_index]
+                     pygame.draw.circle(tram_surf, p_color, (center_pos, center_pos), tram_radius)
+                     pygame.draw.circle(tram_surf, C.COLOR_BLACK, (center_pos, center_pos), tram_radius, 1) # Border
 
-                     pygame.draw.circle(screen, p_color, (screen_x, screen_y), radius)
-                     pygame.draw.circle(screen, C.COLOR_BLACK, (screen_x, screen_y), radius, 1) # Black border
-
-                     # Optional: Draw player ID number inside the circle
-                     id_font = pygame.font.SysFont(None, int(radius * 1.5)) # Adjust size
+                     # Optional: Draw player ID inside the circle on the temp surface
+                     id_font_size = int(tram_radius * 1.5)
+                     try: id_font = pygame.font.SysFont(None, id_font_size)
+                     except: id_font = pygame.font.Font(None, id_font_size) # Fallback
                      id_surf = id_font.render(str(player.player_id), True, C.COLOR_WHITE) # White text
-                     id_rect = id_surf.get_rect(center=(screen_x, screen_y))
-                     screen.blit(id_surf, id_rect)
+                     id_rect = id_surf.get_rect(center=(center_pos, center_pos))
+                     tram_surf.blit(id_surf, id_rect)
+
+                     # Set the overall alpha for the tram surface
+                     tram_surf.set_alpha(128) # Slightly less transparent? (Adjust 0-255)
+
+                     # Calculate blit position and draw the tram surface
+                     blit_rect = tram_surf.get_rect(center=(screen_x, screen_y))
+                     screen.blit(tram_surf, blit_rect.topleft)
 
     # --- draw_hand() needs modification for debug mode ---
     def draw_hand(self, screen, player: Player):

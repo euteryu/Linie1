@@ -685,35 +685,37 @@ class Game:
 
 
     def move_streetcar(self, player: Player, target_coord: Tuple[int, int]):
-        """Moves the streetcar and checks if a required stop was validly visited."""
+        """Moves the streetcar and checks if a required stop coordinate was reached."""
         if not player.validated_route or player.streetcar_position is None:
              print("Error: Cannot move streetcar without route/position.")
              return
 
-        previous_coord = player.streetcar_position
+        # Store previous position only if needed for debugging prints
+        # previous_coord = player.streetcar_position
         player.streetcar_position = target_coord
-        print(f"Player {player.player_id} moved from {previous_coord} to {target_coord}") # More debug info
+        print(f"Player {player.player_id} moved to {target_coord}")
 
-        # Check if the target is the *next required* stop
-        num_required_stops = len(player.route_card.stops) if player.route_card else 0
+        # --- Check if the target IS the coordinate of the *next required* stop ---
+        num_required_stops = 0
+        if player.route_card and player.route_card.stops:
+             num_required_stops = len(player.route_card.stops)
 
+        # Check if we are still expecting to visit stops
         if player.current_route_target_index < num_required_stops:
+            # Get the ID and expected coordinate of the next required stop
             required_stop_id = player.route_card.stops[player.current_route_target_index]
             required_stop_coord = self.board.building_stop_locations.get(required_stop_id)
 
+            # If the place we just landed IS the required stop's coordinate
             if target_coord == required_stop_coord:
-                print(f"Debug P{player.player_id}: Landed on required stop {required_stop_id} tile at {target_coord}.") # Debug print
-                entry_direction = self._get_entry_direction(previous_coord, target_coord)
-                if entry_direction:
-                    # Use the helper function now
-                    if self._is_valid_stop_entry(target_coord, entry_direction):
-                        print(f"--> VALID entry for stop {required_stop_id}. Advancing target.")
-                        player.current_route_target_index += 1
-                    else:
-                        print(f"--> INVALID entry direction ({entry_direction.name}) for stop {required_stop_id}. Target not advanced.")
-                else:
-                     print(f"Error: Could not determine entry direction from {previous_coord} to {target_coord}")
-            # else: Landed somewhere else, not the required stop. No index change.
+                print(f"Landed on required stop {required_stop_id} tile at {target_coord}.")
+                # --- Advance the target index ---
+                # We TRUST the initial path validation ensured a valid entry was possible.
+                print(f"--> Stop {required_stop_id} visited. Advancing target index.")
+                player.current_route_target_index += 1
+            # else: Landed somewhere else, not the *currently required* stop coord.
+            #      Index doesn't change. Could have landed on a LATER stop's tile,
+            #      but that doesn't count until the index matches.
 
     def check_win_condition(self, player: Player) -> bool:
         """Checks if the player has reached their destination terminal AFTER visiting all stops."""
