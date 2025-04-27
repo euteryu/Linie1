@@ -496,169 +496,152 @@ class Game:
         # print(f"Debug: Stop entry check at {stop_coord} from {entry_direction.name}. Valid: {valid_entry}")
         return valid_entry
 
-    # Replace in Game class in game_logic.py
+    def check_player_route_completion(self, player: Player) -> bool: # No longer returns path
+        """Checks if a valid path visiting stops in order currently exists."""
+        try:
+            sequence_nodes = player.get_required_nodes_sequence(self)
+            if not sequence_nodes: return False # Missing cards or stops
 
-    def check_player_route_completion(self, player: Player) -> Tuple[bool, Optional[List[Tuple[int, int]]]]:
-        """Checks if a player's route is complete, VALIDATING stop entries. Now with error handling."""
-        try: # Add try block here
-            if not player.line_card or not player.route_card:
-                # print(f"Route Check Error P{player.player_id}: Missing cards.") # Optional debug
-                return False, None
-            line_num = player.line_card.line_number
-            stops_ids = player.route_card.stops
-            term1_coord, term2_coord = self.get_terminal_coords(line_num)
-            if not term1_coord or not term2_coord:
-                print(f"Route Check Error P{player.player_id}: No terminal coords for Line {line_num}.")
-                return False, None
+            # --- Function to check connectivity between adjacent nodes in sequence ---
+            def check_segment(start_node, end_node) -> bool:
+                segment_path = self.find_path(start_node[0], start_node[1], end_node[0], end_node[1])
+                if not segment_path: return False # No path for this segment
 
-            required_stop_coords: Dict[str, Tuple[int, int]] = {}
-            stop_coords_in_order: List[Tuple[int, int]] = []
-            for stop_id in stops_ids:
-                coord = self.board.building_stop_locations.get(stop_id)
-                if coord is None:
-                    # print(f"Route Check P{player.player_id}: Required stop {stop_id} not placed.") # Optional debug
-                    return False, None # Required stop sign not placed
-                required_stop_coords[stop_id] = coord
-                stop_coords_in_order.append(coord)
+                # --- Validate Stop Entry IF end_node is a required stop ---
+                # Need to know which coords are stops vs terminals
+                stop_coords = set(c for s_id, c in self.board.building_stop_locations.items() if s_id in player.route_card.stops)
+                is_required_stop = end_node in stop_coords
+                if is_required_stop:
+                    if len(segment_path) < 2: return False # Cannot determine entry
+                    previous_coord = segment_path[-2]
+                    entry_direction = self._get_entry_direction(previous_coord, end_node)
+                    if not entry_direction or not self._is_valid_stop_entry(end_node, entry_direction):
+                         return False # Stop entry validation failed
 
-            # --- Function to check a full sequence (remains the same internally) ---
-            def check_sequence(start_terminal, end_terminal, stops) -> Optional[List[Tuple[int, int]]]:
-                sequence = [start_terminal] + stops + [end_terminal]
-                full_path: List[Tuple[int, int]] = []
-                # print(f"Debug P{player.player_id}: Checking sequence {sequence}") # Debug print
-                for i in range(len(sequence) - 1):
-                    start_node = sequence[i]
-                    end_node = sequence[i+1]
-                    # print(f"Debug P{player.player_id}: Finding path segment {start_node} -> {end_node}") # Debug print
-                    segment_path = self.find_path(start_node[0], start_node[1], end_node[0], end_node[1])
+                return True # Segment is valid
 
-                    if not segment_path:
-                        # print(f"Debug P{player.player_id}: Segment FAILED {start_node} -> {end_node} (No path)") # Debug print
-                        return None # Segment failed
+            # Check connectivity for all segments in the sequence
+            for i in range(len(sequence_nodes) - 1):
+                if not check_segment(sequence_nodes[i], sequence_nodes[i+1]):
+                    # print(f"Debug P{player.player_id}: Route check fail segment {i}") # Optional debug
+                    return False # Found an invalid segment
 
-                    # --- Validate Stop Entry IF end_node is a required stop ---
-                    is_required_stop = end_node in stop_coords_in_order
-                    if is_required_stop:
-                        if len(segment_path) < 2:
-                            # print(f"Debug P{player.player_id}: Segment FAILED {start_node} -> {end_node} (Path too short for entry check)") # Debug print
-                            return None # Cannot determine entry
+            print(f"Route Check P{player.player_id}: COMPLETE sequence possible.")
+            return True # All segments are validly connectable right now
 
-                        previous_coord = segment_path[-2]
-                        entry_direction = self._get_entry_direction(previous_coord, end_node)
+        except Exception as e:
+             print(f"\n!!! EXCEPTION during check_player_route_completion for P{player.player_id} !!!\nError: {e}")
+             traceback.print_exc(); return False
 
-                        if not entry_direction:
-                            # print(f"Debug P{player.player_id}: Segment FAILED {start_node} -> {end_node} (Could not determine entry direction)") # Debug print
-                            return None
+    def handle_route_completion(self, player: Player): # No longer takes path arg
+        print(f"\n*** ROUTE COMPLETE for Player {player.player_id}! Entering Driving Phase. ***")
 
-                        if not self._is_valid_stop_entry(end_node, entry_direction):
-                            # print(f"Debug P{player.player_id}: Segment FAILED {start_node} -> {end_node} (INVALID stop entry at {end_node} from {entry_direction.name})") # Debug print
-                            return None # Stop entry validation failed
-                        # else:
-                            # print(f"Debug P{player.player_id}: Segment OK {start_node} -> {end_node} (VALID stop entry at {end_node} from {entry_direction.name})") # Debug print
+        # --- Determine Optimal Start Terminal ---
+        start_pos = None
+        term1_coord, term2_coord = self.get_terminal_coords(player.line_card.line_number)
+        sequence_nodes = player.get_required_nodes_sequence(self) # Temporarily call to get stops
 
-                    # Append segment (avoiding duplicate node)
-                    full_path.extend(segment_path if i == 0 else segment_path[1:])
-                    # print(f"Debug P{player.player_id}: Segment OK {start_node} -> {end_node}. Path length now: {len(full_path)}") # Debug print
-
-                # print(f"Debug P{player.player_id}: Full sequence check successful.") # Debug print
-                return full_path # Entire sequence valid
-
-            # --- Try both sequences ---
-            path1 = check_sequence(term1_coord, term2_coord, stop_coords_in_order)
-            if path1:
-                print(f"Route Check P{player.player_id}: COMPLETE via sequence 1 (Term1 start).")
-                return True, path1
-
-            path2 = check_sequence(term2_coord, term1_coord, stop_coords_in_order)
-            if path2:
-                print(f"Route Check P{player.player_id}: COMPLETE via sequence 2 (Term2 start).")
-                return True, path2
-
-            # print(f"Route Check P{player.player_id}: FAILED both sequences.") # Optional debug
-            return False, None
-
-        except Exception as e: # Add except block here
-             print(f"\n!!! EXCEPTION during check_player_route_completion for P{player.player_id} !!!")
-             print(f"Error: {e}")
-             import traceback
-             traceback.print_exc() # Print full traceback for debugging
-             return False, None # Ensure tuple return on error
-
-    # --- Modify handle_route_completion to store path ---
-    def handle_route_completion(self, player: Player, validated_path: List[Tuple[int, int]]):
-        print(f"\n*** ROUTE COMPLETE for Player {player.player_id}! Storing path. ***")
-        player.player_state = PlayerState.DRIVING
-        player.validated_route = validated_path
-        player.current_route_target_index = 0 # Index for the stops list + end terminal
-
-        # Start position is the first element of the stored path
-        if player.validated_route:
-             player.streetcar_position = player.validated_route[0]
-             print(f"Player {player.player_id} streetcar placed at {player.streetcar_position}.")
+        if not sequence_nodes or len(sequence_nodes) < 2:
+            print(f"Error P{player.player_id}: Cannot determine sequence for start calc.")
+            first_stop_coord = None # Cannot determine first stop
         else:
-             print(f"Error: Route complete but no valid path stored for Player {player.player_id}")
-             # Handle error state? Revert player state?
+            first_stop_coord = sequence_nodes[1] # First stop is always index 1
 
-        # Check if game phase should change
+        path1_len = float('inf')
+        path2_len = float('inf')
+
+        if term1_coord and first_stop_coord:
+             path1 = self.find_path(term1_coord[0], term1_coord[1], first_stop_coord[0], first_stop_coord[1])
+             if path1: path1_len = len(path1)
+
+        if term2_coord and first_stop_coord:
+             path2 = self.find_path(term2_coord[0], term2_coord[1], first_stop_coord[0], first_stop_coord[1])
+             if path2: path2_len = len(path2)
+
+        # Choose the shorter path, default to term1 if equal or errors
+        if path1_len <= path2_len and term1_coord:
+             start_pos = term1_coord
+             print(f"Debug P{player.player_id}: Starting at Term1 ({term1_coord}), Path Len: {path1_len if path1_len != float('inf') else 'N/A'}")
+        elif term2_coord:
+             start_pos = term2_coord
+             print(f"Debug P{player.player_id}: Starting at Term2 ({term2_coord}), Path Len: {path2_len if path2_len != float('inf') else 'N/A'}")
+        else:
+             print(f"Error P{player.player_id}: Cannot determine valid start terminal.")
+             # Handle error: Revert state? Use default?
+             player.player_state = PlayerState.LAYING_TRACK
+             return
+
+        # --- Set Player State ---
+        player.player_state = PlayerState.DRIVING
+        player.required_node_index = 0 # Start aiming for the first stop
+        player.streetcar_position = start_pos
+        player.start_terminal_coord = start_pos # Store the chosen start
+
+        print(f"Player {player.player_id} streetcar placed at {player.streetcar_position}.")
+
         if self.game_phase == GamePhase.LAYING_TRACK:
              self.game_phase = GamePhase.DRIVING
              print(f"Game Phase changing to DRIVING.")
-        # If already DRIVING, no change needed
 
     # --- NEW Driving Methods (Step 6) ---
     def roll_special_die(self) -> Any:
         """Rolls the special Linie 1 die."""
         return random.choice(DIE_FACES)
 
-    def trace_track_steps(self, player: Player, num_steps: int) -> Tuple[int, int]:
-        """Calculates the destination coordinate after moving num_steps along the validated route."""
-        if not player.validated_route or player.streetcar_position is None:
-            print("Error: Cannot trace steps without a validated route or current position.")
-            return player.streetcar_position if player.streetcar_position else (-1,-1) # Error case
+    def trace_track_steps(self, player: Player, num_steps: int) -> Optional[Tuple[int, int]]:
+        """Calculates destination by finding path to next node, then tracing steps."""
+        if player.streetcar_position is None: return None
+        target_node = player.get_next_target_node(self)
+        if not target_node: return player.streetcar_position # Already past last node
 
-        try:
-            current_index_on_path = player.validated_route.index(player.streetcar_position)
-        except ValueError:
-            print(f"Error: Streetcar position {player.streetcar_position} not found in validated route.")
-            # Attempt to find nearest point? For now, return current position.
-            return player.streetcar_position
+        # Find the current best path segment to the next target node
+        path_segment = self.find_path(player.streetcar_position[0], player.streetcar_position[1],
+                                      target_node[0], target_node[1])
 
-        target_index = min(current_index_on_path + num_steps, len(player.validated_route) - 1)
-        return player.validated_route[target_index]
+        if not path_segment or len(path_segment) <= 1:
+             print(f"Warning: Cannot find path segment from {player.streetcar_position} to {target_node}")
+             return player.streetcar_position # Stay put if no path
 
-    def find_next_feature_on_path(self, player: Player) -> Tuple[int, int]:
-        """Finds the coordinate of the next stop sign or the end terminal along the validated route."""
-        if not player.validated_route or player.streetcar_position is None:
-            print("Error: Cannot find next feature without route/position.")
-            return player.streetcar_position if player.streetcar_position else (-1,-1)
+        # Trace steps along this *segment*
+        # Current position is path_segment[0]
+        target_index_on_segment = min(num_steps, len(path_segment) - 1)
+        return path_segment[target_index_on_segment]
 
-        try:
-            current_index_on_path = player.validated_route.index(player.streetcar_position)
-        except ValueError:
-            print(f"Error: Streetcar position {player.streetcar_position} not found in validated route.")
-            return player.streetcar_position # Cannot proceed
 
-        # Iterate from the *next* step on the path
-        for i in range(current_index_on_path + 1, len(player.validated_route)):
-            coord = player.validated_route[i]
+    def find_next_feature_on_path(self, player: Player) -> Optional[Tuple[int, int]]:
+        """Finds path to next node, then finds first feature on THAT path segment."""
+        if player.streetcar_position is None: return None
+        target_node = player.get_next_target_node(self)
+        if not target_node: return player.streetcar_position # Already past last node
 
-            # Check if it's the final destination terminal
-            if i == len(player.validated_route) - 1:
-                return coord # Always stop at the end terminal
+        # Find the current best path segment to the next target node
+        path_segment = self.find_path(player.streetcar_position[0], player.streetcar_position[1],
+                                      target_node[0], target_node[1])
+
+        if not path_segment or len(path_segment) <= 1:
+             print(f"Warning: Cannot find path segment from {player.streetcar_position} to {target_node} for 'H' roll.")
+             return player.streetcar_position # Stay put if no path
+
+        # Iterate along the found path segment (starting from step 1)
+        for i in range(1, len(path_segment)):
+            coord = path_segment[i]
+
+            # Check if it's the target node (which might be the end terminal)
+            if coord == target_node:
+                 return coord # Reached the next required node
 
             # Check if it's a stop sign location
             tile = self.board.get_tile(coord[0], coord[1])
             if tile and tile.has_stop_sign:
-                 return coord # Found the next stop sign
+                 return coord # Found the next stop sign along segment
 
-            # Check if it's *any* terminal location (stops at other players' terminals too)
-            # This requires iterating through TERMINAL_COORDS values
+            # Check if it's *any* terminal location
             for term_coords_pair in TERMINAL_COORDS.values():
                  if coord in term_coords_pair:
-                      return coord # Found any terminal
+                      return coord # Found any terminal along segment
 
-        # Should only reach here if already at the last step
-        return player.validated_route[-1]
+        # Should only reach here if the target_node itself is the only feature
+        return target_node
 
 
     def _get_entry_direction(self, from_coord: Tuple[int,int], to_coord: Tuple[int,int]) -> Optional[Direction]:
@@ -685,77 +668,88 @@ class Game:
 
 
     def move_streetcar(self, player: Player, target_coord: Tuple[int, int]):
-        """Moves the streetcar and checks if a required stop coordinate was reached."""
-        if not player.validated_route or player.streetcar_position is None:
-             print("Error: Cannot move streetcar without route/position.")
-             return
+        """Moves streetcar and increments target index if next required node coord is reached."""
+        if player.streetcar_position is None:
+            print(f"Warning: Player {player.player_id} has no streetcar position to move from.")
+            return # Cannot move if no current position
 
-        # Store previous position only if needed for debugging prints
-        # previous_coord = player.streetcar_position
+        previous_pos = player.streetcar_position # Store for logging if needed
         player.streetcar_position = target_coord
+        # Optionally log previous position:
+        # print(f"Player {player.player_id} moved from {previous_pos} to {target_coord}")
         print(f"Player {player.player_id} moved to {target_coord}")
 
-        # --- Check if the target IS the coordinate of the *next required* stop ---
+
+        # --- Check if the target IS the coordinate of the *next required* node ---
+        # Use the player object passed into the method
+        next_required_node_coord = player.get_next_target_node(self)
+
+        # Check if there is a next node AND the player landed on it
+        if next_required_node_coord and target_coord == next_required_node_coord:
+            # --- CORRECTED: Use player.required_node_index ---
+            print(f"--> Reached required node {player.required_node_index + 1} at {target_coord}. Advancing target.")
+            player.required_node_index += 1
+        # else: Landed somewhere else, or already past the last required node. Index doesn't change.
+
+
+    def check_win_condition(self, player: Player) -> bool:
+        """Checks if player is at EITHER destination terminal tile AND all nodes visited."""
+        if player.player_state != PlayerState.DRIVING or player.streetcar_position is None:
+             return False
+
+        # --- Get the player's specific line and required stops ---
+        if not player.line_card: return False # Should have line card if driving
+        line_num = player.line_card.line_number
         num_required_stops = 0
         if player.route_card and player.route_card.stops:
              num_required_stops = len(player.route_card.stops)
 
-        # Check if we are still expecting to visit stops
-        if player.current_route_target_index < num_required_stops:
-            # Get the ID and expected coordinate of the next required stop
-            required_stop_id = player.route_card.stops[player.current_route_target_index]
-            required_stop_coord = self.board.building_stop_locations.get(required_stop_id)
+        # --- Get BOTH potential destination terminal coordinates ---
+        term1_coord, term2_coord = self.get_terminal_coords(line_num)
+        if not term1_coord or not term2_coord:
+             print(f"Win Check Error P{player.player_id}: Cannot find terminal coords for Line {line_num}")
+             return False
 
-            # If the place we just landed IS the required stop's coordinate
-            if target_coord == required_stop_coord:
-                print(f"Landed on required stop {required_stop_id} tile at {target_coord}.")
-                # --- Advance the target index ---
-                # We TRUST the initial path validation ensured a valid entry was possible.
-                print(f"--> Stop {required_stop_id} visited. Advancing target index.")
-                player.current_route_target_index += 1
-            # else: Landed somewhere else, not the *currently required* stop coord.
-            #      Index doesn't change. Could have landed on a LATER stop's tile,
-            #      but that doesn't count until the index matches.
+        # --- Determine which terminal was the nominal START based on the path ---
+        # (This assumes handle_route_completion sets the initial position correctly)
+        # We need to know which of the two terminals is the actual target destination.
+        # Let's refine the assumption: If the required_node_index indicates they are
+        # aiming for the final destination (i.e., index > num_stops), then the
+        # destination is the terminal they *didn't* start at.
 
-    def check_win_condition(self, player: Player) -> bool:
-        """Checks if the player has reached their destination terminal AFTER visiting all stops."""
-        # --- Basic validity checks ---
-        if player.player_state != PlayerState.DRIVING:
-            # Cannot win if not driving
-            return False
-        if not player.validated_route or player.streetcar_position is None:
-            # Cannot win without a calculated route and current position
-            # print(f"Debug Win Check P{player.player_id}: No route or position.") # Optional debug
-            return False
+        # Get the sequence to know the nominal start/end based on initial placement
+        # We might need a more robust way to store the start terminal if loading saves.
+        # Quick Fix Assumption: If current pos isn't term1, assume term1 was start, term2 is dest. Vice-versa.
+        # This is flawed if they are mid-route.
+        # Better: Store the nominal start terminal when player starts driving.
 
-        # --- Identify the destination ---
-        # The destination is the VERY LAST coordinate in the validated route list
-        destination_coord = player.validated_route[-1]
-        # print(f"Debug Win Check P{player.player_id}: Pos={player.streetcar_position}, Dest={destination_coord}") # Optional debug
+        # --- Let's simplify: Check if current position IS one of the line's terminals ---
+        current_pos = player.streetcar_position
+        is_at_term1 = (current_pos == term1_coord)
+        is_at_term2 = (current_pos == term2_coord)
 
+        # --- Check if player is AT EITHER destination terminal ---
+        if is_at_term1 or is_at_term2:
+            # Determine which terminal they *should* be aiming for as the true destination.
+            # If player.required_node_index implies they are past the stops, they *must* be at the destination.
+            # The sequence has N stops, plus start term, plus end term = N+2 nodes.
+            # Target index goes from 0 (start) to N+1 (end). Index > N means aiming for end.
+            is_aiming_for_final_node = player.required_node_index > num_required_stops
 
-        # --- Check if player is AT the destination ---
-        if player.streetcar_position == destination_coord:
-             # print(f"Debug Win Check P{player.player_id}: At destination.") # Optional debug
-             # --- Check if all required stops have been accounted for ---
-             num_required_stops = 0
-             if player.route_card and player.route_card.stops:
-                 num_required_stops = len(player.route_card.stops)
-
-             # The target index should point *beyond* the last required stop index
-             if player.current_route_target_index >= num_required_stops:
-                  print(f"Debug Win Check P{player.player_id}: All stops visited ({player.current_route_target_index}/{num_required_stops}). WIN!") # Optional debug
-                  # --- Conditions met: Set game over state ---
-                  self.game_phase = GamePhase.GAME_OVER
-                  self.winner = player # Store the winning player object
-                  player.player_state = PlayerState.FINISHED # Mark player as finished
-                  return True
-             else:
-                  # Reached end terminal physically, but logic didn't register all stop visits correctly
-                  print(f"Debug Win Check P{player.player_id}: Reached end but stops mismatch ({player.current_route_target_index}/{num_required_stops}). No win.")
-                  return False
+            if is_aiming_for_final_node:
+                 # No need to check which terminal was start/end if index is correct.
+                 # Reaching *any* terminal when aiming for the end means they finished.
+                 print(f"Win Check P{player.player_id}: At a Terminal ({current_pos}) & Nodes Visited ({player.required_node_index}/{num_required_stops+1} nodes). WIN!")
+                 self.game_phase = GamePhase.GAME_OVER
+                 self.winner = player
+                 player.player_state = PlayerState.FINISHED
+                 return True
+            else:
+                 # They landed on a terminal tile, but haven't logically passed all stops yet.
+                 print(f"Win Check P{player.player_id}: Landed on Terminal ({current_pos}) but node index too low ({player.required_node_index}/{num_required_stops+1} nodes). No win.")
+                 return False
         else:
-            # Not at the destination coordinate
+            # Not at either of the destination terminal coordinates
             return False
 
     # --- Modify end_player_turn for new start-of-turn check ---
@@ -775,26 +769,17 @@ class Game:
 
         # --- Advance Player Index ---
         self.active_player_index = (self.active_player_index + 1) % self.num_players
-
-        # --- Increment Turn Counter (only when wrapping around to Player 0) ---
-        if self.active_player_index == 0:
-             self.current_turn += 1
-
-        # --- Reset Actions for the NEW player ---
+        if self.active_player_index == 0: self.current_turn += 1
         self.actions_taken_this_turn = 0
         next_player = self.get_active_player()
         print(f"\n--- Starting Turn {self.current_turn} for Player {self.active_player_index} ({next_player.player_state.name}) ---")
 
-        # --- <<<<<< CHECK ROUTE COMPLETION AT START OF NEW TURN >>>>>>> ---
+        # --- Check route completion at START of next player's turn ---
         if next_player.player_state == PlayerState.LAYING_TRACK:
-             # Call the check function which now returns path
-             route_complete, path = self.check_player_route_completion(next_player)
-             if route_complete and path:
-                  # Call handler *with* the path
-                  self.handle_route_completion(next_player, path)
-                  # Player state is now DRIVING, their turn starts in DrivingState
-                  print(f"Player {next_player.player_id} state changed to DRIVING at turn start.")
-             # else: Route not complete, player continues in LAYING_TRACK state
+             # check_player_route_completion now only returns bool
+             if self.check_player_route_completion(next_player):
+                  # handle_route_completion no longer needs path
+                  self.handle_route_completion(next_player)
 
     # --- SAVE GAME METHOD ---
     def save_game(self, filename: str):
