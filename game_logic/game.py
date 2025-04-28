@@ -492,128 +492,98 @@ class Game:
              self.confirm_turn() # End turn even if command fails? Maybe.
              return False
 
-    # === Pathfinding & Route Logic ===
-    def find_path(self, start_row: int, start_col: int,
-                  end_row: int, end_col: int,
-                  avoid_coords: Optional[Set[Tuple[int, int]]] = None
-                  ) -> Optional[List[Tuple[int, int]]]:
+    # Modify find_path to accept the direction the search ARRIVED from at the start node
+    def find_path(self, start_row: int, start_col: int, end_row: int, end_col: int,
+                  entry_direction_at_start: Optional[Direction] = None) -> Optional[List[Tuple[int, int]]]:
         """
-        Finds a path using BFS between two points, optionally avoiding
-        a given set of coordinates. Returns the path as a list of
-        (row, col) tuples, or None if no path exists.
+        Finds a path using BFS, preventing immediate backtracking from the start node.
+        Returns the list of coordinates, or None.
+        entry_direction_at_start: The direction used to ENTER (start_row, start_col).
+                                   Neighbors in the opposite direction won't be explored initially.
         """
         start_coord = (start_row, start_col)
         end_coord = (end_row, end_col)
-        coords_to_avoid = avoid_coords if avoid_coords is not None else set()
+        # coords_to_avoid = avoid_coords if avoid_coords is not None else set() <-- redundant as BFS logic already handles visited nodes using the predecessor dictionary
 
         # --- Basic Input Validation ---
         if not self.board.is_valid_coordinate(start_row, start_col) or \
-           not self.board.is_valid_coordinate(end_row, end_col):
-            # print(f"BFS Error: Invalid start/end {start_coord}->{end_coord}")
-            return None
+           not self.board.is_valid_coordinate(end_row, end_col): return None
+        if (start_row, start_col) == (end_row, end_col): return [(start_row, start_col)]
+        start_tile = self.board.get_tile(start_row, start_col)
+        if not start_tile: return None
 
-        if start_coord == end_coord:
-            return [start_coord] # Path to self is just the node itself
+        # Store path predecessors AND the direction taken to reach the node
+        # Value: (predecessor_coord, direction_from_predecessor)
+        predecessor: Dict[Tuple[int, int], Optional[Tuple[Optional[Tuple[int, int]], Optional[Direction]]]] = \
+            {(start_row, start_col): (None, entry_direction_at_start)} # Store initial entry if provided
 
-        # Check if starting tile exists
-        if not self.board.get_tile(start_row, start_col):
-            # print(f"BFS Error: No tile at start {start_coord}")
-            return None
-
-        # --- Initialize BFS ---
-        # Queue stores nodes to visit
-        queue = deque([start_coord])
-        # Predecessor dict stores {node: previous_node} to reconstruct path
-        predecessor: Dict[Tuple[int, int], Optional[Tuple[int, int]]] = \
-            {start_coord: None}
+        queue = deque([(start_row, start_col)]) # No need to store direction in queue itself
 
         path_found = False
-
-        # --- BFS Loop ---
         while queue:
             curr_row, curr_col = queue.popleft()
-            curr_coord = (curr_row, curr_col)
+            current_coord = (curr_row, curr_col)
 
-            # --- Goal Check ---
-            if curr_coord == end_coord:
+            if current_coord == (end_row, end_col):
                 path_found = True
-                break # Exit loop once destination is dequeued
+                break
 
-            # --- Get Current Tile Info ---
             current_tile = self.board.get_tile(curr_row, curr_col)
-            # Should not happen if only valid tiles are added, but safety check
             if not current_tile: continue
 
-            current_connections = self.get_effective_connections(
-                current_tile.tile_type, current_tile.orientation
-            )
-            # Get all directions current tile has an exit towards
-            current_exit_dirs_str = {
-                exit_dir for exits in current_connections.values()
-                for exit_dir in exits
-            }
+            current_connections = self.get_effective_connections(current_tile.tile_type, current_tile.orientation)
+            current_exit_dirs_str = {exit_dir for exits in current_connections.values() for exit_dir in exits}
 
-            # --- Explore Neighbors ---
-            # Consider shuffling directions for less predictable paths?
+            # Get the direction used to arrive at THIS node (from predecessor dict)
+            _, arrived_from_direction = predecessor[current_coord] # Direction entering current_coord
+
             directions_to_check = list(Direction)
-            # random.shuffle(directions_to_check)
+            random.shuffle(directions_to_check) # Keep shuffle for variety
 
-            for direction in directions_to_check:
-                dir_str = direction.name
-                opposite_dir = Direction.opposite(direction)
-                opposite_dir_str = opposite_dir.name
+            for exit_direction in directions_to_check: # Direction to EXIT current_coord
+                # --- "NO BACKWARDS" RULE CHECK ---
+                # If we arrived from a certain direction, don't immediately exit back that way
+                if arrived_from_direction is not None and exit_direction == Direction.opposite(arrived_from_direction):
+                    # print(f"BFS Skip: Trying to exit {exit_direction.name} from {current_coord}, but arrived via {arrived_from_direction.name}") # Debug
+                    continue # Skip exploring this direction
 
-                dr, dc = direction.value
-                nr, nc = curr_row + dr, curr_col + dc
+                # Check if the current tile actually supports exiting this way
+                exit_dir_str = exit_direction.name
+                if exit_dir_str not in current_exit_dirs_str:
+                    continue # Current tile doesn't connect out this way
+
+                # --- Check Neighbor ---
+                dr, dc = exit_direction.value
+                nr, nc = curr_row + dr, col + dc
                 neighbor_coord = (nr, nc)
 
-                # --- Neighbor Validation Checks ---
-                # 1. Is neighbor valid on board?
                 if not self.board.is_valid_coordinate(nr, nc): continue
-                # 2. Already visited / added to queue?
-                if neighbor_coord in predecessor: continue
-                # 3. Is neighbor in the avoid set? (But allow start node)
-                if neighbor_coord != start_coord and \
-                   neighbor_coord in coords_to_avoid:
-                    continue
-                # 4. Does neighbor have a tile?
+                if neighbor_coord in predecessor: continue # Already visited/queued
+
                 neighbor_tile = self.board.get_tile(nr, nc)
                 if not neighbor_tile: continue
 
-                # --- 5. Two-Way Connection Check ---
-                # Does current tile connect towards neighbor?
-                current_connects_out = dir_str in current_exit_dirs_str
-                # Does neighbor tile connect back towards current?
-                neighbor_connections = self.get_effective_connections(
-                    neighbor_tile.tile_type, neighbor_tile.orientation
-                )
-                neighbor_connects_back = opposite_dir_str in {
-                    exit_dir for exits in neighbor_connections.values()
-                    for exit_dir in exits
+                # Check if neighbor connects back (two-way check still needed)
+                neighbor_connects_back = Direction.opposite(exit_direction).name in {
+                    ex_dir for n_exits in self.get_effective_connections(neighbor_tile.tile_type, neighbor_tile.orientation).values() for ex_dir in n_exits
                 }
 
-                # --- Add Valid Neighbor to Queue ---
-                if current_connects_out and neighbor_connects_back:
-                    predecessor[neighbor_coord] = curr_coord
+                if neighbor_connects_back: # Valid forward connection
+                    # Record predecessor and the direction taken to get there
+                    predecessor[neighbor_coord] = (current_coord, exit_direction)
                     queue.append(neighbor_coord)
 
-        # --- Path Reconstruction ---
+        # --- Reconstruct path (no change needed here) ---
         if path_found:
-            path: List[Tuple[int, int]] = []
-            step = end_coord
-            while step is not None:
-                path.append(step)
-                # Check if key exists before accessing
-                if step in predecessor:
-                     step = predecessor[step]
-                else:
-                     # Should not happen if path_found is True
-                     print("Error: Path reconstruction failed!")
-                     return None # Or raise error
-            return path[::-1] # Reverse to get start -> end order
+            path: List[Tuple[int, int]] = []; curr_data = ((end_row, end_col), None) # Store coord and entry dir for reconstruction if needed
+            while curr_data[0] is not None:
+                 coord = curr_data[0]
+                 path.append(coord)
+                 pred_data = predecessor.get(coord)
+                 curr_data = pred_data if pred_data else (None, None) # Move to predecessor
+            return path[::-1]
         else:
-            # print(f"BFS Info: No path found {start_coord} -> {end_coord}")
-            return None # No path exists
+            return None
 
     def get_terminal_coords(self, line_number: int
             ) -> Tuple[Optional[Tuple[int, int]], Optional[Tuple[int, int]]]:
@@ -764,6 +734,7 @@ class Game:
         # --- Set Player State ---
         player.player_state = PlayerState.DRIVING
         player.required_node_index = 0 # Start aiming for the first stop
+        player.arrival_direction = None # Reset arrival direction at start
         player.streetcar_position = start_pos
         player.start_terminal_coord = start_pos # Store the chosen start
 
@@ -778,76 +749,74 @@ class Game:
         """Rolls the special Linie 1 die."""
         return random.choice(DIE_FACES)
 
-    def trace_track_steps(self, player: Player, num_steps: int,
-                           avoid_coords: Optional[Set[Tuple[int, int]]] = None # <-- ADD PARAM HERE
-                           ) -> Optional[Tuple[int, int]]:
-        """Calculates destination by finding path to next node, then tracing steps."""
+    def _find_path_segment_for_driving(self, player: Player) -> Optional[List[Tuple[int, int]]]:
+        """Helper to find the dynamic path segment from current pos to next node."""
         if player.streetcar_position is None: return None
         target_node = player.get_next_target_node(self)
-        if not target_node: return player.streetcar_position # Already past last node
+        if not target_node: return None
 
-        # Find the current best path segment to the next target node
+        # Pass the player's arrival direction to find_path
         path_segment = self.find_path(
             player.streetcar_position[0], player.streetcar_position[1],
             target_node[0], target_node[1],
-            avoid_coords=avoid_coords # Pass avoid set down to find_path
+            player.arrival_direction # Pass how we got here
         )
+        return path_segment
 
+    def trace_track_steps(self, player: Player, num_steps: int) -> Optional[Tuple[int, int]]:
+        """Calculates destination by finding path segment, then tracing steps."""
+        path_segment = self._find_path_segment_for_driving(player)
         if not path_segment or len(path_segment) <= 1:
-             print(f"Warning: Cannot find path segment from "
-                   f"{player.streetcar_position} to {target_node}")
-             return player.streetcar_position # Stay put if no path
+             print(f"Warning: Cannot find path segment from {player.streetcar_position} for trace.")
+             return player.streetcar_position
 
-        # Trace steps along this *segment*
-        # Current position is path_segment[0]
         target_index_on_segment = min(num_steps, len(path_segment) - 1)
+        # --- Determine arrival direction for the *next* move ---
+        # If we moved (target_index > 0), calculate direction from prev step
+        if target_index_on_segment > 0:
+             prev_coord = path_segment[target_index_on_segment - 1]
+             next_coord = path_segment[target_index_on_segment]
+             player.arrival_direction = self._get_entry_direction(prev_coord, next_coord)
+        # Else (staying put), keep old arrival direction? Or set to None? Let's keep old for now.
+
         return path_segment[target_index_on_segment]
 
 
-    def find_next_feature_on_path(self, player: Player,
-                                  avoid_coords: Optional[Set[Tuple[int, int]]] = None # <-- ADD PARAM HERE
-                                  ) -> Optional[Tuple[int, int]]:
-        """Finds path to next node, then finds first feature on THAT path segment."""
-        if player.streetcar_position is None: return None
-        target_node = player.get_next_target_node(self)
-        if not target_node: return player.streetcar_position # Already past last node
-
-        # Find the current best path segment to the next target node
-        path_segment = self.find_path(
-            player.streetcar_position[0], player.streetcar_position[1],
-            target_node[0], target_node[1],
-            avoid_coords=avoid_coords # Pass avoid set down to find_path
-        )
-
+    def find_next_feature_on_path(self, player: Player) -> Optional[Tuple[int, int]]:
+        """Finds path segment, then finds first feature on THAT segment."""
+        path_segment = self._find_path_segment_for_driving(player)
         if not path_segment or len(path_segment) <= 1:
-             print(f"Warning: Cannot find path segment from "
-                   f"{player.streetcar_position} to {target_node} for 'H' roll.")
-             return player.streetcar_position # Stay put if no path
+             print(f"Warning: Cannot find path segment from {player.streetcar_position} for 'H' roll.")
+             return player.streetcar_position
+
+        target_node = path_segment[-1] # The required node we aimed for
+        final_coord_found = target_node # Default to target node if no feature found earlier
+        arrival_at_feature: Optional[Direction] = None
 
         # Iterate along the found path segment (starting from step 1)
         for i in range(1, len(path_segment)):
             coord = path_segment[i]
+            feature_found = False
 
-            # Check if it's the target node (which might be the end terminal)
-            if coord == target_node:
-                 # If the target node IS the feature (e.g. H roll to end) return it
-                 # Also covers case where segment is only start -> end
-                 return coord
+            if coord == target_node: feature_found = True # Reached the next required node
 
-            # Check if it's a stop sign location
             tile = self.board.get_tile(coord[0], coord[1])
-            if tile and tile.has_stop_sign:
-                 return coord # Found the next stop sign along segment
+            if tile and tile.has_stop_sign: feature_found = True # Found any stop sign
 
-            # Check if it's *any* terminal location
-            # Use get_terminal_coords for efficiency? No, need to check all lines.
-            for term_line, term_coords_pair in TERMINAL_COORDS.items():
-                 if coord == term_coords_pair[0] or coord == term_coords_pair[1]:
-                      # Found ANY terminal entrance tile coordinate
-                      return coord # Stop at any terminal
+            for term_coords_pair in C.TERMINAL_COORDS.values():
+                 if coord in term_coords_pair: feature_found = True # Found any terminal
 
-        # If loop finishes, the target_node itself must be the next feature
-        return target_node
+            if feature_found:
+                 final_coord_found = coord
+                 # Calculate arrival direction at this feature
+                 if i > 0: # Should always be true here
+                      prev_coord = path_segment[i-1]
+                      arrival_at_feature = self._get_entry_direction(prev_coord, final_coord_found)
+                 break # Stop at the first feature found
+
+        # Update player's arrival direction for the next turn
+        player.arrival_direction = arrival_at_feature
+        return final_coord_found
 
 
     def _get_entry_direction(self, from_coord: Tuple[int,int], to_coord: Tuple[int,int]) -> Optional[Direction]:

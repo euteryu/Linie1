@@ -378,6 +378,7 @@ class DrivingState(GameState):
         super().__init__(visualizer)
         self.message = "Roll die or select debug roll."
         self.last_roll: Optional[Any] = None
+        self.current_move_path: Optional[List[Tuple[int, int]]] = None # Store path taken this move
 
     def handle_event(self, event):
         # --- Handle Common Buttons (Save/Load/Undo/Redo/Debug) ---
@@ -424,17 +425,38 @@ class DrivingState(GameState):
         # --- Execute Move if Action Triggered ---
         if action_triggered and roll_result is not None:
             self.last_roll = roll_result
-            success = self.game.attempt_driving_move(
-                active_player, roll_result
-            )
-            # attempt_driving_move now creates MoveCommand, executes it,
-            # and updates actions_taken_this_turn. Win check happens inside command.
-            # Message might be updated inside command or win check.
-            if not success and "Error" not in self.message:
-                 self.message = "Move failed or no change."
-            # No explicit confirm needed for driving? Assume turn ends.
-            # If confirm needed, add Enter key handling here too.
+            self.current_move_path = None # Clear previous path highlight
 
+            target_coord: Optional[Tuple[int, int]] = None
+            calculated_segment: Optional[List[Tuple[int,int]]] = None
+
+            if roll_result == C.STOP_SYMBOL:
+                 # We need the path taken to the feature
+                 calculated_segment = self.game._find_path_segment_for_driving(active_player) # Find path first
+                 target_coord = self.game.find_next_feature_on_path(active_player) # Then find feature *on* that path
+                 if calculated_segment and target_coord:
+                     # Trim segment to only go up to the target feature
+                     try:
+                          target_idx = calculated_segment.index(target_coord)
+                          self.current_move_path = calculated_segment[:target_idx+1]
+                     except ValueError: pass # Target not in segment? Error.
+                 print(f"Target (H): {target_coord}")
+            elif isinstance(roll_result, int):
+                 # Trace steps already calculates the path segment implicitly now
+                 calculated_segment = self.game._find_path_segment_for_driving(active_player)
+                 target_coord = self.game.trace_track_steps(active_player, roll_result)
+                 if calculated_segment and target_coord:
+                     # Trim segment to only go up to the target
+                     try:
+                          target_idx = calculated_segment.index(target_coord)
+                          self.current_move_path = calculated_segment[:target_idx+1]
+                     except ValueError: pass # Target not in segment? Error.
+                 print(f"Target ({roll_result}): {target_coord}")
+            # ... (rest of move/check win/end turn) ...
+        # --- Clear path highlight when turn ends or state changes ---
+        # (Need to handle this appropriately, maybe in end_turn_sequence or visualizer state change)
+
+    # draw method is likely empty, but visualizer needs access to current_move_path
     def draw(self, screen):
         # Board/Streetcars drawn by visualizer.draw_board
         self.visualizer.draw_board(screen)

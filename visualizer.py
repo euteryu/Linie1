@@ -284,6 +284,26 @@ class Linie1Visualizer:
                  print(f"Error rendering/blitting text for die face {face}: {e}")
         return surfaces
 
+    def draw_highlighted_path(self, screen, path_coords: Optional[List[Tuple[int, int]]]):
+        """Draws a translucent overlay over tiles in the given path."""
+        if not path_coords: return
+
+        highlight_color = (255, 255, 0, 70) # Yellow, semi-transparent
+
+        for i, (r, c) in enumerate(path_coords):
+             if not self.game.board.is_valid_coordinate(r, c): continue
+             # Calculate screen rect for the tile
+             screen_x = C.BOARD_X_OFFSET + (c - C.PLAYABLE_COLS[0]) * self.TILE_SIZE
+             screen_y = C.BOARD_Y_OFFSET + (r - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE
+             rect = pygame.Rect(screen_x, screen_y, self.TILE_SIZE, self.TILE_SIZE)
+
+             # Create a temporary surface for the highlight
+             temp_surf = pygame.Surface(rect.size, pygame.SRCALPHA)
+             temp_surf.fill(highlight_color)
+             screen.blit(temp_surf, rect.topleft)
+
+             # Optional: Draw arrows indicating direction? More complex.
+
     def run(self):
         """ Main game loop. """
         running = True
@@ -313,8 +333,13 @@ class Linie1Visualizer:
             # Drawing
             self.screen.fill(C.COLOR_UI_BG)
             if self.current_state:
-                 # Delegate drawing to the current state
-                 self.current_state.draw(self.screen)
+                # Delegate drawing to the current state
+                self.current_state.draw(self.screen)
+                # Draw highlighted path if applicable (AFTER board, BEFORE streetcars/UI?)
+                if isinstance(self.current_state, DrivingState) and self.current_state.current_move_path:
+                    self.draw_highlighted_path(self.screen, self.current_state.current_move_path)
+                # Draw streetcars (now includes all players) - MOVE THIS CALL?
+                # self.draw_streetcars(self.screen) # Maybe call this after board?
             else:
                  # Handle case where state might be None (error?)
                  self.draw_text(self.screen, "Error: Invalid State", 10, 10, C.COLOR_STOP)

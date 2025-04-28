@@ -12,18 +12,34 @@ class Player:
         self.route_card: Optional[RouteCard] = None
         self.player_state: PlayerState = PlayerState.LAYING_TRACK
         self.streetcar_position: Optional[Tuple[int, int]] = None
-        # self.validated_route: Optional[List[Tuple[int, int]]] = None # REMOVED
         # Renamed for clarity: index into the sequence of required stops/terminals
         self.required_node_index: int = 0
         self.start_terminal_coord: Optional[Tuple[int, int]] = None # Store which terminal they started from
+        self.arrival_direction: Optional[Direction] = None # Direction used to ENTER current streetcar_position
 
-    def __repr__(self) -> str: # ... implementation ...
-        route_len = len(self.validated_route) if self.validated_route else 0; return (f"Player {self.player_id} (State: {self.player_state.name}, Hand: {len(self.hand)}, RouteIdx: {self.current_route_target_index}/{route_len})")
+    def __repr__(self) -> str:
+        # Removed reference to validated_route length
+        # Added required_node_index for debugging info
+        num_stops = 0
+        if self.route_card and self.route_card.stops:
+             num_stops = len(self.route_card.stops)
 
-    def to_dict(self) -> Dict: # ... implementation ...
-        hand_data = [tile.name for tile in self.hand]; line_card_data = self.line_card.line_number if self.line_card else None; # ... rest of implementation ...
-        route_card_data = { "stops": self.route_card.stops, "variant": self.route_card.variant_index } if self.route_card else None; # ... rest of implementation ...
-        route_path_data = [list(coord) for coord in self.validated_route] if self.validated_route else None; # ... rest of implementation ...
+        # Target node index progresses from 0 (aiming for stop 1) up to num_stops (aiming for end terminal)
+        # So total number of "targets" is num_stops + 1
+        total_targets = num_stops + 1
+
+        return (f"Player(id={self.player_id}, " # Use keyword args style for clarity
+                f"State={self.player_state.name}, "
+                f"Hand={len(self.hand)}, "
+                # Show progress through required nodes
+                f"NodeIdx={self.required_node_index}/{total_targets})")
+
+    def to_dict(self) -> Dict:
+        """Converts Player state to a JSON-serializable dictionary."""
+        hand_data = [tile.name for tile in self.hand]
+        line_card_data = self.line_card.line_number if self.line_card else None
+        route_card_data = { "stops": self.route_card.stops, "variant": self.route_card.variant_index } if self.route_card else None
+
         return {
             "player_id": self.player_id,
             "hand": hand_data,
@@ -31,8 +47,10 @@ class Player:
             "route_card": route_card_data,
             "player_state": self.player_state.name,
             "streetcar_position": list(self.streetcar_position) if self.streetcar_position else None,
-            "required_node_index": self.required_node_index,
-            "start_terminal_coord": list(self.start_terminal_coord) if self.start_terminal_coord else None, # ADDED
+            # "validated_route": route_path_data, # <-- REMOVE or COMMENT OUT
+            "required_node_index": self.required_node_index, # Keep this
+            # Save arrival_direction if needed for loading mid-move? Maybe not necessary.
+            # "arrival_direction": self.arrival_direction.name if self.arrival_direction else None,
         }
 
     @staticmethod
@@ -45,14 +63,12 @@ class Player:
         try: player.player_state = PlayerState[data.get("player_state", "LAYING_TRACK")]
         except KeyError: player.player_state = PlayerState.LAYING_TRACK
         pos_list = data.get("streetcar_position"); player.streetcar_position = tuple(pos_list) if isinstance(pos_list, list) and len(pos_list) == 2 else None; # ... rest of implementation ...
-        route_list = data.get("validated_route")
-        player.validated_route = [tuple(coord) for coord in route_list if isinstance(coord, list) and len(coord) == 2] if route_list else None; # ... rest of implementation ...
-        player.current_route_target_index = data.get("current_route_target_index", 0)
-        # Don't load validated_route
-        player.required_node_index = data.get("required_node_index", 0) # Load this
-        start_term_list = data.get("start_terminal_coord") # ADDED
-        player.start_terminal_coord = tuple(start_term_list) if start_term_list else None # ADDED
-        return player
+        
+        player.required_node_index = data.get("required_node_index", 0)
+        # Load arrival direction if saved? Default to None otherwise.
+        # arrival_str = data.get("arrival_direction")
+        # player.arrival_direction = Direction[arrival_str] if arrival_str else None
+        player.arrival_direction = None # Safer to reset on load
         return player
 
     def get_required_nodes_sequence(self, game: 'Game') -> Optional[List[Tuple[int, int]]]:
