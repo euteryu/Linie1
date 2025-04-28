@@ -21,7 +21,8 @@ from .commands import (Command, PlaceTileCommand,
 from constants import (
     TILE_DEFINITIONS, TILE_COUNTS_BASE, TILE_COUNTS_5_PLUS_ADD,
     STARTING_HAND_TILES, ROUTE_CARD_VARIANTS, TERMINAL_COORDS,
-    HAND_TILE_LIMIT, MAX_PLAYER_ACTIONS, DIE_FACES, STOP_SYMBOL
+    HAND_TILE_LIMIT, MAX_PLAYER_ACTIONS, DIE_FACES, STOP_SYMBOL,
+    TERMINAL_DATA
 )
 
 
@@ -244,6 +245,41 @@ class Game:
         """Checks if connections represent an East-West straight path."""
         return 'W' in effective_connections.get('E', [])
 
+    def _get_terminal_area_coords(self, line_number: int,
+                                  terminal_coord: Tuple[int, int]
+                                  ) -> Set[Tuple[int, int]]:
+        """
+        Helper to find the pair of coordinates defining the terminal area
+        that includes the given terminal_coord for the specified line.
+        Returns an empty set if not found or data is invalid.
+        """
+        # Use TERMINAL_DATA which holds the detailed pairs and orientations
+        entrances = TERMINAL_DATA.get(line_number)
+        if not entrances:
+             print(f"Warning: No TERMINAL_DATA found for Line {line_number}")
+             return set()
+
+        # TERMINAL_DATA format: { line: ( entrance_a, entrance_b ) }
+        # entrance_a format: ( ((r1,c1), orient1), ((r2,c2), orient2) )
+        try:
+            for entrance_pair_info in entrances: # Iterate through entrance_a, entrance_b
+                 # Extract the two coordinates defining this entrance area
+                 coord1 = entrance_pair_info[0][0]
+                 coord2 = entrance_pair_info[1][0]
+                 coords_in_pair = {coord1, coord2}
+                 # Check if the given terminal_coord is one of these two
+                 if terminal_coord in coords_in_pair:
+                      # Found the matching pair, return the set of both coords
+                      return coords_in_pair
+        except (IndexError, TypeError) as e:
+             print(f"Error parsing TERMINAL_DATA for Line {line_number}: {e}")
+             # Fall through to return empty set if format is wrong
+
+        # If the terminal_coord wasn't found in any defined pair for the line
+        print(f"Warning: Coord {terminal_coord} not found in "
+              f"TERMINAL_DATA pairs for Line {line_number}")
+        return set()
+
     # === Placement/Exchange Validity Checks ===
     # (These are called by Commands or externally)
 
@@ -390,75 +426,137 @@ class Game:
 
     def attempt_driving_move(self, player: Player, roll_result: Any) -> bool:
         """ Creates and executes MoveCommand after determining target. """
-        if player.player_state != PlayerState.DRIVING:
-             print("Action Error: Not in driving state.")
-             return False
-        # Driving turn effectively takes 1 logical "action" slot
-        if self.actions_taken_this_turn >= MAX_PLAYER_ACTIONS:
-             print("Action Error: Driving move already completed this turn.")
-             return False
+        if player.player_state != PlayerState.DRIVING: return False
+        if self.actions_taken_this_turn > 0: return False
+
+        # --- Check if required player attributes exist ---
+        if player.start_terminal_coord is None or player.line_card is None:
+             print("Error: Cannot drive - start terminal or line card missing.")
+             # Maybe end turn automatically here?
+             self.actions_taken_this_turn = MAX_PLAYER_ACTIONS
+             self.confirm_turn() # End turn if essential data missing
+             return False # Indicate failure
 
         target_coord: Optional[Tuple[int, int]] = None
-        # ... (Determine target_coord based on roll_result) ...
-        if roll_result == STOP_SYMBOL: target_coord = self.find_next_feature_on_path(player)
-        elif isinstance(roll_result, int): target_coord = self.trace_track_steps(player, roll_result)
-        else: print(f"Driving Error: Invalid roll {roll_result}"); return False
+        # --- Get the set of coordinates for the STARTING terminal area ---
+        # <<< FIX: Pass BOTH arguments >>>
+        start_term_area_to_avoid = self._get_terminal_area_coords(
+            player.line_card.line_number,
+            player.start_terminal_coord
+        )
+        if not start_term_area_to_avoid:
+            # Warning if area couldn't be found, but proceed without avoid set
+             print(f"Warning: Could not determine start terminal area for P{player.player_id}")
 
+
+        # --- Determine target_coord using pathfinding (passing avoid set) ---
+        if roll_result == STOP_SYMBOL:
+             target_coord = self.find_next_feature_on_path(
+                 player, start_term_area_to_avoid
+             )
+        elif isinstance(roll_result, int):
+             target_coord = self.trace_track_steps(
+                 player, roll_result, start_term_area_to_avoid
+             )
+        else:
+             print(f"Driving Error: Invalid roll {roll_result}")
+             self.actions_taken_this_turn = MAX_PLAYER_ACTIONS # End turn on bad roll
+             self.confirm_turn()
+             return False # Indicate failure
+
+        # --- Handle cases where no target found or no move needed ---
         if target_coord is None:
              print(f"Driving Error: No target for roll {roll_result}.")
-             return False
+             self.actions_taken_this_turn = MAX_PLAYER_ACTIONS
+             self.confirm_turn()
+             return False # Indicate failure (though turn ends)
+
         if target_coord == player.streetcar_position:
-             print(f"Driving Info: No move for roll {roll_result}.")
-             self.actions_taken_this_turn = MAX_PLAYER_ACTIONS # Turn ends
-             return True # Action taken, but no state change
+            print(f"Driving Info: No move required for roll {roll_result}.")
+            self.actions_taken_this_turn = MAX_PLAYER_ACTIONS
+            self.confirm_turn()
+            return True # Turn ends, no state change needed by command
 
         # --- Create and execute Move Command ---
         command = MoveCommand(self, player, target_coord)
         if self.command_history.execute_command(command):
-             # Mark turn as done AFTER successful command execution
+             # Command handles position/index update and win check
              self.actions_taken_this_turn = MAX_PLAYER_ACTIONS
+             if self.game_phase != GamePhase.GAME_OVER:
+                  print("Auto-confirming driving turn...")
+                  self.confirm_turn()
              return True
         else:
              print("Driving Error: Move command execution failed.")
+             self.actions_taken_this_turn = MAX_PLAYER_ACTIONS
+             self.confirm_turn() # End turn even if command fails? Maybe.
              return False
 
     # === Pathfinding & Route Logic ===
-    # (find_path, get_terminal_coords, _get_entry_direction,
-    #  _is_valid_stop_entry, check_player_route_completion,
-    #  handle_route_completion)
-    # (Keep implementations as refined previously)
-    def find_path(self, start_row: int, start_col: int, end_row: int, end_col: int) -> Optional[List[Tuple[int, int]]]:
-        """Finds a path using BFS and returns the list of coordinates, or None."""
+    def find_path(self, start_row: int, start_col: int,
+                  end_row: int, end_col: int,
+                  avoid_coords: Optional[Set[Tuple[int, int]]] = None
+                  ) -> Optional[List[Tuple[int, int]]]:
+        """
+        Finds a path using BFS between two points, optionally avoiding
+        a given set of coordinates. Returns the path as a list of
+        (row, col) tuples, or None if no path exists.
+        """
+        start_coord = (start_row, start_col)
+        end_coord = (end_row, end_col)
+        coords_to_avoid = avoid_coords if avoid_coords is not None else set()
+
+        # --- Basic Input Validation ---
         if not self.board.is_valid_coordinate(start_row, start_col) or \
            not self.board.is_valid_coordinate(end_row, end_col):
-            return None
-        if (start_row, start_col) == (end_row, end_col):
-            return [(start_row, start_col)]
-        start_tile = self.board.get_tile(start_row, start_col)
-        if not start_tile:
+            # print(f"BFS Error: Invalid start/end {start_coord}->{end_coord}")
             return None
 
-        queue = deque([(start_row, start_col)])
-        # Store path predecessors: Key = coord, Value = predecessor_coord
-        predecessor: Dict[Tuple[int, int], Optional[Tuple[int, int]]] = {(start_row, start_col): None}
+        if start_coord == end_coord:
+            return [start_coord] # Path to self is just the node itself
+
+        # Check if starting tile exists
+        if not self.board.get_tile(start_row, start_col):
+            # print(f"BFS Error: No tile at start {start_coord}")
+            return None
+
+        # --- Initialize BFS ---
+        # Queue stores nodes to visit
+        queue = deque([start_coord])
+        # Predecessor dict stores {node: previous_node} to reconstruct path
+        predecessor: Dict[Tuple[int, int], Optional[Tuple[int, int]]] = \
+            {start_coord: None}
 
         path_found = False
+
+        # --- BFS Loop ---
         while queue:
             curr_row, curr_col = queue.popleft()
+            curr_coord = (curr_row, curr_col)
 
-            if (curr_row, curr_col) == (end_row, end_col):
+            # --- Goal Check ---
+            if curr_coord == end_coord:
                 path_found = True
-                break # Found the end
+                break # Exit loop once destination is dequeued
 
+            # --- Get Current Tile Info ---
             current_tile = self.board.get_tile(curr_row, curr_col)
+            # Should not happen if only valid tiles are added, but safety check
             if not current_tile: continue
 
-            current_connections = self.get_effective_connections(current_tile.tile_type, current_tile.orientation)
-            current_exit_dirs_str = {exit_dir for exits in current_connections.values() for exit_dir in exits}
+            current_connections = self.get_effective_connections(
+                current_tile.tile_type, current_tile.orientation
+            )
+            # Get all directions current tile has an exit towards
+            current_exit_dirs_str = {
+                exit_dir for exits in current_connections.values()
+                for exit_dir in exits
+            }
 
-            # Shuffle neighbors for potentially less predictable paths if multiple exist
+            # --- Explore Neighbors ---
+            # Consider shuffling directions for less predictable paths?
             directions_to_check = list(Direction)
-            random.shuffle(directions_to_check)
+            # random.shuffle(directions_to_check)
 
             for direction in directions_to_check:
                 dir_str = direction.name
@@ -467,35 +565,55 @@ class Game:
 
                 dr, dc = direction.value
                 nr, nc = curr_row + dr, curr_col + dc
-
                 neighbor_coord = (nr, nc)
 
+                # --- Neighbor Validation Checks ---
+                # 1. Is neighbor valid on board?
                 if not self.board.is_valid_coordinate(nr, nc): continue
-                if neighbor_coord in predecessor: continue # Already visited/queued
-
+                # 2. Already visited / added to queue?
+                if neighbor_coord in predecessor: continue
+                # 3. Is neighbor in the avoid set? (But allow start node)
+                if neighbor_coord != start_coord and \
+                   neighbor_coord in coords_to_avoid:
+                    continue
+                # 4. Does neighbor have a tile?
                 neighbor_tile = self.board.get_tile(nr, nc)
                 if not neighbor_tile: continue
 
-                # Two-way check
-                current_connects_towards_neighbor = dir_str in current_exit_dirs_str
-                neighbor_connections = self.get_effective_connections(neighbor_tile.tile_type, neighbor_tile.orientation)
-                neighbor_exit_dirs_str = {exit_dir for exits in neighbor_connections.values() for exit_dir in exits}
-                neighbor_connects_back_to_current = opposite_dir_str in neighbor_exit_dirs_str
+                # --- 5. Two-Way Connection Check ---
+                # Does current tile connect towards neighbor?
+                current_connects_out = dir_str in current_exit_dirs_str
+                # Does neighbor tile connect back towards current?
+                neighbor_connections = self.get_effective_connections(
+                    neighbor_tile.tile_type, neighbor_tile.orientation
+                )
+                neighbor_connects_back = opposite_dir_str in {
+                    exit_dir for exits in neighbor_connections.values()
+                    for exit_dir in exits
+                }
 
-                if current_connects_towards_neighbor and neighbor_connects_back_to_current:
-                    predecessor[neighbor_coord] = (curr_row, curr_col)
+                # --- Add Valid Neighbor to Queue ---
+                if current_connects_out and neighbor_connects_back:
+                    predecessor[neighbor_coord] = curr_coord
                     queue.append(neighbor_coord)
 
-        # Reconstruct path if found
+        # --- Path Reconstruction ---
         if path_found:
             path: List[Tuple[int, int]] = []
-            curr = (end_row, end_col)
-            while curr is not None:
-                path.append(curr)
-                curr = predecessor[curr]
-            return path[::-1] # Reverse to get start -> end
+            step = end_coord
+            while step is not None:
+                path.append(step)
+                # Check if key exists before accessing
+                if step in predecessor:
+                     step = predecessor[step]
+                else:
+                     # Should not happen if path_found is True
+                     print("Error: Path reconstruction failed!")
+                     return None # Or raise error
+            return path[::-1] # Reverse to get start -> end order
         else:
-            return None
+            # print(f"BFS Info: No path found {start_coord} -> {end_coord}")
+            return None # No path exists
 
     def get_terminal_coords(self, line_number: int
             ) -> Tuple[Optional[Tuple[int, int]], Optional[Tuple[int, int]]]:
@@ -660,18 +778,24 @@ class Game:
         """Rolls the special Linie 1 die."""
         return random.choice(DIE_FACES)
 
-    def trace_track_steps(self, player: Player, num_steps: int) -> Optional[Tuple[int, int]]:
+    def trace_track_steps(self, player: Player, num_steps: int,
+                           avoid_coords: Optional[Set[Tuple[int, int]]] = None # <-- ADD PARAM HERE
+                           ) -> Optional[Tuple[int, int]]:
         """Calculates destination by finding path to next node, then tracing steps."""
         if player.streetcar_position is None: return None
         target_node = player.get_next_target_node(self)
         if not target_node: return player.streetcar_position # Already past last node
 
         # Find the current best path segment to the next target node
-        path_segment = self.find_path(player.streetcar_position[0], player.streetcar_position[1],
-                                      target_node[0], target_node[1])
+        path_segment = self.find_path(
+            player.streetcar_position[0], player.streetcar_position[1],
+            target_node[0], target_node[1],
+            avoid_coords=avoid_coords # Pass avoid set down to find_path
+        )
 
         if not path_segment or len(path_segment) <= 1:
-             print(f"Warning: Cannot find path segment from {player.streetcar_position} to {target_node}")
+             print(f"Warning: Cannot find path segment from "
+                   f"{player.streetcar_position} to {target_node}")
              return player.streetcar_position # Stay put if no path
 
         # Trace steps along this *segment*
@@ -680,18 +804,24 @@ class Game:
         return path_segment[target_index_on_segment]
 
 
-    def find_next_feature_on_path(self, player: Player) -> Optional[Tuple[int, int]]:
+    def find_next_feature_on_path(self, player: Player,
+                                  avoid_coords: Optional[Set[Tuple[int, int]]] = None # <-- ADD PARAM HERE
+                                  ) -> Optional[Tuple[int, int]]:
         """Finds path to next node, then finds first feature on THAT path segment."""
         if player.streetcar_position is None: return None
         target_node = player.get_next_target_node(self)
         if not target_node: return player.streetcar_position # Already past last node
 
         # Find the current best path segment to the next target node
-        path_segment = self.find_path(player.streetcar_position[0], player.streetcar_position[1],
-                                      target_node[0], target_node[1])
+        path_segment = self.find_path(
+            player.streetcar_position[0], player.streetcar_position[1],
+            target_node[0], target_node[1],
+            avoid_coords=avoid_coords # Pass avoid set down to find_path
+        )
 
         if not path_segment or len(path_segment) <= 1:
-             print(f"Warning: Cannot find path segment from {player.streetcar_position} to {target_node} for 'H' roll.")
+             print(f"Warning: Cannot find path segment from "
+                   f"{player.streetcar_position} to {target_node} for 'H' roll.")
              return player.streetcar_position # Stay put if no path
 
         # Iterate along the found path segment (starting from step 1)
@@ -700,7 +830,9 @@ class Game:
 
             # Check if it's the target node (which might be the end terminal)
             if coord == target_node:
-                 return coord # Reached the next required node
+                 # If the target node IS the feature (e.g. H roll to end) return it
+                 # Also covers case where segment is only start -> end
+                 return coord
 
             # Check if it's a stop sign location
             tile = self.board.get_tile(coord[0], coord[1])
@@ -708,11 +840,13 @@ class Game:
                  return coord # Found the next stop sign along segment
 
             # Check if it's *any* terminal location
-            for term_coords_pair in TERMINAL_COORDS.values():
-                 if coord in term_coords_pair:
-                      return coord # Found any terminal along segment
+            # Use get_terminal_coords for efficiency? No, need to check all lines.
+            for term_line, term_coords_pair in TERMINAL_COORDS.items():
+                 if coord == term_coords_pair[0] or coord == term_coords_pair[1]:
+                      # Found ANY terminal entrance tile coordinate
+                      return coord # Stop at any terminal
 
-        # Should only reach here if the target_node itself is the only feature
+        # If loop finishes, the target_node itself must be the next feature
         return target_node
 
 
@@ -739,29 +873,18 @@ class Game:
          return None
 
 
+    # --- Update move_streetcar to ONLY update position ---
     def move_streetcar(self, player: Player, target_coord: Tuple[int, int]):
-        """Moves streetcar and increments target index if next required node coord is reached."""
-        if player.streetcar_position is None:
-            print(f"Warning: Player {player.player_id} has no streetcar position to move from.")
-            return # Cannot move if no current position
+        """ONLY updates the player's streetcar position attribute."""
+        # Basic check
+        if not isinstance(target_coord, tuple) or len(target_coord) != 2:
+             print(f"Error: Invalid target_coord {target_coord} for move_streetcar.")
+             return
 
-        previous_pos = player.streetcar_position # Store for logging if needed
+        # Update position - visualizer reads this for drawing
         player.streetcar_position = target_coord
-        # Optionally log previous position:
-        # print(f"Player {player.player_id} moved from {previous_pos} to {target_coord}")
-        print(f"Player {player.player_id} moved to {target_coord}")
-
-
-        # --- Check if the target IS the coordinate of the *next required* node ---
-        # Use the player object passed into the method
-        next_required_node_coord = player.get_next_target_node(self)
-
-        # Check if there is a next node AND the player landed on it
-        if next_required_node_coord and target_coord == next_required_node_coord:
-            # --- CORRECTED: Use player.required_node_index ---
-            print(f"--> Reached required node {player.required_node_index + 1} at {target_coord}. Advancing target.")
-            player.required_node_index += 1
-        # else: Landed somewhere else, or already past the last required node. Index doesn't change.
+        # Log moved here, NOT in the command execute, to track visual state change
+        # print(f"Player {player.player_id} position updated to {target_coord}")
 
     def check_win_condition(self, player: Player) -> bool:
         """Checks if player is at EITHER destination terminal tile AND all nodes visited."""
@@ -879,17 +1002,17 @@ class Game:
 
         if self.game_phase == GamePhase.GAME_OVER: return False
 
-        # Validation: Ensure enough actions taken for laying track
+        # Validation (Laying Track requires MAX actions)
         if active_player.player_state == PlayerState.LAYING_TRACK:
             if self.actions_taken_this_turn < MAX_PLAYER_ACTIONS:
-                 # Allow ending early? For now, require MAX actions.
                  print(f"Confirm Error: Need {MAX_PLAYER_ACTIONS} actions.")
                  return False
+        # Driving automatically meets action requirement conceptually
         elif active_player.player_state == PlayerState.DRIVING:
-             # Driving turn is implicitly confirmed after the move command executes
+             # Check if move was actually completed via action count
              if self.actions_taken_this_turn < MAX_PLAYER_ACTIONS:
-                  print("Confirm Error: Driving move not completed yet.")
-                  return False # Should not happen if logic is correct
+                  print("Confirm Error: Driving move not yet completed.")
+                  return False # Should not be called before move finishes
 
         print(f"Player {active_player.player_id} confirmed turn.")
 

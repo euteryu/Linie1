@@ -184,52 +184,74 @@ class ExchangeTileCommand(Command):
 
 # --- Driving Commands (Simpler Undo) ---
 class MoveCommand(Command):
-    def __init__(self, game: 'Game', player: Player, target_coord: Tuple[int, int]):
+    def __init__(self, game: 'Game', player: Player,
+                 target_coord: Tuple[int, int]):
         super().__init__(game)
         self.player = player
         self.target_coord = target_coord
         # Store state for undo
         self._original_pos: Optional[Tuple[int, int]] = None
         self._original_node_index: int = 0
+        # Store whether index was advanced during execute for precise undo
+        self._advanced_index_on_execute = False
 
     def execute(self) -> bool:
-        print(f"Executing Move: P{self.player.player_id} moves to {self.target_coord}")
+        print(f"Executing Move: P{self.player.player_id} target {self.target_coord}")
         if self.player.streetcar_position is None:
             print("--> Move Failed: Player has no current position.")
-            return False # Cannot move if not placed
+            return False
 
-        # Store pre-move state
+        # --- Store pre-move state for Undo ---
         self._original_pos = self.player.streetcar_position
         self._original_node_index = self.player.required_node_index
+        self._advanced_index_on_execute = False # Reset flag
 
-        # Perform the move logic (simplified, actual move happens before command)
-        # self.game.move_streetcar(self.player, self.target_coord) # move_streetcar called *before* command now
-        # We just need to potentially update the node index based on the move that *already happened*
+        # --- Perform the actual position update ---
+        # Call the simple Game method to update the player attribute
+        self.game.move_streetcar(self.player, self.target_coord)
+
+        # --- Check if the NEW position reached the next required node ---
         next_required_node = self.player.get_next_target_node(self.game)
         if next_required_node and self.target_coord == next_required_node:
-             print(f"   (Reached required node {self.player.required_node_index + 1})")
-             self.player.required_node_index += 1 # Increment happens here
+             print(f"   (Reached required node "
+                   f"{self.player.required_node_index + 1})")
+             self.player.required_node_index += 1
+             self._advanced_index_on_execute = True # Mark index change
 
-        # Check win AFTER moving and potentially updating index
+        # --- Check Win Condition AFTER position and index are updated ---
+        # Note: check_win_condition itself sets game phase/winner if true
         win = self.game.check_win_condition(self.player)
-        print(f"--> Move SUCCESS. Win check: {win}")
-        return True # Assume move itself was valid if command created
+
+        print(f"--> Move Execute SUCCESS. Landed at {self.target_coord}. Win: {win}")
+        return True # Command execution was successful
 
     def undo(self) -> bool:
-        print(f"Undoing Move: P{self.player.player_id} moves back from {self.target_coord}")
+        print(f"Undoing Move: P{self.player.player_id} back to {self._original_pos}")
         if self._original_pos is None:
             print("--> Undo Move Failed: No original position saved.")
             return False
 
-        # Check if game ended, cannot undo past game end? Or allow review? For now, allow.
-        if self.game.game_phase == GamePhase.GAME_OVER and self.game.winner == self.player:
+        # Check if game ended, revert if undoing winning move
+        if self.game.game_phase == GamePhase.GAME_OVER and \
+           self.game.winner == self.player:
              print("   (Undoing winning move, resetting game phase)")
-             self.game.game_phase = GamePhase.DRIVING # Revert game phase
+             self.game.game_phase = GamePhase.DRIVING
              self.game.winner = None
+             self.player.player_state = PlayerState.DRIVING # Ensure state is correct
 
-        # Restore position and node index
-        self.player.streetcar_position = self._original_pos
+        # --- Restore position and node index ---
+        # Use simple Game method to update position
+        self.game.move_streetcar(self.player, self._original_pos)
+        # Only revert index if it was advanced during execute
+        # This prevents decrementing index multiple times if undoing non-advancing moves
+        # However, the current system resets action count on undo, allowing re-roll,
+        # so restoring the exact original index is correct.
         self.player.required_node_index = self._original_node_index
 
-        print(f"--> Undo Move SUCCESS. Pos: {self.player.streetcar_position}, Idx: {self.player.required_node_index}")
+        print(f"--> Undo Move SUCCESS. Pos: {self.player.streetcar_position}, "
+              f"Idx: {self.player.required_node_index}")
         return True
+
+    def get_description(self) -> str:
+         return (f"Move P{self.player.player_id} to "
+                 f"{self.target_coord}")

@@ -1,0 +1,75 @@
+# 27/04/25 05:39
+1. Create from scratch to check movement bug from loading prev .json 
+   likely due to missing start_coord saving.
+2. Test with more players - menu to integrate at game start
+3. Menu ESC key?
+
+# SACRED
+# Note: Pygame arc angles go counter-clockwise
+    if tile_name == "Straight": # N-S
+        pygame.draw.line(surf, track_color, ptN, ptS, line_width)
+    elif tile_name == "Curve": # N-E
+        pygame.draw.arc(surf, track_color, rect_TR, angle_N, angle_E,
+                        line_width)
+    elif tile_name == "StraightLeftCurve": # N-S, S-W
+        pygame.draw.line(surf, track_color, ptN, ptS, line_width)
+        pygame.draw.arc(surf, track_color, rect_BL, angle_S, angle_W,
+                        line_width)
+    elif tile_name == "StraightRightCurve": # N-S, S-E
+        pygame.draw.line(surf, track_color, ptN, ptS, line_width)
+        pygame.draw.arc(surf, track_color, rect_BR, angle_E, angle_S,
+                        line_width)
+    elif tile_name == "DoubleCurveY": # N-W, N-E ("Y" shape from North)
+        pygame.draw.arc(surf, track_color, rect_TL, angle_W, angle_N,
+                        line_width)
+        pygame.draw.arc(surf, track_color, rect_TR, angle_N, angle_E,
+                        line_width)
+    elif tile_name == "DiagonalCurve": # S-W, N-E (Diagonal slash)
+        pygame.draw.arc(surf, track_color, rect_BL, angle_S, angle_W,
+                        line_width)
+        pygame.draw.arc(surf, track_color, rect_TR, angle_N, angle_E,
+                        line_width)
+    elif tile_name == "Tree_JunctionTop": # E-W, W-N, N-E (T-junction open South)
+        pygame.draw.line(surf, track_color, ptW, ptE, line_width)
+        pygame.draw.arc(surf, track_color, rect_TL, angle_W, angle_N,
+                        line_width)
+        pygame.draw.arc(surf, track_color, rect_TR, angle_N, angle_E,
+                        line_width)
+    elif tile_name == "Tree_JunctionRight": # E-W, N-E, S-E (T-junction open West)
+        pygame.draw.line(surf, track_color, ptW, ptE, line_width)
+        pygame.draw.arc(surf, track_color, rect_TR, angle_N, angle_E,
+                        line_width)
+        pygame.draw.arc(surf, track_color, rect_BR, angle_E, angle_S,
+                        line_width)
+    elif tile_name == "Tree_Roundabout": # W-N, N-E, E-S, S-W (All curves)
+        pygame.draw.arc(surf, track_color, rect_TL, angle_W, angle_N,
+                        line_width)
+        pygame.draw.arc(surf, track_color, rect_TR, angle_N, angle_E,
+                        line_width)
+        pygame.draw.arc(surf, track_color, rect_BR, angle_E, angle_S,
+                        line_width)
+        pygame.draw.arc(surf, track_color, rect_BL, angle_S, angle_W,
+                        line_width)
+    elif tile_name == "Tree_Crossroad": # N-S, E-W (+)
+        pygame.draw.line(surf, track_color, ptN, ptS, line_width)
+        pygame.draw.line(surf, track_color, ptW, ptE, line_width)
+    elif tile_name == "Tree_StraightDiagonal1": # N-S, S-W, N-E
+        pygame.draw.line(surf, track_color, ptN, ptS, line_width)
+        pygame.draw.arc(surf, track_color, rect_BL, angle_S, angle_W,
+                        line_width)
+        pygame.draw.arc(surf, track_color, rect_TR, angle_N, angle_E,
+                        line_width)
+    elif tile_name == "Tree_StraightDiagonal2": # N-S, N-W, S-E
+        pygame.draw.line(surf, track_color, ptN, ptS, line_width)
+        pygame.draw.arc(surf, track_color, rect_TL, angle_W, angle_N,
+                        line_width)
+        pygame.draw.arc(surf, track_color, rect_BR, angle_E, angle_S,
+                        line_width)
+    else:
+        # Draw a placeholder for unknown types
+        print(f"Warning: Unknown tile type to draw: {tile_name}")
+        pygame.draw.rect(surf, C.COLOR_GRID, surf.get_rect(), 1)
+        pygame.draw.line(surf, C.COLOR_STOP, (0, 0), (size, size), 1)
+        pygame.draw.line(surf, C.COLOR_STOP, (0, size), (size, 0), 1)
+
+    return surf

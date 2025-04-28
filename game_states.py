@@ -157,26 +157,25 @@ class LayingTrackState(GameState):
             if player and 0 <= self.selected_tile_index < len(player.hand): return player.hand[self.selected_tile_index]
         return None
 
-
     def handle_event(self, event):
-        # --- Handle Common Buttons (Save/Load/Undo/Redo/Debug) ---
-        if self._handle_common_clicks(event):
-             return # Event handled
+        # --- Handle Common Buttons ---
+        if self._handle_common_clicks(event): return
 
         # --- State-Specific Handling ---
-        try:
-            active_player: Player = self.game.get_active_player()
-        except IndexError: return # Exit if no valid player
-
-        # Ignore input if not this player's state anymore
+        try: active_player: Player = self.game.get_active_player()
+        except IndexError: return
         if active_player.player_state != PlayerState.LAYING_TRACK: return
 
         # --- Mouse Input ---
         if event.type == pygame.MOUSEBUTTONDOWN:
+            # Add print to see if MOUSE events are overriding KEY events somehow
+            # print(f"LayingTrackState MouseDown: {event.button}")
             self._handle_mouse_down(event, active_player)
 
         # --- Keyboard Input ---
         elif event.type == pygame.KEYDOWN:
+            # --- DEBUG PRINT ---
+            print(f"LayingTrackState KeyDown: Key={event.key}, Name={pygame.key.name(event.key)}")
             self._handle_key_down(event, active_player)
 
     def _handle_mouse_down(self, event, active_player):
@@ -225,20 +224,24 @@ class LayingTrackState(GameState):
 
 
     def _handle_key_down(self, event, active_player):
-        # ... (handle rotate 'R') ...
-        # Handle Ctrl+Z/Y even if common handler misses it
+        """ Handles key down events for LayingTrackState. """
+        # --- DEBUG PRINT ---
+        # print(f"  _handle_key_down received: {pygame.key.name(event.key)}")
+
+        if event.key == pygame.K_r: # Rotate
+            # print("  'R' key detected, calling _rotate_selection...") # DEBUG
+            self._rotate_selection()
+            # return # Optional: Consume event if needed
+
+        # ... (handle Enter, Ctrl+Z/Y) ...
         mods = pygame.key.get_mods()
         if event.key == pygame.K_z and (mods & pygame.KMOD_CTRL):
              self.undo_action()
-             return # Consume event
         elif event.key == pygame.K_y and (mods & pygame.KMOD_CTRL):
              self.redo_action()
-             return # Consume event
         elif event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
-             # Check button click as well or just keyboard? Assume keyboard for now.
              if not self.visualizer.debug_mode:
                   self._confirm_turn_action()
-             return # Consume event
 
 
     def _rotate_selection(self):
@@ -248,6 +251,9 @@ class LayingTrackState(GameState):
         msg = f"Orientation: {self.current_orientation}°"
         if selected_type: msg += f" for {selected_type.name}"
         self.message = msg
+
+        # --- DEBUG PRINT ---
+        print(f"  Rotated preview to {self.current_orientation}. Message: '{self.message}'")
 
     def _attempt_board_action(self, player, row, col):
         """ Attempts Place or Exchange based on target and mode. """
@@ -375,31 +381,14 @@ class DrivingState(GameState):
 
     def handle_event(self, event):
         # --- Handle Common Buttons (Save/Load/Undo/Redo/Debug) ---
-        if self._handle_common_clicks(event): return
+        if self._handle_common_clicks(event): return # Handles save/load/debug
 
-        # --- State-Specific Handling ---
-        try:
-            active_player: Player = self.game.get_active_player()
-        except IndexError: return # Exit if no valid player
+        active_player = self.game.get_active_player()
+        # This state only active for DRIVING players
         if active_player.player_state != PlayerState.DRIVING: return
+        # Prevent actions if turn already marked as complete (safety)
+        if self.game.actions_taken_this_turn >= C.MAX_PLAYER_ACTIONS: return
 
-        # --- Check if turn already effectively ended (e.g., by move) ---
-        # Driving turn completes after one move action.
-        # Prevent further actions if already moved.
-        if self.game.actions_taken_this_turn >= C.MAX_PLAYER_ACTIONS:
-             # Allow undo/redo even after move? Yes via common clicks.
-             # But prevent new move triggers.
-             if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-                  self.message = "Move already completed this turn."
-             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                  # Check if click was on debug die - prevent re-roll
-                  for rect in self.visualizer.debug_die_rects.values():
-                       if rect.collidepoint(event.pos):
-                            self.message = "Move already completed this turn."
-                            break
-             return
-
-        # --- Handle Input for Rolling/Moving ---
         roll_result: Optional[Any] = None
         action_triggered = False
 

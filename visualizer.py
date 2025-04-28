@@ -74,25 +74,25 @@ def create_tile_surface(tile_type: TileType, size: int) -> pygame.Surface:
                         line_width)
     elif tile_name == "StraightLeftCurve": # N-S, S-W
         pygame.draw.line(surf, track_color, ptN, ptS, line_width)
-        pygame.draw.arc(surf, track_color, rect_BL, angle_W, angle_S,
+        pygame.draw.arc(surf, track_color, rect_BL, angle_S, angle_W,
                         line_width)
     elif tile_name == "StraightRightCurve": # N-S, S-E
         pygame.draw.line(surf, track_color, ptN, ptS, line_width)
-        pygame.draw.arc(surf, track_color, rect_BR, angle_S, angle_E,
+        pygame.draw.arc(surf, track_color, rect_BR, angle_E, angle_S,
                         line_width)
     elif tile_name == "DoubleCurveY": # N-W, N-E ("Y" shape from North)
-        pygame.draw.arc(surf, track_color, rect_TL, angle_N, angle_W,
+        pygame.draw.arc(surf, track_color, rect_TL, angle_W, angle_N,
                         line_width)
         pygame.draw.arc(surf, track_color, rect_TR, angle_N, angle_E,
                         line_width)
     elif tile_name == "DiagonalCurve": # S-W, N-E (Diagonal slash)
-        pygame.draw.arc(surf, track_color, rect_BL, angle_W, angle_S,
+        pygame.draw.arc(surf, track_color, rect_BL, angle_S, angle_W,
                         line_width)
         pygame.draw.arc(surf, track_color, rect_TR, angle_N, angle_E,
                         line_width)
     elif tile_name == "Tree_JunctionTop": # E-W, W-N, N-E (T-junction open South)
         pygame.draw.line(surf, track_color, ptW, ptE, line_width)
-        pygame.draw.arc(surf, track_color, rect_TL, angle_N, angle_W,
+        pygame.draw.arc(surf, track_color, rect_TL, angle_W, angle_N,
                         line_width)
         pygame.draw.arc(surf, track_color, rect_TR, angle_N, angle_E,
                         line_width)
@@ -100,31 +100,31 @@ def create_tile_surface(tile_type: TileType, size: int) -> pygame.Surface:
         pygame.draw.line(surf, track_color, ptW, ptE, line_width)
         pygame.draw.arc(surf, track_color, rect_TR, angle_N, angle_E,
                         line_width)
-        pygame.draw.arc(surf, track_color, rect_BR, angle_S, angle_E,
+        pygame.draw.arc(surf, track_color, rect_BR, angle_E, angle_S,
                         line_width)
     elif tile_name == "Tree_Roundabout": # W-N, N-E, E-S, S-W (All curves)
-        pygame.draw.arc(surf, track_color, rect_TL, angle_N, angle_W,
+        pygame.draw.arc(surf, track_color, rect_TL, angle_W, angle_N,
                         line_width)
         pygame.draw.arc(surf, track_color, rect_TR, angle_N, angle_E,
                         line_width)
-        pygame.draw.arc(surf, track_color, rect_BR, angle_S, angle_E,
+        pygame.draw.arc(surf, track_color, rect_BR, angle_E, angle_S,
                         line_width)
-        pygame.draw.arc(surf, track_color, rect_BL, angle_W, angle_S,
+        pygame.draw.arc(surf, track_color, rect_BL, angle_S, angle_W,
                         line_width)
     elif tile_name == "Tree_Crossroad": # N-S, E-W (+)
         pygame.draw.line(surf, track_color, ptN, ptS, line_width)
         pygame.draw.line(surf, track_color, ptW, ptE, line_width)
     elif tile_name == "Tree_StraightDiagonal1": # N-S, S-W, N-E
         pygame.draw.line(surf, track_color, ptN, ptS, line_width)
-        pygame.draw.arc(surf, track_color, rect_BL, angle_W, angle_S,
+        pygame.draw.arc(surf, track_color, rect_BL, angle_S, angle_W,
                         line_width)
         pygame.draw.arc(surf, track_color, rect_TR, angle_N, angle_E,
                         line_width)
     elif tile_name == "Tree_StraightDiagonal2": # N-S, N-W, S-E
         pygame.draw.line(surf, track_color, ptN, ptS, line_width)
-        pygame.draw.arc(surf, track_color, rect_TL, angle_N, angle_W,
+        pygame.draw.arc(surf, track_color, rect_TL, angle_W, angle_N,
                         line_width)
-        pygame.draw.arc(surf, track_color, rect_BR, angle_S, angle_E,
+        pygame.draw.arc(surf, track_color, rect_BR, angle_E, angle_S,
                         line_width)
     else:
         # Draw a placeholder for unknown types
