@@ -14,7 +14,7 @@ class Player:
         self.streetcar_position: Optional[Tuple[int, int]] = None
         # Renamed for clarity: index into the sequence of required stops/terminals
         self.required_node_index: int = 0
-        self.start_terminal_coord: Optional[Tuple[int, int]] = None # Store which terminal they started from
+        self.start_terminal_coord: Optional[Tuple[int, int]] = None
         self.arrival_direction: Optional[Direction] = None # Direction used to ENTER current streetcar_position
 
     def __repr__(self) -> str:
@@ -71,38 +71,55 @@ class Player:
         player.arrival_direction = None # Safer to reset on load
         return player
 
-    def get_required_nodes_sequence(self, game: 'Game') -> Optional[List[Tuple[int, int]]]:
-        """Gets the sequence of coordinates the player needs to visit."""
-        # print(f"Debug P{self.player_id}: Getting required nodes sequence...") # Debug
-        if not self.line_card or not self.route_card: return None
-        term1, term2 = game.get_terminal_coords(self.line_card.line_number)
-        if not term1 or not term2: return None
+    def get_required_nodes_sequence(self, game: 'Game', is_driving_check: bool = False) -> Optional[List[Tuple[int, int]]]:
+        """
+        Gets the sequence of coordinates the player needs to visit.
+        is_driving_check: If True, requires start_terminal_coord to be set.
+                          If False (default), assumes nominal sequence for checking.
+        """
+        if not self.line_card or not self.route_card: 
+            return None
+
+        term1_coord, term2_coord = game.get_terminal_coords(self.line_card.line_number)
+        if not term1_coord or not term2_coord:
+            print(f"Error P{self.player_id}: Cannot get terminal coords for Line {self.line_card.line_number}")
+            return None
 
         stop_coords = []
         # print(f"Debug P{self.player_id}: Required stops IDs: {self.route_card.stops}") # Debug
         for stop_id in self.route_card.stops:
             coord = game.board.building_stop_locations.get(stop_id)
             if coord is None:
-                 # print(f"Debug P{self.player_id}: Stop {stop_id} location not found.") # Debug
-                 return None # Required stop not placed yet
+                # print(f"Debug P{self.player_id}: Stop {stop_id} location not found.") # Debug
+                return None # Required stop not placed yet
             stop_coords.append(coord)
         # print(f"Debug P{self.player_id}: Found stop coords: {stop_coords}") # Debug
 
-        # --- Determine Start/End ---
-        # Use the stored start terminal if available (implementing your suggestion)
-        start_node = getattr(self, 'start_terminal_coord', None) # Check if attribute exists
-        end_node = None
-        if start_node == term1: end_node = term2
-        elif start_node == term2: end_node = term1
-        else:
-            # Fallback if start_terminal_coord wasn't set (e.g., loading old save)
-            # Default to term1 as start - this might be wrong!
-            print(f"Warning P{self.player_id}: start_terminal_coord not set. Defaulting sequence start.")
-            start_node = term1
-            end_node = term2
+        start_node: Optional[Tuple[int, int]] = None
+        end_node: Optional[Tuple[int, int]] = None
+
+        # If driving, the stored start terminal dictates the sequence
+        # Use the is_driving_check flag passed in (or its default)
+        if is_driving_check:
+            if self.start_terminal_coord:
+                start_node = self.start_terminal_coord
+                end_node = term2_coord if start_node == term1_coord else term1_coord
+            else:
+                 # This is an error state if we expected driving check but start isn't set
+                 print(f"ERROR P{self.player_id}: Driving check requested but start_terminal_coord not set!")
+                 return None
+        else: # Not a driving check (is_driving_check is False - the default)
+             # Assume nominal sequence (term1 -> term2) for pre-drive completion check
+             start_node = term1_coord
+             end_node = term2_coord
+
+
+        if start_node is None or end_node is None:
+             # This path indicates an error in logic above
+             print(f"ERROR P{self.player_id}: Failed to determine start/end nodes even with default.")
+             return None
 
         sequence = [start_node] + stop_coords + [end_node]
-        # print(f"Debug P{self.player_id}: Final sequence: {sequence}") # Debug
         return sequence
 
     def get_next_target_node(self, game: 'Game') -> Optional[Tuple[int, int]]:

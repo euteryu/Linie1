@@ -381,80 +381,100 @@ class DrivingState(GameState):
         self.current_move_path: Optional[List[Tuple[int, int]]] = None # Store path taken this move
 
     def handle_event(self, event):
-        # --- Handle Common Buttons (Save/Load/Undo/Redo/Debug) ---
-        if self._handle_common_clicks(event): return # Handles save/load/debug
+        # --- Handle Save/Load/Debug Toggle first ---
+        if self._handle_common_clicks(event): return
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+             if self.visualizer.debug_toggle_button_rect.collidepoint(event.pos):
+                 self.visualizer.debug_mode = not self.visualizer.debug_mode
+                 self.message = f"Debug Mode {'ON' if self.visualizer.debug_mode else 'OFF'}"
+                 return
 
         active_player = self.game.get_active_player()
-        # This state only active for DRIVING players
         if active_player.player_state != PlayerState.DRIVING: return
-        # Prevent actions if turn already marked as complete (safety)
-        if self.game.actions_taken_this_turn >= C.MAX_PLAYER_ACTIONS: return
 
         roll_result: Optional[Any] = None
-        action_triggered = False
+        action_triggered = False # Reset per event check
 
-        # Debug Die Click
-        if self.visualizer.debug_mode and \
-           event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            mouse_pos = event.pos
+        # --- Check for Debug Die Click ---
+        if self.visualizer.debug_mode and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mouse_pos = event.pos; clicked_face = None
             for face, rect in self.visualizer.debug_die_rects.items():
                 if rect.collidepoint(mouse_pos):
-                    roll_result = face
-                    self.message = f"DEBUG: Set roll to {roll_result}"
-                    action_triggered = True
-                    break
+                    # --- DEBUG PRINT ---
+                    print(f"*** DBG: Debug die click detected! Face: {face}, Rect: {rect}")
+                    clicked_face = face; break
+            if clicked_face is not None:
+                roll_result = clicked_face
+                self.message = f"DEBUG: Set roll to {roll_result}"
+                action_triggered = True
 
-        # Normal Roll Trigger (Space)
-        elif not self.visualizer.debug_mode and \
-             event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-            roll_result = self.game.roll_special_die()
-            self.message = f"Rolled {roll_result}"
-            action_triggered = True
 
-        # # Handle Undo/Redo Keys for Driving
-        # mods = pygame.key.get_mods()
-        # if event.type == pygame.KEYDOWN:
-        #      if event.key == pygame.K_z and (mods & pygame.KMOD_CTRL):
-        #          self.undo_action()
-        #          return
-        #      elif event.key == pygame.K_y and (mods & pygame.KMOD_CTRL):
-        #          self.redo_action()
-        #          return
-        #      # ... (handle SPACE for normal roll) ...
+        # --- Check for Normal Roll Trigger (Space key) ---
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+            if not self.visualizer.debug_mode:
+                # --- DEBUG PRINT ---
+                print("*** DBG: Space pressed for normal roll.")
+                roll_result = self.game.roll_special_die()
+                self.message = f"Rolled {roll_result}"
+                action_triggered = True
+            else:
+                self.message = "DEBUG: Press die face or disable debug."
 
-        # --- Execute Move if Action Triggered ---
-        if action_triggered and roll_result is not None:
-            self.last_roll = roll_result
-            self.current_move_path = None # Clear previous path highlight
 
-            target_coord: Optional[Tuple[int, int]] = None
-            calculated_segment: Optional[List[Tuple[int,int]]] = None
+        # --- If an action was triggered, execute the move ---
+        if action_triggered:
+            # --- DEBUG PRINT ---
+            print(f"*** DBG: Action triggered. Roll result: {roll_result}")
+            if roll_result is not None:
+                self.last_roll = roll_result # Store for display
 
-            if roll_result == C.STOP_SYMBOL:
-                 # We need the path taken to the feature
-                 calculated_segment = self.game._find_path_segment_for_driving(active_player) # Find path first
-                 target_coord = self.game.find_next_feature_on_path(active_player) # Then find feature *on* that path
-                 if calculated_segment and target_coord:
-                     # Trim segment to only go up to the target feature
-                     try:
-                          target_idx = calculated_segment.index(target_coord)
-                          self.current_move_path = calculated_segment[:target_idx+1]
-                     except ValueError: pass # Target not in segment? Error.
-                 print(f"Target (H): {target_coord}")
-            elif isinstance(roll_result, int):
-                 # Trace steps already calculates the path segment implicitly now
-                 calculated_segment = self.game._find_path_segment_for_driving(active_player)
-                 target_coord = self.game.trace_track_steps(active_player, roll_result)
-                 if calculated_segment and target_coord:
-                     # Trim segment to only go up to the target
-                     try:
-                          target_idx = calculated_segment.index(target_coord)
-                          self.current_move_path = calculated_segment[:target_idx+1]
-                     except ValueError: pass # Target not in segment? Error.
-                 print(f"Target ({roll_result}): {target_coord}")
-            # ... (rest of move/check win/end turn) ...
-        # --- Clear path highlight when turn ends or state changes ---
-        # (Need to handle this appropriately, maybe in end_turn_sequence or visualizer state change)
+                # --- Determine Target ---
+                target_coord: Optional[Tuple[int, int]] = None
+                # --- DEBUG PRINT ---
+                print("*** DBG: Calculating target coordinate...")
+                if roll_result == C.STOP_SYMBOL:
+                     target_coord = self.game.find_next_feature_on_path(active_player)
+                     # --- DEBUG PRINT ---
+                     print(f"*** DBG: Target (H): {target_coord}")
+                elif isinstance(roll_result, int):
+                     target_coord = self.game.trace_track_steps(active_player, roll_result)
+                     # --- DEBUG PRINT ---
+                     print(f"*** DBG: Target ({roll_result}): {target_coord}")
+                else:
+                     print(f"Error: Invalid roll result type {roll_result}")
+                     self.message = "Error: Invalid roll type."; return # Exit if roll invalid
+
+                if target_coord:
+                     # --- DEBUG PRINT ---
+                     print(f"*** DBG: Moving streetcar to {target_coord}...")
+                     self.game.move_streetcar(active_player, target_coord) # Position updated here
+
+                     # --- Check Win Condition ---
+                     # --- DEBUG PRINT ---
+                     print("*** DBG: Checking win condition...")
+                     if self.game.check_win_condition(active_player):
+                         self.message = f"Player {active_player.player_id} WINS!"
+                         # --- DEBUG PRINT ---
+                         print(f"*** DBG: Win detected for P{active_player.player_id}. Turn should not advance.")
+                         # DO NOT CALL END TURN HERE
+                     else:
+                         # --- No Win: End Turn normally ---
+                         # --- DEBUG PRINT ---
+                         print(f"*** DBG: No win detected for P{active_player.player_id}. Ending turn...")
+                         self.game.actions_taken_this_turn = C.MAX_PLAYER_ACTIONS
+                         self.game.end_player_turn() # Proceeds to next player
+                         self.message = f"Moved to {target_coord}. Turn ended."
+                         # --- DEBUG PRINT ---
+                         print("*** DBG: end_player_turn called.")
+                else:
+                     self.message = "Error: Could not determine target coordinate."
+                     # --- DEBUG PRINT ---
+                     print("*** DBG: Error: Target coordinate calculation failed.")
+            else:
+                 self.message = "Error: Action triggered but no valid roll result."
+                 # --- DEBUG PRINT ---
+                 print("*** DBG: Error: Action triggered but roll_result was None.")
+        # else: No action triggered this frame (e.g., just mouse movement)
 
     # draw method is likely empty, but visualizer needs access to current_move_path
     def draw(self, screen):
