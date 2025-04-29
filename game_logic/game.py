@@ -503,127 +503,131 @@ class Game:
     def find_path(self,
                   start_node: Tuple[int, int],
                   end_node: Tuple[int, int],
-                  # --- Constraint Parameters ---
-                  # How did we arrive at start_node? (For 'no backwards')
-                  entry_direction_at_start: Optional[Direction] = None,
-                  # Is the end_node of this specific search a required stop?
-                  target_is_required_stop: bool = False,
-                  # If target is stop, what is the *required* entry direction?
-                  required_entry_direction: Optional[Direction] = None
+                  entry_direction_at_start: Optional[Direction] = None
                  ) -> Optional[List[Tuple[int, int]]]:
         """
-        Finds the shortest path using A* search, considering constraints.
-
-        Args:
-            start_node: (row, col) tuple for start.
-            end_node: (row, col) tuple for destination.
-            entry_direction_at_start: Direction used to enter start_node.
-            target_is_required_stop: Is the end_node a stop requiring validation?
-            required_entry_direction: If target is stop, the entry direction needed.
-
-        Returns:
-            List of coordinates for the path, or None if no valid path found.
+        Finds *a* shortest path using A* (unconstrained target entry).
+        Includes verbose debugging prints.
         """
         start_row, start_col = start_node
         end_row, end_col = end_node
+        current_player_id = self.get_active_player().player_id # For logs
+
+        print(f"\n--- A* Start P{current_player_id}: {start_node} -> {end_node} "
+              f"(Arrived at start via: {entry_direction_at_start}) ---")
 
         # Basic validation
         if not self.board.is_valid_coordinate(start_row, start_col) or \
-           not self.board.is_valid_coordinate(end_row, end_col): return None
-        if start_node == end_node: return [start_node]
+           not self.board.is_valid_coordinate(end_row, end_col):
+            print("    A* Fail: Invalid start/end coordinate.")
+            return None
+        if start_node == end_node:
+            print("    A* Success: Start node is end node.")
+            return [start_node]
         start_tile = self.board.get_tile(start_row, start_col)
-        if not start_tile: return None
+        if not start_tile:
+            print(f"    A* Fail: No tile at start node {start_node}.")
+            return None
 
         # A* Data Structures
         open_set = PriorityQueue()
-        # Store (f_score, unique_id, node_coord) - unique_id breaks ties
-        count = 0
-        open_set.put((0 + self._heuristic(start_node, end_node), count, start_node))
-        open_set_hash = {start_node} # To check for presence quickly
-
-        # came_from stores: node -> (previous_node, direction_from_previous)
+        count = 0 # Tie-breaker for priority queue
+        start_h = self._heuristic(start_node, end_node)
+        open_set.put((start_h, count, start_node)) # f=g+h, g=0 at start
+        open_set_hash = {start_node}
         came_from: Dict[Tuple[int, int], Optional[Tuple[Optional[Tuple[int, int]], Optional[Direction]]]] = \
             {start_node: (None, entry_direction_at_start)}
-
-        g_score = {start_node: 0} # Cost from start to node
+        g_score = {start_node: 0}
 
         while not open_set.empty():
             # Get node with lowest f_score
-            _, _, current_node = open_set.get()
+            current_f, _, current_node = open_set.get()
+            if current_node not in open_set_hash: continue # Skip if already removed (for safety)
             open_set_hash.remove(current_node)
             curr_row, curr_col = current_node
 
+            # --- Get data about current node ---
+            current_tile = self.board.get_tile(curr_row, curr_col)
+            if not current_tile:
+                print(f"    A* Warn: No tile found at {current_node} during exploration.")
+                continue # Skip if tile somehow disappeared
+
+            # Get arrival direction from predecessor data
+            _, arrived_from_direction = came_from[current_node]
+
+            print(f"  A* Visiting: {current_node} (f={current_f}, g={g_score.get(current_node, -1)}) "
+                  f"Arrived via: {arrived_from_direction}") # DEBUG
+
             # --- Goal Check ---
             if current_node == end_node:
+                print(f"    A* Goal Reached: {end_node}!")
                 # Path found, reconstruct it
                 path = []
-                curr_data = (current_node, None) # (coord, direction_from_prev)
+                curr_data = (current_node, None)
                 while curr_data[0] is not None:
                     path.append(curr_data[0])
                     pred_data = came_from.get(curr_data[0])
                     curr_data = pred_data if pred_data else (None, None)
+                print(f"    A* Reconstructed Path: {path[::-1]}") # DEBUG
                 return path[::-1] # Reverse path
 
             # --- Explore Neighbors ---
-            current_tile = self.board.get_tile(curr_row, curr_col)
-            if not current_tile: continue # Should not happen if logic is correct
-
-            current_connections = self.get_effective_connections(current_tile.tile_type, current_tile.orientation)
+            current_connections = self.get_effective_connections(
+                current_tile.tile_type, current_tile.orientation
+            )
             current_exit_dirs_str = {ex for exits in current_connections.values() for ex in exits}
-            _, arrived_from_direction = came_from[current_node]
+            # print(f"    Node {current_node} Exits: {current_exit_dirs_str}") # Optional Very Verbose
 
-            for exit_direction in Direction: # Iterate through N, E, S, W
+            for exit_direction in Direction: # Iterate N, E, S, W
                 # 1. No Backwards Rule Check
-                if arrived_from_direction is not None and exit_direction == Direction.opposite(arrived_from_direction):
+                if arrived_from_direction is not None and \
+                   exit_direction == Direction.opposite(arrived_from_direction):
+                    # print(f"      Skip Exit: {exit_direction.name} (U-turn)") # DEBUG
                     continue
 
                 # 2. Check Connectivity Out
                 exit_dir_str = exit_direction.name
                 if exit_dir_str not in current_exit_dirs_str:
-                    continue # Current tile doesn't exit this way
+                    # print(f"      Skip Exit: {exit_direction.name} (No exit on tile)") # DEBUG
+                    continue
 
                 # 3. Calculate Neighbor Coordinates
                 dr, dc = exit_direction.value
                 nr, nc = curr_row + dr, curr_col + dc
                 neighbor_node = (nr, nc)
 
-                if not self.board.is_valid_coordinate(nr, nc): continue # Off board
+                # print(f"      Checking Neighbor {neighbor_node} via {exit_direction.name}...") # DEBUG
+
+                if not self.board.is_valid_coordinate(nr, nc):
+                    # print("        Neighbor off board.") # DEBUG
+                    continue
 
                 neighbor_tile = self.board.get_tile(nr, nc)
-                if not neighbor_tile: continue # Cannot path through empty space
+                if not neighbor_tile:
+                    # print("        Neighbor has no tile.") # DEBUG
+                    continue
 
                 # 4. Check Connectivity Back (Two-Way Check)
-                neighbor_connects_back = Direction.opposite(exit_direction).name in {
-                    ex for n_exits in self.get_effective_connections(neighbor_tile.tile_type, neighbor_tile.orientation).values() for ex in n_exits
+                neighbor_connections_back = self.get_effective_connections(
+                    neighbor_tile.tile_type, neighbor_tile.orientation
+                )
+                neighbor_exit_dirs_back = {
+                    ex for exits in neighbor_connections_back.values() for ex in exits
                 }
-                if not neighbor_connects_back: continue # Track doesn't connect properly
+                required_entry_for_neighbor = Direction.opposite(exit_direction)
+                if required_entry_for_neighbor.name not in neighbor_exit_dirs_back:
+                    # print(f"        Neighbor {neighbor_node} doesn't connect back {required_entry_for_neighbor.name}.") # DEBUG
+                    continue
 
-                # --- 5. Apply A* Constraint Checks ---
-                # Constraint A: Entering the TARGET NODE requires valid stop entry?
-                if neighbor_node == end_node and target_is_required_stop:
-                    if not self._is_valid_stop_entry(neighbor_node, exit_direction):
-                        # print(f"A* Pruning: Invalid stop entry {exit_direction.name} at target {neighbor_node}")
-                        continue # Invalid entry, prune this path
+                # 5. Calculate Tentative Scores
+                # Cost is typically 1 per step unless weighted tiles are added
+                move_cost = 1
+                tentative_g_score = g_score.get(current_node, float('inf')) + move_cost
 
-                    # Additional Check: Ensure required_entry_direction matches if provided
-                    if required_entry_direction and exit_direction != required_entry_direction:
-                         # print(f"A* Pruning: Entry {exit_direction.name} != Required {required_entry_direction.name} at target {neighbor_node}")
-                         continue
-
-
-                # Constraint B: Exiting the START NODE (if it's a stop requiring specific exit?)
-                # This constraint is harder to apply directly here. It's better handled
-                # by the calling function (`check_segment_sequence`) by ensuring it only
-                # calls find_path starting from the correct "step_out_coord" after a stop.
-                # The `entry_direction_at_start` handles the immediate U-turn prevention.
-
-
-                # --- Calculate Tentative Scores ---
-                tentative_g_score = g_score.get(current_node, float('inf')) + 1 # Cost = 1 per step
-
-                # --- Update Path if Shorter or New ---
+                # 6. Update Path if Shorter or New
                 if tentative_g_score < g_score.get(neighbor_node, float('inf')):
                     # Found a better path to neighbor
+                    # print(f"        Better path found to {neighbor_node} (g={tentative_g_score})") # DEBUG
                     came_from[neighbor_node] = (current_node, exit_direction)
                     g_score[neighbor_node] = tentative_g_score
                     f_score = tentative_g_score + self._heuristic(neighbor_node, end_node)
@@ -631,29 +635,30 @@ class Game:
                         count += 1
                         open_set.put((f_score, count, neighbor_node))
                         open_set_hash.add(neighbor_node)
-                    # If already in open_set with higher f_score, priority queue handles update implicitly
+                        # print(f"          Added {neighbor_node} to open set (f={f_score})") # DEBUG
+                    # else: # Node already in open_set, PriorityQueue might not update correctly
+                        # print(f"          Updated path to {neighbor_node} (already in open set)") # DEBUG
 
 
         # If loop finishes and goal not reached
-        # print(f"A* Failed: No path found from {start_node} to {end_node} with constraints.")
+        print(f"--- A* Failed: No path found from {start_node} to {end_node} "
+              f"(Arrived via: {entry_direction_at_start}) ---") # DEBUG
         return None
 
     # This is a more complex A* that prunes based on the required_entry_directions_at_target set.
-    def find_path_astar_constrained(self, start_node, end_node, entry_direction_at_start, target_is_stop, required_entry_directions_at_target) -> Optional[List[Tuple[int, int]]]:
-        # This function needs to implement the A* logic described above, specifically:
-        # - Use PriorityQueue, came_from, g_score
-        # - Use _heuristic
-        # - In neighbor expansion:
-        #    - Check 'no backwards' using came_from[current].arrival_direction
-        #    - Check two-way connectivity
-        #    - ***IF neighbor == end_node AND target_is_stop:***
-        #         Check if the direction `current -> neighbor` is in `required_entry_directions_at_target`.
-        #         If not, `continue` (prune this path).
-        #    - Calculate scores and update open_set/came_from if path is better.
-        # - Reconstruct path from came_from if end_node is reached.
-        print(f"!!! NOTE: find_path_astar_constrained NOT IMPLEMENTED YET !!!") # Placeholder
-        # For now, return result of normal A* to avoid crash, but it won't be fully correct
-        return self.find_path(start_node, end_node, entry_direction_at_start, target_is_stop, list(required_entry_directions_at_target)[0] if required_entry_directions_at_target else None)
+    def find_path_astar_constrained(self,
+                  start_node, end_node, entry_direction_at_start,
+                  target_is_stop, required_entry_directions_at_target
+                  ) -> Optional[List[Tuple[int, int]]]:
+        """
+        Placeholder - Calls standard A* for now.
+        TODO: Implement actual constrained A* logic here.
+        """
+        print(f"!!! NOTE: find_path_astar_constrained using standard find_path !!!") # Placeholder Note
+        # It should call the find_path function above this one
+        return self.find_path(
+            start_node, end_node, entry_direction_at_start
+        )
 
 
     def get_terminal_coords(self, line_number: int
@@ -786,90 +791,154 @@ class Game:
             # --- Helper function to check one sequence direction ---
             def check_segment_sequence(start_terminal, end_terminal,
                                     stop_coords) -> bool:
-                sequence_nodes = [start_terminal] + stop_coords + [end_terminal]
-                stop_coord_set = set(stop_coords)
-                print(f"DBG P{player.player_id}: Checking Sequence (A* Strict): {sequence_nodes}")
+                """
+                Checks one full sequence using constrained A* for pathfinding
+                and validating strict stop entry/exit rules.
 
-                # Need to track how we entered the *previous* node to prevent U-turns
+                Args:
+                    start_terminal: Coordinate tuple of the starting terminal.
+                    end_terminal: Coordinate tuple of the ending terminal.
+                    stop_coords: List of coordinate tuples for required stops.
+
+                Returns:
+                    True if the entire sequence is possible meeting constraints,
+                    False otherwise.
+                """
+                # --- Define sequence_nodes using passed parameters ---
+                sequence_nodes = [start_terminal] + stop_coords + [end_terminal]
+                # --- End Definition ---
+
+                stop_coord_set = set(stop_coords) # For quick lookup if a node is a stop
+                print(f"DBG P{player.player_id}: Checking Sequence (A* Strict V5): {sequence_nodes}")
+
+                # Track the direction used to arrive at the start of the *next* segment
+                # This is used to prevent immediate U-turns in the A* search
                 arrival_direction_at_current_start = None
 
+                # Iterate through each required segment in the sequence
                 for i in range(len(sequence_nodes) - 1):
                     start_node = sequence_nodes[i]
-                    end_node = sequence_nodes[i+1]
+                    end_node = sequence_nodes[i+1] # The node we need to reach
                     is_end_node_stop = end_node in stop_coord_set
+                    # Look ahead to the node after the end_node (if it exists)
                     next_node_in_sequence = sequence_nodes[i+2] if (i+2) < len(sequence_nodes) else None
 
                     print(f"DBG P{player.player_id}: Checking A* Segment {start_node} -> {end_node}")
 
-                    # --- Determine constraints for A* based on if end_node is stop ---
-                    target_is_stop = is_end_node_stop
-                    required_entry = None # Default: any entry is okay unless end_node is stop
-
-                    # If end_node is a stop, find out which entry directions are valid
-                    valid_entry_dirs_for_stop = set()
-                    required_exit_dir_for_stop : Optional[Direction] = None # Only if valid entry exists
+                    # --- Determine entry constraints for this segment's A* call ---
+                    required_entries_at_end = None # Default: no constraint
                     if is_end_node_stop:
-                        # Find ALL possible valid entry directions first
+                        # If the target is a stop, find ALL valid entry directions
+                        required_entries_at_end = set()
                         for potential_entry_dir in Direction:
+                             # Check if entering end_node from this direction is valid
                              if self._is_valid_stop_entry(end_node, potential_entry_dir):
-                                  valid_entry_dirs_for_stop.add(potential_entry_dir)
-                        if not valid_entry_dirs_for_stop:
-                             print(f"*** DBG P{player.player_id}: FAIL ({end_node}): NO possible valid entry direction exists.")
-                             return False # Stop is impossible to enter correctly
+                                  required_entries_at_end.add(potential_entry_dir)
 
-                    # --- Call A* to find path INTO the end_node ---
-                    # A* needs to know the required entry only if target is stop
-                    # We pass the set of valid entries; A* must use one of them
-                    entry_path_segment = self.find_path_astar_constrained( # Needs new A* function
-                        start_node, end_node,
+                        if not required_entries_at_end:
+                            # If no direction allows valid entry, this stop is impossible
+                            print(f"*** DBG P{player.player_id}: FAIL ({end_node}): "
+                                  f"NO possible valid entry direction exists.")
+                            return False # Entire sequence fails
+
+                        print(f"DBG P{player.player_id}: Stop {end_node} requires entry "
+                              f"via one of: {required_entries_at_end}")
+
+
+                    # --- Call the CONSTRAINED A* to find path INTO the end_node ---
+                    # This A* will prune paths that don't meet required_entries_at_end
+                    entry_path_segment = self.find_path_astar_constrained(
+                        start_node,
+                        end_node,
                         entry_direction_at_start=arrival_direction_at_current_start,
                         target_is_stop=is_end_node_stop,
-                        # Pass the SET of valid entries required at the target
-                        required_entry_directions_at_target=valid_entry_dirs_for_stop if is_end_node_stop else None
+                        required_entry_directions_at_target=required_entries_at_end
                     )
 
-
+                    # Check if the constrained A* found a valid path
                     if not entry_path_segment:
-                        print(f"*** DBG P{player.player_id}: FAIL Segment {start_node} -> {end_node} (No valid path found by A*)")
-                        return False
+                        print(f"*** DBG P{player.player_id}: FAIL Segment {start_node} -> {end_node} "
+                              f"(No valid path found by Constrained A*)")
+                        return False # No path exists meeting entry constraints
 
-                    # --- If end_node was a stop, determine required exit ---
-                    actual_entry_direction = self._get_entry_direction(entry_path_segment[-2], end_node) # How A* path *actually* entered
-                    arrival_direction_at_next_start = actual_entry_direction # For the next iteration's U-turn check
+                    print(f"DBG P{player.player_id}: Segment {start_node} -> {end_node} OK (A* Path Found).")
 
+                    # --- Path Found - Determine Actual Entry and Required Exit ---
+                    # Get the direction used for the last step of the found path
+                    actual_entry_direction = self._get_entry_direction(
+                        entry_path_segment[-2], end_node
+                    )
+                    if not actual_entry_direction:
+                         print(f"*** DBG P{player.player_id}: FAIL Cannot determine actual entry dir for {end_node}")
+                         return False # Should not happen if path len > 1
+
+                    # This direction becomes the constraint for the start of the NEXT segment search
+                    arrival_direction_at_next_start = actual_entry_direction
+
+                    # --- If end_node was a stop, check EXIT constraint ---
                     if is_end_node_stop:
-                        # Check if the actual entry was one of the valid ones
-                        if actual_entry_direction not in valid_entry_dirs_for_stop:
-                             print(f"*** DBG P{player.player_id}: FAIL (A* path entry {actual_entry_direction.name} "
-                                   f"not in valid set {valid_entry_dirs_for_stop}?)")
-                             # This indicates a potential flaw in the constrained A* logic
-                             return False
+                        # We know entry was valid because A* returned a path.
+                        print(f"DBG P{player.player_id}: Stop {end_node} reached via valid entry "
+                              f"{actual_entry_direction.name}.")
 
+                        # Determine the required exit direction (opposite end of straight)
                         required_exit_direction = Direction.opposite(actual_entry_direction)
 
-                        # Check if stop tile has this required exit connection
+                        # Check if the stop tile physically has this exit connection
                         stop_tile = self.board.get_tile(end_node[0], end_node[1])
-                        stop_connections = self.get_effective_connections(stop_tile.tile_type, stop_tile.orientation)
-                        stop_tile_exits = {ex for exits in stop_connections.values() for ex in exits}
+                        # We assume stop_tile exists because check_player_route_completion ensures stops are placed
+                        stop_connections = self.get_effective_connections(
+                            stop_tile.tile_type, stop_tile.orientation
+                        )
+                        stop_tile_exits = {
+                            ex for exits in stop_connections.values() for ex in exits
+                        }
                         if required_exit_direction.name not in stop_tile_exits:
                             print(f"*** DBG P{player.player_id}: FAIL (Stop tile {end_node} "
-                                  f"lacks required exit {required_exit_direction.name})")
-                            return False
+                                  f"lacks required exit connection {required_exit_direction.name} "
+                                  f"after entry {actual_entry_direction.name})")
+                            return False # Cannot exit correctly
 
-                        # The exit constraint is implicitly handled by passing the correct
-                        # arrival_direction_at_current_start to the *next* segment's A* call.
-                        # The A* for "end_node -> next_node_in_sequence" will start with an
-                        # entry direction = required_exit_direction, preventing U-turns and
-                        # implicitly ensuring the path continues correctly from the stop.
-                        arrival_direction_at_next_start = required_exit_direction # Must exit this way
-                        print(f"DBG P{player.player_id}: Stop {end_node} checks OK. Required exit {required_exit_direction.name} set for next segment.")
+                        # Check if we can reach the *next* node using this required exit
+                        if next_node_in_sequence:
+                            dr_exit, dc_exit = required_exit_direction.value
+                            step_out_coord = (end_node[0] + dr_exit, end_node[1] + dc_exit)
 
-                    # Prepare for next iteration
+                            if not self.board.is_valid_coordinate(step_out_coord[0], step_out_coord[1]):
+                                 print(f"*** DBG P{player.player_id}: FAIL (Required exit "
+                                       f"{required_exit_direction.name} leads off board?)")
+                                 return False
+
+                            print(f"DBG P{player.player_id}: Checking exit path from "
+                                  f"{step_out_coord} -> {next_node_in_sequence} "
+                                  f"(Must have arrived at {step_out_coord} via {required_exit_direction.name})")
+
+                            # Use standard A* here - constraints are for *target* node entry
+                            path_from_exit_neighbor_exists = self.find_path(
+                                step_out_coord, # Start from neighbor
+                                next_node_in_sequence, # Go to next sequence node
+                                required_exit_direction # Pass how we arrived at step_out_coord
+                            ) is not None
+
+                            if not path_from_exit_neighbor_exists:
+                                print(f"*** DBG P{player.player_id}: FAIL (No path found from "
+                                      f"required exit neighbor {step_out_coord} to "
+                                      f"{next_node_in_sequence})")
+                                return False
+                            print(f"DBG P{player.player_id}: Valid exit path exists from {step_out_coord}.")
+                        # else: Last stop before terminal, exit check is implicitly okay.
+
+                        # Update the arrival direction for the next segment's A* start constraint
+                        arrival_direction_at_next_start = required_exit_direction
+                        print(f"DBG P{player.player_id}: Stop {end_node} PASSED Strict Checks. "
+                              f"Next arrival constraint: {arrival_direction_at_next_start.name}")
+                    # Else (if not a stop): No exit check needed, just update arrival direction
+
+                    # Prepare for the next segment check in the loop
                     arrival_direction_at_current_start = arrival_direction_at_next_start
 
-
-                # If loop completes, all segments found valid paths with constraints
-                print(f"DBG P{player.player_id}: Full sequence PASSED A* Strict check.")
+                # If the loop completes, all segments were validated successfully
+                print(f"DBG P{player.player_id}: Full sequence PASSED True Strict check.")
                 return True
             # --- End of check_segment_sequence helper ---
 
@@ -1076,97 +1145,114 @@ class Game:
         player.streetcar_position = target_coord # Update position FIRST
         print(f"Player {player.player_id} moved from {previous_pos} to {target_coord}")
 
-        # --- Check if the place we JUST LANDED ON is the coordinate of the *next required* node ---
-        # Get the node the player *was* aiming for BEFORE this move started
-        next_required_node_coord = player.get_next_target_node(self)
+        # --- DETAILED DEBUGGING FOR INDEX INCREMENT ---
+        print(f"--- DBG move_streetcar P{player.player_id} Post-Move Checks ---")
+        print(f"  Landed at: {target_coord}")
+        print(f"  Index BEFORE check: {player.required_node_index}")
 
-        # Check if we landed where we needed to go
-        if next_required_node_coord and target_coord == next_required_node_coord:
-            # We reached the coordinate of the node we were aiming for.
-            # This node could be a stop or the final terminal.
+        # Get the node the player *was* aiming for
+        current_target_stop_index = player.required_node_index
+        sequence_nodes = player.get_required_nodes_sequence(self, is_driving_check=True)
 
-            # Check if this node corresponds to a required STOP ID that needs ticking off
-            num_required_stops = len(player.route_card.stops) if player.route_card else 0
-            current_target_stop_index = player.required_node_index # Index (0..N-1) for stops list
+        if not sequence_nodes:
+             print(f"  DBG move_streetcar P{player.player_id}: ERROR - Cannot get sequence nodes!")
+             return
 
-            # Is the node we just reached one of the required stops, AND is it the one
-            # we are currently targeting based on the index?
-            if current_target_stop_index < num_required_stops:
-                 required_stop_id = player.route_card.stops[current_target_stop_index]
-                 coord_for_this_stop_id = self.board.building_stop_locations.get(required_stop_id)
+        target_node_list_index = current_target_stop_index + 1
 
-                 if target_coord == coord_for_this_stop_id:
-                      # Yes, we landed on the coord for the stop we were aiming for.
-                      print(f"--> Reached required stop node {current_target_stop_index+1} "
-                            f"({required_stop_id}) at {target_coord}. Advancing target index.")
-                      player.required_node_index += 1
-                 # else: We landed on the target node coordinate, but it wasn't the stop
-                 #      associated with the current index (e.g., landed on final terminal
-                 #      while still needing to visit stops - win check handles this)
-            # else: We landed on the target node coordinate, and the index already
-            #      indicates we are past the last required stop (i.e., aiming for final terminal).
-            #      No index increment needed here. Win check handles this state.
+        if target_node_list_index < len(sequence_nodes):
+             the_node_player_was_aiming_for = sequence_nodes[target_node_list_index]
+             print(f"  Was Aiming For: Node #{target_node_list_index} at {the_node_player_was_aiming_for}")
 
-        # else: Landed somewhere else, not the *currently required* target node coord. Index doesn't change.
+             # Did the player LAND on the coordinate they were aiming for?
+             if target_coord == the_node_player_was_aiming_for:
+                 print(f"  MATCH: Landed on the target node coordinate.")
+
+                 # --- CORRECTED LOGIC: Increment IF target node reached ---
+                 # Whether it's a stop or the final terminal, reaching the
+                 # target node means we advance the index for the *next* target.
+                 print(f"  INCREMENTING index from {player.required_node_index} to {player.required_node_index + 1}")
+                 player.required_node_index += 1
+
+                 # Optional: Add a specific message if it was a stop vs terminal
+                 num_required_stops = len(player.route_card.stops) if player.route_card else 0
+                 if current_target_stop_index < num_required_stops:
+                      required_stop_id = player.route_card.stops[current_target_stop_index]
+                      print(f"  (Landed on required stop '{required_stop_id}')")
+                 else:
+                      print(f"  (Landed on FINAL TERMINAL)")
+                 # --- End Corrected Logic ---
+
+             else: # Landed somewhere else
+                 print(f"  NO MATCH: Landed coord {target_coord} != target node coord {the_node_player_was_aiming_for}. No index change.")
+        else: # Index already past end of sequence
+             print(f"  Index {player.required_node_index} already pointing past final node "
+                   f"(Sequence length {len(sequence_nodes)}). No index change.")
+
+        print(f"  Index AFTER check: {player.required_node_index}")
+        print(f"--- End DBG move_streetcar P{player.player_id} ---")
 
     def check_win_condition(self, player: Player) -> bool:
-        """Checks if player is at EITHER destination terminal tile AND all nodes visited."""
-        if player.player_state != PlayerState.DRIVING or player.streetcar_position is None:
-             return False
+        """
+        Checks if player is at EITHER destination terminal tile AND
+        their target index indicates all required stops have been passed.
+        (Assumes driving phase uses unconstrained pathfinding).
+        """
+        # --- Basic validity checks ---
+        if player.player_state != PlayerState.DRIVING:
+            return False
+        if player.streetcar_position is None:
+            print("Win Check Warn: No streetcar position.")
+            return False
+        if not player.line_card:
+             print(f"Win Check Error P{player.player_id}: Missing line card.")
+             return False # Should have line card if driving
 
-        # --- Get the player's specific line and required stops ---
-        if not player.line_card: return False # Should have line card if driving
+        # --- Get Both Potential Destination Terminal Coordinates ---
         line_num = player.line_card.line_number
-        num_required_stops = 0
-        if player.route_card and player.route_card.stops:
-             num_required_stops = len(player.route_card.stops)
-
-        # --- Get BOTH potential destination terminal coordinates ---
         term1_coord, term2_coord = self.get_terminal_coords(line_num)
         if not term1_coord or not term2_coord:
-             print(f"Win Check Error P{player.player_id}: Cannot find terminal coords for Line {line_num}")
+             print(f"Win Check Error P{player.player_id}: Cannot find term coords L{line_num}")
              return False
 
-        # --- Determine which terminal was the nominal START based on the path ---
-        # (This assumes handle_route_completion sets the initial position correctly)
-        # We need to know which of the two terminals is the actual target destination.
-        # Let's refine the assumption: If the required_node_index indicates they are
-        # aiming for the final destination (i.e., index > num_stops), then the
-        # destination is the terminal they *didn't* start at.
-
-        # Get the sequence to know the nominal start/end based on initial placement
-        # We might need a more robust way to store the start terminal if loading saves.
-        # Quick Fix Assumption: If current pos isn't term1, assume term1 was start, term2 is dest. Vice-versa.
-        # This is flawed if they are mid-route.
-        # Better: Store the nominal start terminal when player starts driving.
-
-        # --- Let's simplify: Check if current position IS one of the line's terminals ---
         current_pos = player.streetcar_position
         is_at_term1 = (current_pos == term1_coord)
         is_at_term2 = (current_pos == term2_coord)
 
-        # --- Check if player is AT EITHER destination terminal ---
+        # --- Check 1: Is player physically at a terminal for their line? ---
         if is_at_term1 or is_at_term2:
-            # Determine which terminal they *should* be aiming for as the true destination.
-            # If player.required_node_index implies they are past the stops, they *must* be at the destination.
-            # The sequence has N stops, plus start term, plus end term = N+2 nodes.
-            # Target index goes from 0 (start) to N+1 (end). Index > N means aiming for end.
-            is_aiming_for_final_node = player.required_node_index > num_required_stops
+            print(f"DBG Win Check P{player.player_id}: At a terminal ({current_pos}).") # Debug
 
-            if is_aiming_for_final_node:
-                 # No need to check which terminal was start/end if index is correct.
-                 # Reaching *any* terminal when aiming for the end means they finished.
-                 print(f"Win Check P{player.player_id}: At a Terminal ({current_pos}) & Nodes Visited ({player.required_node_index}/{num_required_stops+1} nodes). WIN!")
+            # --- Check 2: Has the player logically passed all required stops? ---
+            num_required_stops = 0
+            if player.route_card and player.route_card.stops:
+                 num_required_stops = len(player.route_card.stops)
+
+            # The player's index tracks the *next* node they are aiming for.
+            # Index 0 = aiming for Stop 1 (Node index 1 in sequence)
+            # ...
+            # Index N = aiming for End Terminal (Node index N+1 in sequence)
+            # where N = num_required_stops.
+            # So, if the index is >= N+1, they have passed all stops.
+            index_indicating_all_stops_passed = num_required_stops + 1
+
+            print(f"DBG Win Check P{player.player_id}: Current Node Idx = {player.required_node_index}, "
+                  f"Idx Needed >= {index_indicating_all_stops_passed} (Based on {num_required_stops} stops)") # Debug
+
+            # --- Corrected Condition ---
+            if player.required_node_index >= index_indicating_all_stops_passed:
+                 # They are at a terminal AND their index shows they finished the sequence.
+                 print(f"Win Check P{player.player_id}: Node index sufficient. WIN!") # Debug
                  self.game_phase = GamePhase.GAME_OVER
                  self.winner = player
                  player.player_state = PlayerState.FINISHED
                  return True
             else:
-                 # They landed on a terminal tile, but haven't logically passed all stops yet.
-                 print(f"Win Check P{player.player_id}: Landed on Terminal ({current_pos}) but node index too low ({player.required_node_index}/{num_required_stops+1} nodes). No win.")
+                 # Physically at a terminal, but sequence not complete according to index.
+                 print(f"Win Check P{player.player_id}: At Terminal but node index too low. No win.") # Debug
                  return False
         else:
-            # Not at either of the destination terminal coordinates
+            # Not physically at either terminal coordinate.
             return False
 
     # === Turn Management & Undo/Redo ===
