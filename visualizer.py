@@ -141,8 +141,12 @@ class Linie1Visualizer:
     """
     Manages the Pygame window, main loop, drawing, and input delegation
     based on the current game state.
+
+    Default 1 Player. Pass in another # @ main.py to change this.
     """
-    def __init__(self, num_players=2):
+    def __init__(self, num_players=1):
+        self.num_players = num_players
+
         pygame.init()
         pygame.font.init() # Explicitly init font module
 

@@ -462,7 +462,8 @@ class DrivingState(GameState):
                          # --- DEBUG PRINT ---
                          print(f"*** DBG: No win detected for P{active_player.player_id}. Ending turn...")
                          self.game.actions_taken_this_turn = C.MAX_PLAYER_ACTIONS
-                         self.game.end_player_turn() # Proceeds to next player
+                        #  self.game.end_player_turn() # Proceeds to next player
+                         self.game.confirm_turn()
                          self.message = f"Moved to {target_coord}. Turn ended."
                          # --- DEBUG PRINT ---
                          print("*** DBG: end_player_turn called.")
