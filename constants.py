@@ -16,22 +16,40 @@ from typing import List, Dict, Tuple, Any
 # TERMINAL_DATA: Dict[int, Tuple[Tuple[Tuple[int, int], int], Tuple[Tuple[int, int], int]]] = { 1: ( (((6, 0), 90), ((7, 0), 0)), (((2, 13), 180), ((3, 13), 270)) ), 2: ( (((10, 0), 90), ((11, 0), 0)), (((6, 13), 180), ((7, 13), 270)) ), 3: ( (((2, 0), 90), ((3, 0), 0)), (((10, 13), 180), ((11, 13), 270)) ), 4: ( (((0, 6), 90), ((0, 7), 180)), (((13, 10), 0), ((13, 11), 270)) ), 5: ( (((0, 2), 90), ((0, 3), 180)), (((13, 6), 0), ((13, 7), 270)) ), 6: ( (((0, 10), 90), ((0, 11), 180)), (((13, 2), 0), ((13, 3), 270)) ) }
 # TERMINAL_COORDS: Dict[int, Tuple[Tuple[int,int], Tuple[int,int]]] = { line: (data[0][0][0], data[1][0][0]) for line, data in TERMINAL_DATA.items() }
 
-## TEST CONFIG
+## TEST CONFIG #1: STRAIGHT VERTICAL LINE
+# # --- Grid Dimensions ---
+# GRID_ROWS: int = 5; GRID_COLS: int = 6
+# PLAYABLE_ROWS: Tuple[int, int] = (1, 3); PLAYABLE_COLS: Tuple[int, int] = (1, 4)
+# # --- Game Rules & Data ---
+# BUILDING_COORDS: Dict[str, Tuple[int, int]] = { 'A': (1, 2), 'B': (3, 2) }
+# TILE_DEFINITIONS: Dict[str, Dict[str, Any]] = { "Straight": {"connections": [['N', 'S']], "is_swappable": True}, "Curve": {"connections": [['N', 'E']], "is_swappable": True}, "StraightLeftCurve": {"connections": [['N', 'S'], ['S', 'W']], "is_swappable": True}, "StraightRightCurve": {"connections": [['N', 'S'], ['S', 'E']], "is_swappable": True}, "DoubleCurveY": {"connections": [['N', 'W'], ['N', 'E']], "is_swappable": True}, "DiagonalCurve": {"connections": [['S', 'W'], ['N', 'E']], "is_swappable": True}, "Tree_JunctionTop": {"connections": [['E', 'W'], ['W', 'N'], ['N', 'E']], "is_swappable": False}, "Tree_JunctionRight": {"connections": [['E', 'W'], ['N', 'E'], ['S', 'E']], "is_swappable": False}, "Tree_Roundabout": {"connections": [['W', 'N'], ['N', 'E'], ['E', 'S'], ['S', 'W']], "is_swappable": False}, "Tree_Crossroad": {"connections": [['N', 'S'], ['E', 'W']], "is_swappable": False}, "Tree_StraightDiagonal1": {"connections": [['N', 'S'], ['S', 'W'], ['N', 'E']], "is_swappable": False}, "Tree_StraightDiagonal2": {"connections": [['N', 'S'], ['N', 'W'], ['S', 'E']], "is_swappable": False}, }
+# TILE_COUNTS_BASE: Dict[str, int] = { "Straight": 21, "Curve": 20, "StraightLeftCurve": 10, "StraightRightCurve": 10, "DoubleCurveY": 10, "DiagonalCurve": 6, "Tree_JunctionTop": 6, "Tree_JunctionRight": 6, "Tree_Roundabout": 4, "Tree_Crossroad": 4, "Tree_StraightDiagonal1": 2, "Tree_StraightDiagonal2": 2, }
+# TILE_COUNTS_5_PLUS_ADD: Dict[str, int] = {"Straight": 15, "Curve": 10,}
+# STARTING_HAND_TILES: Dict[str, int] = {"Straight": 3, "Curve": 2,}
+# ROUTE_CARD_VARIANTS: List[Dict[str, Dict[int, List[str]]]] = [ 
+#     { 
+#         "1-4": { 1: ['A', 'B'], 2: ['A', 'B'], }}, 
+#     ]
+# TERMINAL_DATA: Dict[int, Tuple[Tuple[Tuple[int, int], int], Tuple[Tuple[int, int], int]]] = { 1: ( (((0, 3), 90), ((0, 4), 180)), (((4, 3), 0), ((4, 4), 270)) ), }
+# TERMINAL_COORDS: Dict[int, Tuple[Tuple[int,int], Tuple[int,int]]] = { line: (data[0][0][0], data[1][0][0]) for line, data in TERMINAL_DATA.items() }
+
+## TEST CONFIG #2: TRICK LOOP REDDIT
 # --- Grid Dimensions ---
-GRID_ROWS: int = 5; GRID_COLS: int = 6
-PLAYABLE_ROWS: Tuple[int, int] = (1, 3); PLAYABLE_COLS: Tuple[int, int] = (1, 4)
+GRID_ROWS: int = 10; GRID_COLS: int = 10
+PLAYABLE_ROWS: Tuple[int, int] = (1, 8); PLAYABLE_COLS: Tuple[int, int] = (1, 8)
 # --- Game Rules & Data ---
-BUILDING_COORDS: Dict[str, Tuple[int, int]] = { 'A': (1, 2), 'B': (3, 2) }
+BUILDING_COORDS: Dict[str, Tuple[int, int]] = { 'A': (5, 1), 'B': (4, 6), 'C': (6, 8), }
 TILE_DEFINITIONS: Dict[str, Dict[str, Any]] = { "Straight": {"connections": [['N', 'S']], "is_swappable": True}, "Curve": {"connections": [['N', 'E']], "is_swappable": True}, "StraightLeftCurve": {"connections": [['N', 'S'], ['S', 'W']], "is_swappable": True}, "StraightRightCurve": {"connections": [['N', 'S'], ['S', 'E']], "is_swappable": True}, "DoubleCurveY": {"connections": [['N', 'W'], ['N', 'E']], "is_swappable": True}, "DiagonalCurve": {"connections": [['S', 'W'], ['N', 'E']], "is_swappable": True}, "Tree_JunctionTop": {"connections": [['E', 'W'], ['W', 'N'], ['N', 'E']], "is_swappable": False}, "Tree_JunctionRight": {"connections": [['E', 'W'], ['N', 'E'], ['S', 'E']], "is_swappable": False}, "Tree_Roundabout": {"connections": [['W', 'N'], ['N', 'E'], ['E', 'S'], ['S', 'W']], "is_swappable": False}, "Tree_Crossroad": {"connections": [['N', 'S'], ['E', 'W']], "is_swappable": False}, "Tree_StraightDiagonal1": {"connections": [['N', 'S'], ['S', 'W'], ['N', 'E']], "is_swappable": False}, "Tree_StraightDiagonal2": {"connections": [['N', 'S'], ['N', 'W'], ['S', 'E']], "is_swappable": False}, }
 TILE_COUNTS_BASE: Dict[str, int] = { "Straight": 21, "Curve": 20, "StraightLeftCurve": 10, "StraightRightCurve": 10, "DoubleCurveY": 10, "DiagonalCurve": 6, "Tree_JunctionTop": 6, "Tree_JunctionRight": 6, "Tree_Roundabout": 4, "Tree_Crossroad": 4, "Tree_StraightDiagonal1": 2, "Tree_StraightDiagonal2": 2, }
 TILE_COUNTS_5_PLUS_ADD: Dict[str, int] = {"Straight": 15, "Curve": 10,}
 STARTING_HAND_TILES: Dict[str, int] = {"Straight": 3, "Curve": 2,}
 ROUTE_CARD_VARIANTS: List[Dict[str, Dict[int, List[str]]]] = [ 
     { 
-        "1-4": { 1: ['A', 'B'], 2: ['A', 'B'], }}, 
+        "1-4": { 1: ['A', 'B', 'C'], 2: ['A', 'B', 'C'], }}, 
     ]
-TERMINAL_DATA: Dict[int, Tuple[Tuple[Tuple[int, int], int], Tuple[Tuple[int, int], int]]] = { 1: ( (((0, 3), 90), ((0, 4), 180)), (((4, 3), 0), ((4, 4), 270)) ), }
+TERMINAL_DATA: Dict[int, Tuple[Tuple[Tuple[int, int], int], Tuple[Tuple[int, int], int]]] = { 1: ( (((3, 0), 90), ((4, 0), 0)), (((8, 9), 180), ((9, 9), 270)) ), }
 TERMINAL_COORDS: Dict[int, Tuple[Tuple[int,int], Tuple[int,int]]] = { line: (data[0][0][0], data[1][0][0]) for line, data in TERMINAL_DATA.items() }
+
 
 
 # --- Pygame/Visual Layout Constants ---
