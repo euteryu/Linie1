@@ -183,75 +183,115 @@ class ExchangeTileCommand(Command):
         return True
 
 # --- Driving Commands (Simpler Undo) ---
+# game_logic/commands.py
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Tuple, Optional, Dict
+from .enums import PlayerState, Direction, GamePhase # <-- ADDED GamePhase HERE
+from .tile import TileType, PlacedTile
+from .player import Player
+
+if TYPE_CHECKING:
+    from .game import Game
+
+class Command(ABC):
+    def __init__(self, game: 'Game'):
+        self.game = game
+    @abstractmethod
+    def execute(self) -> bool: pass
+    @abstractmethod
+    def undo(self) -> bool: pass
+    def get_description(self) -> str: return self.__class__.__name__
+
+class PlaceTileCommand(Command):
+    def __init__(self, game: 'Game', player: Player, tile_type: TileType, orientation: int, row: int, col: int):
+        super().__init__(game)
+        self.player, self.tile_type, self.orientation, self.row, self.col = player, tile_type, orientation, row, col
+        self._original_hand_contains_tile, self._stop_sign_placed, self._building_id_stopped = False, False, None
+    def execute(self) -> bool:
+        if self.tile_type not in self.player.hand: return False
+        self._original_hand_contains_tile = True
+        is_valid, _ = self.game.check_placement_validity(self.tile_type, self.orientation, self.row, self.col)
+        if not is_valid: return False
+        self.player.hand.remove(self.tile_type)
+        placed_tile = PlacedTile(self.tile_type, self.orientation)
+        self.game.board.set_tile(self.row, self.col, placed_tile)
+        building_before = self.game.board.buildings_with_stops.copy()
+        self.game._check_and_place_stop_sign(placed_tile, self.row, self.col)
+        newly_stopped = self.game.board.buildings_with_stops - building_before
+        if newly_stopped: self._stop_sign_placed, self._building_id_stopped = True, newly_stopped.pop()
+        return True
+    def undo(self) -> bool:
+        if self._stop_sign_placed and self._building_id_stopped:
+            tile = self.game.board.get_tile(self.row, self.col)
+            if tile and tile.has_stop_sign:
+                 tile.has_stop_sign = False
+                 self.game.board.buildings_with_stops.discard(self._building_id_stopped)
+                 if self._building_id_stopped in self.game.board.building_stop_locations:
+                     del self.game.board.building_stop_locations[self._building_id_stopped]
+        self.game.board.set_tile(self.row, self.col, None)
+        if self._original_hand_contains_tile: self.player.hand.append(self.tile_type)
+        return True
+
+class ExchangeTileCommand(Command):
+    def __init__(self, game: 'Game', player: Player, new_tile_type: TileType, new_orientation: int, row: int, col: int):
+        super().__init__(game)
+        self.player, self.new_tile_type, self.new_orientation, self.row, self.col = player, new_tile_type, new_orientation, row, col
+        self._original_hand_contains_tile, self._old_placed_tile_data = False, None
+    def execute(self) -> bool:
+        if self.new_tile_type not in self.player.hand: return False
+        self._original_hand_contains_tile = True
+        old_placed_tile = self.game.board.get_tile(self.row, self.col)
+        if not old_placed_tile or not old_placed_tile.tile_type.is_swappable: return False
+        self._old_placed_tile_data = old_placed_tile.to_dict()
+        self.player.hand.remove(self.new_tile_type)
+        self.player.hand.append(old_placed_tile.tile_type)
+        self.game.board.set_tile(self.row, self.col, PlacedTile(self.new_tile_type, self.new_orientation))
+        return True
+    def undo(self) -> bool:
+        if self._old_placed_tile_data is None: return False
+        old_tile = PlacedTile.from_dict(self._old_placed_tile_data, self.game.tile_types)
+        if not old_tile: return False
+        self.game.board.set_tile(self.row, self.col, old_tile)
+        if old_tile.tile_type in self.player.hand: self.player.hand.remove(old_tile.tile_type)
+        if self._original_hand_contains_tile: self.player.hand.append(self.new_tile_type)
+        return True
+
 class MoveCommand(Command):
-    def __init__(self, game: 'Game', player: Player,
-                 target_coord: Tuple[int, int]):
+    def __init__(self, game: 'Game', player: Player, target_path_index: int):
         super().__init__(game)
         self.player = player
-        self.target_coord = target_coord
+        self.target_path_index = target_path_index
         # Store state for undo
-        self._original_pos: Optional[Tuple[int, int]] = None
+        self._original_path_index: int = 0
         self._original_node_index: int = 0
-        # Store whether index was advanced during execute for precise undo
-        self._advanced_index_on_execute = False
+        self._was_game_over = False
 
     def execute(self) -> bool:
-        print(f"Executing Move: P{self.player.player_id} target {self.target_coord}")
-        if self.player.streetcar_position is None:
-            print("--> Move Failed: Player has no current position.")
-            return False
+        print(f"Executing Move: P{self.player.player_id} to path index {self.target_path_index}")
 
-        # --- Store pre-move state for Undo ---
-        self._original_pos = self.player.streetcar_position
+        self._original_path_index = self.player.streetcar_path_index
         self._original_node_index = self.player.required_node_index
-        self._advanced_index_on_execute = False # Reset flag
+        self._was_game_over = self.game.game_phase == GamePhase.GAME_OVER
 
-        # --- Perform the actual position update ---
-        # Call the simple Game method to update the player attribute
-        self.game.move_streetcar(self.player, self.target_coord)
-
-        # --- Check if the NEW position reached the next required node ---
-        next_required_node = self.player.get_next_target_node(self.game)
-        if next_required_node and self.target_coord == next_required_node:
-             print(f"   (Reached required node "
-                   f"{self.player.required_node_index + 1})")
-             self.player.required_node_index += 1
-             self._advanced_index_on_execute = True # Mark index change
-
-        # --- Check Win Condition AFTER position and index are updated ---
-        # Note: check_win_condition itself sets game phase/winner if true
+        self.game.move_streetcar(self.player, self.target_path_index)
         win = self.game.check_win_condition(self.player)
 
-        print(f"--> Move Execute SUCCESS. Landed at {self.target_coord}. Win: {win}")
-        return True # Command execution was successful
+        print(f"--> Move Execute SUCCESS. Landed at {self.player.streetcar_position}. Win: {win}")
+        return True
 
     def undo(self) -> bool:
-        print(f"Undoing Move: P{self.player.player_id} back to {self._original_pos}")
-        if self._original_pos is None:
-            print("--> Undo Move Failed: No original position saved.")
-            return False
+        print(f"Undoing Move: P{self.player.player_id} back to path index {self._original_path_index}")
 
-        # Check if game ended, revert if undoing winning move
-        if self.game.game_phase == GamePhase.GAME_OVER and \
-           self.game.winner == self.player:
-             print("   (Undoing winning move, resetting game phase)")
+        if not self._was_game_over and self.game.game_phase == GamePhase.GAME_OVER:
              self.game.game_phase = GamePhase.DRIVING
              self.game.winner = None
-             self.player.player_state = PlayerState.DRIVING # Ensure state is correct
+             self.player.player_state = PlayerState.DRIVING
 
-        # --- Restore position and node index ---
-        # Use simple Game method to update position
-        self.game.move_streetcar(self.player, self._original_pos)
-        # Only revert index if it was advanced during execute
-        # This prevents decrementing index multiple times if undoing non-advancing moves
-        # However, the current system resets action count on undo, allowing re-roll,
-        # so restoring the exact original index is correct.
+        self.player.streetcar_path_index = self._original_path_index
         self.player.required_node_index = self._original_node_index
 
-        print(f"--> Undo Move SUCCESS. Pos: {self.player.streetcar_position}, "
-              f"Idx: {self.player.required_node_index}")
+        print(f"--> Undo Move SUCCESS. Pos: {self.player.streetcar_position}, Node Idx: {self.player.required_node_index}")
         return True
 
     def get_description(self) -> str:
-         return (f"Move P{self.player.player_id} to "
-                 f"{self.target_coord}")
+         return f"Move P{self.player.player_id} to path index {self.target_path_index}"

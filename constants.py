@@ -38,7 +38,7 @@ from typing import List, Dict, Tuple, Any
 GRID_ROWS: int = 10; GRID_COLS: int = 10
 PLAYABLE_ROWS: Tuple[int, int] = (1, 8); PLAYABLE_COLS: Tuple[int, int] = (1, 8)
 # --- Game Rules & Data ---
-BUILDING_COORDS: Dict[str, Tuple[int, int]] = { 'A': (5, 1), 'B': (4, 6), 'C': (6, 8), }
+BUILDING_COORDS: Dict[str, Tuple[int, int]] = { 'A': (5, 1), 'B': (4, 6), 'C': (6, 8), 'T': (2, 6) }
 TILE_DEFINITIONS: Dict[str, Dict[str, Any]] = { "Straight": {"connections": [['N', 'S']], "is_swappable": True}, "Curve": {"connections": [['N', 'E']], "is_swappable": True}, "StraightLeftCurve": {"connections": [['N', 'S'], ['S', 'W']], "is_swappable": True}, "StraightRightCurve": {"connections": [['N', 'S'], ['S', 'E']], "is_swappable": True}, "DoubleCurveY": {"connections": [['N', 'W'], ['N', 'E']], "is_swappable": True}, "DiagonalCurve": {"connections": [['S', 'W'], ['N', 'E']], "is_swappable": True}, "Tree_JunctionTop": {"connections": [['E', 'W'], ['W', 'N'], ['N', 'E']], "is_swappable": False}, "Tree_JunctionRight": {"connections": [['E', 'W'], ['N', 'E'], ['S', 'E']], "is_swappable": False}, "Tree_Roundabout": {"connections": [['W', 'N'], ['N', 'E'], ['E', 'S'], ['S', 'W']], "is_swappable": False}, "Tree_Crossroad": {"connections": [['N', 'S'], ['E', 'W']], "is_swappable": False}, "Tree_StraightDiagonal1": {"connections": [['N', 'S'], ['S', 'W'], ['N', 'E']], "is_swappable": False}, "Tree_StraightDiagonal2": {"connections": [['N', 'S'], ['N', 'W'], ['S', 'E']], "is_swappable": False}, }
 TILE_COUNTS_BASE: Dict[str, int] = { "Straight": 21, "Curve": 20, "StraightLeftCurve": 10, "StraightRightCurve": 10, "DoubleCurveY": 10, "DiagonalCurve": 6, "Tree_JunctionTop": 6, "Tree_JunctionRight": 6, "Tree_Roundabout": 4, "Tree_Crossroad": 4, "Tree_StraightDiagonal1": 2, "Tree_StraightDiagonal2": 2, }
 TILE_COUNTS_5_PLUS_ADD: Dict[str, int] = {"Straight": 15, "Curve": 10,}
@@ -47,7 +47,7 @@ ROUTE_CARD_VARIANTS: List[Dict[str, Dict[int, List[str]]]] = [
     { 
         "1-4": { 1: ['A', 'B', 'C'], 2: ['A', 'B', 'C'], }}, 
     ]
-TERMINAL_DATA: Dict[int, Tuple[Tuple[Tuple[int, int], int], Tuple[Tuple[int, int], int]]] = { 1: ( (((3, 0), 90), ((4, 0), 0)), (((8, 9), 180), ((9, 9), 270)) ), }
+TERMINAL_DATA: Dict[int, Tuple[Tuple[Tuple[int, int], int], Tuple[Tuple[int, int], int]]] = { 1: ( (((3, 0), 90), ((4, 0), 0)), (((7, 9), 180), ((8, 9), 270)) ), }
 TERMINAL_COORDS: Dict[int, Tuple[Tuple[int,int], Tuple[int,int]]] = { line: (data[0][0][0], data[1][0][0]) for line, data in TERMINAL_DATA.items() }
 
 

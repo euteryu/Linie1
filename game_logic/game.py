@@ -17,6 +17,10 @@ from .command_history import CommandHistory
 from .commands import (Command, PlaceTileCommand,
                      ExchangeTileCommand, MoveCommand)
 
+from collections import namedtuple
+from .player import RouteStep
+from .pathfinding import Pathfinder, AStarPathfinder, BFSPathfinder
+
 # --- Constants ---
 from constants import (
     TILE_DEFINITIONS, TILE_COUNTS_BASE, TILE_COUNTS_5_PLUS_ADD,
@@ -53,6 +57,8 @@ class Game:
         self.winner: Optional[Player] = None
         self.actions_taken_this_turn: int = 0
         self.command_history = CommandHistory()
+        # self.pathfinder: Pathfinder = AStarPathfinder()
+        self.pathfinder: Pathfinder = BFSPathfinder()
 
     def get_active_player(self) -> Player:
         if 0 <= self.active_player_index < len(self.players):
@@ -249,159 +255,94 @@ class Game:
             cost += abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
         return cost
 
-    def _find_sequential_goal_path(self, player: Player, full_node_sequence: List[Tuple[int, int]]) -> Tuple[Optional[List[Tuple[int, int]]], int]:
+    def _find_sequential_goal_path(self, player: Player, full_node_sequence: List[Tuple[int, int]]) -> Tuple[Optional[List[RouteStep]], int]:
         """
-        Performs a multi-goal A* search to find the shortest valid path that visits all nodes
-        in the full_node_sequence in order, respecting all game rules.
+        Performs the pathfinding. Now correctly passes the previous target node
+        to the successor generation logic.
         """
-        print(f"--- SEQ A* P{player.player_id}: Validating sequence {full_node_sequence} ---")
         start_pos = full_node_sequence[0]
-        # State: (position, arrival_direction, sequence_index)
-        start_state = PathState(pos=start_pos, arrival_dir=None, seq_idx=1) # Start by aiming for index 1
-
-        if not self.board.get_tile(start_pos[0], start_pos[1]):
-            print("   -> FAIL: Start terminal has no tile.")
-            return None, float('inf')
-
-        open_set = PriorityQueue()
-        tie_breaker = 0
+        start_state = PathState(pos=start_pos, arrival_dir=None, seq_idx=1)
+        if not self.board.get_tile(start_pos[0], start_pos[1]): return None, float('inf')
+        
+        open_set = PriorityQueue(); tie_breaker = 0
         f_score = self._heuristic_sequential(start_pos, 1, full_node_sequence)
         open_set.put((f_score, tie_breaker, start_state))
-
-        g_scores = {start_state: 0}
-        came_from = {start_state: None}
+        
+        g_scores, came_from = {start_state: 0}, {start_state: None}
+        goal_node_coords = set(full_node_sequence)
         stop_locations = set(self.board.building_stop_locations.values())
 
         while not open_set.empty():
             _, _, current_state = open_set.get()
-
-            # --- Goal Check ---
             if current_state.seq_idx == len(full_node_sequence):
-                print(f"   -> SUCCESS: Reached final node {current_state.pos} having visited all prior nodes.")
-                path = []
+                path_steps: List[RouteStep] = []
                 curr = current_state
                 while curr is not None:
-                    path.append(curr.pos)
+                    is_goal = curr.pos in goal_node_coords
+                    step = RouteStep(coord=curr.pos, is_goal_node=is_goal, arrival_direction=curr.arrival_dir)
+                    path_steps.append(step)
                     curr = came_from.get(curr)
-                return path[::-1], g_scores[current_state]
+                return path_steps[::-1], g_scores[current_state]
 
-            # --- Successor Generation ---
-            current_g = g_scores[current_state]
-            current_tile = self.board.get_tile(current_state.pos[0], current_state.pos[1])
-            if not current_tile: continue
+            # Pass the PREVIOUS target node to _get_valid_successors for the "forced exit" check.
+            # This is crucial for ensuring the rule only applies to the IMMEDIATE goal.
+            previous_target_node_for_exit_check = full_node_sequence[current_state.seq_idx - 1] if current_state.seq_idx > 0 else None
 
-            current_conns = self.get_effective_connections(current_tile.tile_type, current_tile.orientation)
-            entry_port = Direction.opposite(current_state.arrival_dir).name if current_state.arrival_dir else None
-            
-            # Determine valid exit directions from this entry port
-            if entry_port:
-                valid_exit_strs = current_conns.get(entry_port, [])
-            else: # No entry constraint at start, all exits are potentially valid
-                valid_exit_strs = list(set(ex for exits in current_conns.values() for ex in exits))
-
-            for exit_dir_str in valid_exit_strs:
-                exit_dir = Direction.from_str(exit_dir_str)
-                dr, dc = exit_dir.value
-                neighbor_pos = (current_state.pos[0] + dr, current_state.pos[1] + dc)
-
-                if not self.board.is_valid_coordinate(neighbor_pos[0], neighbor_pos[1]): continue
-                neighbor_tile = self.board.get_tile(neighbor_pos[0], neighbor_pos[1])
-                if not neighbor_tile: continue
-
-                # Check for a two-way connection
-                neighbor_conns = self.get_effective_connections(neighbor_tile.tile_type, neighbor_tile.orientation)
-                required_entry_port = Direction.opposite(exit_dir).name
-                if required_entry_port not in {ex for exits in neighbor_conns.values() for ex in exits}: continue
-
-                # Determine the sequence index for the neighbor state
-                next_seq_idx = current_state.seq_idx
-                target_node = full_node_sequence[current_state.seq_idx]
-                if neighbor_pos == target_node:
-                    is_stop = neighbor_pos in stop_locations
-                    if not is_stop or self._is_valid_stop_entry(neighbor_pos, exit_dir):
-                        next_seq_idx += 1 # Advance sequence progress
-
-                neighbor_state = PathState(pos=neighbor_pos, arrival_dir=exit_dir, seq_idx=next_seq_idx)
-                
-                tentative_g = current_g + 1
-                if tentative_g < g_scores.get(neighbor_state, float('inf')):
-                    came_from[neighbor_state] = current_state
-                    g_scores[neighbor_state] = tentative_g
-                    f_score = tentative_g + self._heuristic_sequential(neighbor_pos, next_seq_idx, full_node_sequence)
+            for successor_state in _get_valid_successors(self, current_state, full_node_sequence, previous_target_node_for_exit_check):
+                new_cost = g_scores[current_state] + 1
+                if new_cost < g_scores.get(successor_state, float('inf')):
+                    g_scores[successor_state], came_from[successor_state] = new_cost, current_state
+                    f_score = new_cost + self._heuristic_sequential(successor_state.pos, successor_state.seq_idx, full_node_sequence)
                     tie_breaker += 1
-                    open_set.put((f_score, tie_breaker, neighbor_state))
-
-        print(f"   -> FAIL: No valid path found for sequence.")
+                    open_set.put((f_score, tie_breaker, successor_state))
         return None, float('inf')
 
-    def check_player_route_completion(self, player: Player) -> Tuple[bool, Optional[Tuple[int, int]]]:
-        """Orchestrates route completion check using the new sequential A* pathfinder."""
-        print(f"--- Checking P{player.player_id} Route Completion (Unified A*) ---")
-        if not player.line_card or not player.route_card: return False, None
+    def check_player_route_completion(self, player: Player) -> Tuple[bool, Optional[Tuple[int, int]], Optional[List[RouteStep]]]:
+        if not player.line_card or not player.route_card: return False, None, None
+        stops = player.get_required_stop_coords(self)
+        if stops is None: return False, None, None
+        t1, t2 = self.get_terminal_coords(player.line_card.line_number)
+        if not t1 or not t2: return False, None, None
+
+        path1, cost1 = self.pathfinder.find_path(self, player, [t1] + stops + [t2])
+        path2, cost2 = self.pathfinder.find_path(self, player, [t2] + stops + [t1])
+
+        valid1, valid2 = (cost1 != float('inf')), (cost2 != float('inf'))
+        if not valid1 and not valid2: return False, None, None
         
-        stop_coords = player.get_required_stop_coords(self)
-        if stop_coords is None:
-            print(f"Route Check P{player.player_id}: FAILED - Not all required stops are on the board.")
-            return False, None
-
-        term1, term2 = self.get_terminal_coords(player.line_card.line_number)
-        if not term1 or not term2: return False, None
-
-        # --- Validate Sequence 1: Term1 -> Stops -> Term2 ---
-        seq1_nodes = [term1] + stop_coords + [term2]
-        path1, cost1 = self._find_sequential_goal_path(player, seq1_nodes)
-
-        # --- Validate Sequence 2: Term2 -> Stops -> Term1 ---
-        seq2_nodes = [term2] + stop_coords + [term1]
-        path2, cost2 = self._find_sequential_goal_path(player, seq2_nodes)
-
-        # --- Determine Outcome ---
-        is_valid1 = (cost1 != float('inf'))
-        is_valid2 = (cost2 != float('inf'))
-
-        if not is_valid1 and not is_valid2:
-            print(f"Route Check P{player.player_id}: FAILED - No valid sequence direction found.")
-            return False, None
+        chosen_start, optimal_path = (t1, path1) if valid1 and (not valid2 or cost1 <= cost2) else (t2, path2)
         
-        chosen_start = None
-        if is_valid1 and is_valid2:
-            chosen_start = term1 if cost1 <= cost2 else term2
-        elif is_valid1:
-            chosen_start = term1
-        else: # is_valid2 must be true
-            chosen_start = term2
-
         if chosen_start:
              print(f"Route Check P{player.player_id}: COMPLETE. Chosen Start: {chosen_start}")
-             player.start_terminal_coord = chosen_start
-             return True, chosen_start
-        
-        return False, None
+             return True, chosen_start, optimal_path
+        return False, None, None
 
-    def handle_route_completion(self, player: Player):
-        if not player.start_terminal_coord:
-             player.player_state = PlayerState.LAYING_TRACK
-             return
-        player.player_state = PlayerState.DRIVING
-        player.required_node_index = 0 # Start by aiming for node 0 (the start terminal)
-        player.streetcar_position = player.start_terminal_coord
-        player.arrival_direction = None
-        # Once placed, the tram must move OFF the start terminal, so the index immediately advances.
-        player.required_node_index = 1 # Now aiming for the first stop (or end terminal if no stops)
+    def handle_route_completion(self, player: Player, chosen_start: Tuple[int, int], optimal_path: List[RouteStep]):
+        player.player_state, player.start_terminal_coord, player.validated_route = PlayerState.DRIVING, chosen_start, optimal_path
+        player.streetcar_path_index, player.required_node_index = 0, 1 # Start at index 0, aim for node at index 1
         print(f"  Player {player.player_id} streetcar placed at: {player.streetcar_position}")
+        # Print the full validated path for debugging/clarity
+        print("--- Validated Route Path ---")
+        for i, step in enumerate(player.validated_route):
+            arr_dir_str = step.arrival_direction.name if step.arrival_direction else "Start"
+            goal_marker = "[GOAL]" if step.is_goal_node else ""
+            print(f"  Step {i:<2}: {step.coord} (Arrival: {arr_dir_str:<5}) {goal_marker}")
+        print("--- End Validated Route ---")
+        
         if self.game_phase == GamePhase.LAYING_TRACK:
              self.game_phase = GamePhase.DRIVING
-             print(f"\n*** ROUTE COMPLETE for Player {player.player_id}! Entering Driving Phase. ***")
 
-    # =====================================================================
-    # === NEW: DRIVING PHASE LOGIC (Using a basic A* for segments) ===
-    # =====================================================================
+
 
     def _heuristic_manhattan(self, pos1: Tuple[int, int], pos2: Tuple[int, int]) -> int:
         return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
 
-    def _find_basic_path(self, start_pos: Tuple[int, int], end_pos: Tuple[int, int], arrival_dir_at_start: Optional[Direction]) -> Optional[List[Tuple[int, int]]]:
-        """A simple A* to find a path from A to B, respecting the U-turn rule and FORCED EXITS from valid stops."""
+    def _find_basic_path(self, start_pos: Tuple[int, int], end_pos: Tuple[int, int], arrival_dir_at_start: Optional[Direction], previous_target_node: Optional[Tuple[int, int]]) -> Optional[List[Tuple[int, int]]]:
+        """
+        A simple A* to find a path from A to B, respecting the U-turn rule and
+        only forcing a straight-through exit if the start_pos was the required
+        goal on the previous turn.
+        """
         start_state = (start_pos, arrival_dir_at_start)
         open_set = PriorityQueue()
         tie_breaker = 0
@@ -425,32 +366,36 @@ class Game:
             current_tile = self.board.get_tile(current_pos[0], current_pos[1])
             if not current_tile: continue
 
-            # --- REFACTORED LOGIC: Determine valid exits ---
+            # --- FINAL CORRECTED LOGIC ---
             forced_exit_dir: Optional[Direction] = None
-            # Check if we are starting from a validly-entered stop, which forces our exit.
             if current_pos == start_pos:
                 is_stop = start_pos in self.board.building_stop_locations.values()
-                if is_stop and arrival_dir_at_start and self._is_valid_stop_entry(start_pos, arrival_dir_at_start):
-                    # Player just "stopped" correctly. The only valid exit is to continue straight.
+                # Check if the tile we are starting from was the required goal of the PREVIOUS move.
+                was_the_required_goal = (start_pos == previous_target_node)
+                
+                # The "forced straight" rule ONLY applies if all three are true:
+                # 1. We are starting on a stop tile.
+                # 2. That stop was our specific required goal last turn.
+                # 3. We entered it validly.
+                if is_stop and was_the_required_goal and arrival_dir_at_start and self._is_valid_stop_entry(start_pos, arrival_dir_at_start):
                     forced_exit_dir = arrival_dir_at_start
-                    print(f"  (Pathfinding from valid stop, forcing exit via {forced_exit_dir.name})")
-            
+                    print(f"  (Pathfinding from REQUIRED GOAL stop {start_pos}, forcing exit via {forced_exit_dir.name})")
+
             current_conns = self.get_effective_connections(current_tile.tile_type, current_tile.orientation)
             valid_exit_dirs = []
             if forced_exit_dir:
-                # If exit is forced, only consider that direction if the tile physically allows it.
                 entry_port = Direction.opposite(arrival_dir_at_start).name if arrival_dir_at_start else None
                 if entry_port and forced_exit_dir.name in current_conns.get(entry_port, []):
                     valid_exit_dirs.append(forced_exit_dir)
             else:
-                # Standard logic: get all non-U-turn exits based on how we entered the current tile.
+                # Standard logic for regular tiles OR non-required stops.
                 entry_port = Direction.opposite(current_arrival_dir).name if current_arrival_dir else None
                 if entry_port:
                     valid_exit_strs = current_conns.get(entry_port, [])
-                else: # No entry constraint (very start of path), all exits are possible.
+                else: 
                     valid_exit_strs = list(set(ex for exits in current_conns.values() for ex in exits))
                 valid_exit_dirs = [Direction.from_str(s) for s in valid_exit_strs]
-            # --- END REFACTORED LOGIC ---
+            # --- END FINAL CORRECTED LOGIC ---
 
             for exit_dir in valid_exit_dirs:
                 dr, dc = exit_dir.value
@@ -469,27 +414,48 @@ class Game:
                     open_set.put((f_score, tie_breaker, neighbor_pos, exit_dir))
         return None
 
-    def roll_special_die(self) -> Any:
-        return random.choice(DIE_FACES)
-
     def trace_track_steps(self, player: Player, num_steps: int) -> Optional[Tuple[int, int]]:
-        next_target = player.get_next_target_node(self)
-        if not player.streetcar_position or not next_target: return player.streetcar_position
-        
-        path_segment = self._find_basic_path(player.streetcar_position, next_target, player.arrival_direction)
+        """
+        Calculates destination by finding path segment.
+        The tram moves up to num_steps, but MUST stop if it lands on its next required node.
+        """
+        sequence = player.get_full_driving_sequence(self)
+        if not player.streetcar_position or not sequence:
+            return player.streetcar_position
+
+        next_target = sequence[player.required_node_index] if player.required_node_index < len(sequence) else None
+        previous_target = sequence[player.required_node_index - 1] if player.required_node_index > 0 else None
+        if not next_target: return player.streetcar_position
+
+        path_segment = self._find_basic_path(player.streetcar_position, next_target, player.arrival_direction, previous_target)
         if not path_segment or len(path_segment) <= 1: return player.streetcar_position
 
-        target_idx = min(num_steps, len(path_segment) - 1)
-        return path_segment[target_idx]
+        # --- CORRECTED MOVEMENT LOGIC ---
+        path_length_to_node = len(path_segment) - 1
+
+        if path_length_to_node <= num_steps:
+            # If the roll is enough (or more than enough) to reach the next required node,
+            # the destination IS the node.
+            print(f"  (Roll of {num_steps} is sufficient to reach goal {path_length_to_node} steps away. Stopping at goal.)")
+            return path_segment[-1]
+        else:
+            # If the roll is not enough to reach the goal, move exactly num_steps along the path.
+            return path_segment[num_steps]
 
     def find_next_feature_on_path(self, player: Player) -> Optional[Tuple[int, int]]:
-        next_target = player.get_next_target_node(self)
-        if not player.streetcar_position or not next_target: return player.streetcar_position
+        """Finds path segment, then finds first feature on THAT segment."""
+        sequence = player.get_full_driving_sequence(self)
+        if not player.streetcar_position or not sequence:
+            return player.streetcar_position
 
-        path_segment = self._find_basic_path(player.streetcar_position, next_target, player.arrival_direction)
+        # Determine the NEXT and PREVIOUS target nodes.
+        next_target = sequence[player.required_node_index] if player.required_node_index < len(sequence) else None
+        previous_target = sequence[player.required_node_index - 1] if player.required_node_index > 0 else None
+        if not next_target: return player.streetcar_position
+        
+        path_segment = self._find_basic_path(player.streetcar_position, next_target, player.arrival_direction, previous_target)
         if not path_segment or len(path_segment) <= 1: return player.streetcar_position
         
-        # Check path for features (stops or any terminal)
         for i in range(1, len(path_segment)):
             coord = path_segment[i]
             tile = self.board.get_tile(coord[0], coord[1])
@@ -499,6 +465,10 @@ class Game:
         
         return path_segment[-1] # No features, go to end of segment
 
+    def roll_special_die(self) -> Any:
+        return random.choice(DIE_FACES)
+
+
     def _get_entry_direction(self, from_coord: Tuple[int,int], to_coord: Tuple[int,int]) -> Optional[Direction]:
         if from_coord is None or to_coord is None: return None
         dr, dc = to_coord[0] - from_coord[0], to_coord[1] - from_coord[1]
@@ -506,48 +476,18 @@ class Game:
             if d.value == (dr, dc): return d
         return None
 
-    def move_streetcar(self, player: Player, target_coord: Tuple[int, int]):
-        """Moves streetcar and only increments target index if the visit to a required node is valid."""
-        if player.streetcar_position is None: return
+    def move_streetcar(self, player: Player, target_path_index: int):
+        """Moves streetcar by updating its index in the validated path."""
+        if not player.validated_route or not (0 <= target_path_index < len(player.validated_route)): return
+        
+        player.streetcar_path_index = target_path_index
+        
+        # Check if the new step is a goal node to update progress
+        new_step = player.validated_route[target_path_index]
+        if new_step.is_goal_node:
+            print(f"  -> Reached required node at {new_step.coord}. Advancing sequence index.")
+            player.required_node_index += 1
 
-        # Determine the direction of arrival for the new position
-        arrival_direction = self._get_entry_direction(player.streetcar_position, target_coord)
-
-        # Update player's state for the new position
-        player.streetcar_position = target_coord
-        player.arrival_direction = arrival_direction
-        print(f"Player {player.player_id} moved to {target_coord}")
-
-        # Check if the new position is a required node for the player
-        sequence = player.get_full_driving_sequence(self)
-        if not sequence: return
-
-        # The node the player was aiming for is at their current sequence index
-        if player.required_node_index < len(sequence):
-            the_node_player_was_aiming_for = sequence[player.required_node_index]
-
-            if player.streetcar_position == the_node_player_was_aiming_for:
-                # Landed on the target coordinate. Now check if the visit was valid.
-                is_stop_tile = player.streetcar_position in self.board.building_stop_locations.values()
-                
-                is_valid_visit = False
-                if is_stop_tile:
-                    # For a stop, the entry direction must be valid (i.e., straight-through)
-                    if player.arrival_direction and self._is_valid_stop_entry(player.streetcar_position, player.arrival_direction):
-                        is_valid_visit = True
-                        print(f"  -> Validly stopped at {player.streetcar_position}.")
-                    else:
-                        arr_dir_name = player.arrival_direction.name if player.arrival_direction else "None"
-                        print(f"  -> Landed on stop {player.streetcar_position} but entry via {arr_dir_name} was INVALID.")
-                else:
-                    # If it's not a stop (i.e., a terminal), landing on it is always a valid visit.
-                    is_valid_visit = True
-                    print(f"  -> Reached terminal node {player.streetcar_position}.")
-
-                # Only advance the sequence if the visit was valid.
-                if is_valid_visit:
-                    print(f"  Advancing sequence index from {player.required_node_index} to {player.required_node_index + 1}.")
-                    player.required_node_index += 1
 
     def check_win_condition(self, player: Player) -> bool:
         if player.player_state != PlayerState.DRIVING: return False
@@ -567,23 +507,156 @@ class Game:
                 return True
         return False
 
+
+    def _find_sequential_goal_path(self, player: Player, full_node_sequence: List[Tuple[int, int]]) -> Tuple[Optional[List[RouteStep]], int]:
+        """
+        Performs a multi-goal A* search and returns a rich path of RouteStep objects.
+        """
+        print(f"--- SEQ A* P{player.player_id}: Validating sequence {full_node_sequence} ---")
+        start_pos = full_node_sequence[0]
+        start_state = PathState(pos=start_pos, arrival_dir=None, seq_idx=1)
+
+        if not self.board.get_tile(start_pos[0], start_pos[1]): return None, float('inf')
+
+        open_set = PriorityQueue()
+        tie_breaker = 0
+        f_score = self._heuristic_sequential(start_pos, 1, full_node_sequence)
+        open_set.put((f_score, tie_breaker, start_state))
+
+        g_scores = {start_state: 0}
+        came_from = {start_state: None}
+        goal_node_coords = set(full_node_sequence)
+        stop_locations = set(self.board.building_stop_locations.values())
+
+        while not open_set.empty():
+            _, _, current_state = open_set.get()
+
+            if current_state.seq_idx == len(full_node_sequence):
+                # --- PATH RECONSTRUCTION WITH RouteStep OBJECTS ---
+                path_steps: List[RouteStep] = []
+                curr = current_state
+                while curr is not None:
+                    is_goal = curr.pos in goal_node_coords
+                    step = RouteStep(
+                        coord=curr.pos,
+                        is_goal_node=is_goal,
+                        arrival_direction=curr.arrival_dir
+                    )
+                    path_steps.append(step)
+                    curr = came_from.get(curr)
+                return path_steps[::-1], g_scores[current_state]
+
+            # ... (the A* successor generation logic remains the same as before)
+            current_g = g_scores[current_state]
+            current_tile = self.board.get_tile(current_state.pos[0], current_state.pos[1])
+            if not current_tile: continue
+            current_conns = self.get_effective_connections(current_tile.tile_type, current_tile.orientation)
+            entry_port = Direction.opposite(current_state.arrival_dir).name if current_state.arrival_dir else None
+            if entry_port: valid_exit_strs = current_conns.get(entry_port, [])
+            else: valid_exit_strs = list(set(ex for exits in current_conns.values() for ex in exits))
+            for exit_dir_str in valid_exit_strs:
+                exit_dir = Direction.from_str(exit_dir_str)
+                dr, dc = exit_dir.value
+                neighbor_pos = (current_state.pos[0] + dr, current_state.pos[1] + dc)
+                if not self.board.is_valid_coordinate(neighbor_pos[0], neighbor_pos[1]): continue
+                neighbor_tile = self.board.get_tile(neighbor_pos[0], neighbor_pos[1])
+                if not neighbor_tile: continue
+                neighbor_conns = self.get_effective_connections(neighbor_tile.tile_type, neighbor_tile.orientation)
+                required_entry_port = Direction.opposite(exit_dir).name
+                if required_entry_port not in {ex for exits in neighbor_conns.values() for ex in exits}: continue
+                next_seq_idx = current_state.seq_idx
+                target_node = full_node_sequence[current_state.seq_idx]
+                if neighbor_pos == target_node:
+                    if not (neighbor_pos in stop_locations) or self._is_valid_stop_entry(neighbor_pos, exit_dir):
+                        next_seq_idx += 1
+                neighbor_state = PathState(pos=neighbor_pos, arrival_dir=exit_dir, seq_idx=next_seq_idx)
+                tentative_g = current_g + 1
+                if tentative_g < g_scores.get(neighbor_state, float('inf')):
+                    came_from[neighbor_state] = current_state
+                    g_scores[neighbor_state] = tentative_g
+                    f_score = tentative_g + self._heuristic_sequential(neighbor_pos, next_seq_idx, full_node_sequence)
+                    tie_breaker += 1
+                    open_set.put((f_score, tie_breaker, neighbor_state))
+        
+        return None, float('inf')
+
+    def check_player_route_completion(self, player: Player) -> Tuple[bool, Optional[Tuple[int, int]], Optional[List[RouteStep]]]:
+        if not player.line_card or not player.route_card: return False, None, None
+        stops = player.get_required_stop_coords(self)
+        if stops is None: return False, None, None
+        t1, t2 = self.get_terminal_coords(player.line_card.line_number)
+        if not t1 or not t2: return False, None, None
+
+        # This is where the pathfinder is called. It returns the optimal path if one exists.
+        path1, cost1 = self.pathfinder.find_path(self, player, [t1] + stops + [t2])
+        path2, cost2 = self.pathfinder.find_path(self, player, [t2] + stops + [t1])
+
+        valid1, valid2 = (cost1 != float('inf')), (cost2 != float('inf'))
+        if not valid1 and not valid2: return False, None, None
+        
+        chosen_start, optimal_path = (t1, path1) if valid1 and (not valid2 or cost1 <= cost2) else (t2, path2)
+        
+        if chosen_start: return True, chosen_start, optimal_path
+        return False, None, None
+
+    def handle_route_completion(self, player: Player, chosen_start: Tuple[int, int], optimal_path: List[RouteStep]):
+        player.player_state, player.start_terminal_coord, player.validated_route = PlayerState.DRIVING, chosen_start, optimal_path
+        player.streetcar_path_index, player.required_node_index = 0, 1 # Start at index 0, aim for node at index 1
+        
+        print(f"  Player {player.player_id} streetcar placed at: {player.streetcar_position}")
+        
+        # --- ADDED DEBUG OUTPUT ---
+        # Print the full validated route coordinates for clarity.
+        print("--- Validated Route Path ---")
+        for i, step in enumerate(player.validated_route):
+            arr_dir_str = step.arrival_direction.name if step.arrival_direction else "Start"
+            goal_marker = "[GOAL]" if step.is_goal_node else ""
+            print(f"  Step {i:<2}: {step.coord} (Arrival: {arr_dir_str:<5}) {goal_marker}")
+        print("--- End Validated Route ---")
+        # --- END ADDED DEBUG OUTPUT ---
+        
+        if self.game_phase == GamePhase.LAYING_TRACK:
+             self.game_phase = GamePhase.DRIVING
+
+    # --- DRIVING PHASE LOGIC (REWRITTEN) ---
+
     def attempt_driving_move(self, player: Player, roll_result: Any) -> bool:
-        if player.player_state != PlayerState.DRIVING: return False
+        """Determines target path index based on the stored validated path and creates a MoveCommand."""
+        if player.player_state != PlayerState.DRIVING or not player.validated_route:
+            return False
         if self.actions_taken_this_turn > 0: return False
 
-        target_coord: Optional[Tuple[int, int]] = None
-        if roll_result == STOP_SYMBOL:
-             target_coord = self.find_next_feature_on_path(player)
-        elif isinstance(roll_result, int):
-             target_coord = self.trace_track_steps(player, roll_result)
+        current_path_idx = player.streetcar_path_index
         
-        if target_coord is None or target_coord == player.streetcar_position:
+        # Find the index of the next goal node in the validated path
+        next_goal_path_idx = -1
+        for i in range(current_path_idx + 1, len(player.validated_route)):
+            if player.validated_route[i].is_goal_node:
+                next_goal_path_idx = i
+                break
+        
+        if next_goal_path_idx == -1: # No more goals left
+            self.confirm_turn()
+            return True
+
+        distance_to_goal = next_goal_path_idx - current_path_idx
+        
+        target_path_idx = current_path_idx
+        if roll_result == STOP_SYMBOL:
+            target_path_idx = next_goal_path_idx
+        elif isinstance(roll_result, int):
+            if roll_result >= distance_to_goal:
+                target_path_idx = next_goal_path_idx
+            else:
+                target_path_idx = current_path_idx + roll_result
+        
+        if target_path_idx == current_path_idx:
             print(f"Driving Info: No move for roll {roll_result}. Ending turn.")
             self.actions_taken_this_turn = MAX_PLAYER_ACTIONS
             self.confirm_turn()
-            return True # No move, but turn ends successfully
+            return True
 
-        command = MoveCommand(self, player, target_coord)
+        command = MoveCommand(self, player, target_path_idx)
         if self.command_history.execute_command(command):
              self.actions_taken_this_turn = MAX_PLAYER_ACTIONS
              if self.game_phase != GamePhase.GAME_OVER:
@@ -614,6 +687,8 @@ class Game:
         return False
 
     def confirm_turn(self) -> bool:
+        # The logic inside here must be updated to use the new return signature
+        # from check_player_route_completion
         active_player = self.get_active_player()
         if self.game_phase == GamePhase.GAME_OVER: return False
         if active_player.player_state == PlayerState.LAYING_TRACK and self.actions_taken_this_turn < MAX_PLAYER_ACTIONS:
@@ -634,9 +709,9 @@ class Game:
         print(f"\n--- Starting Turn {self.current_turn} for Player {next_player.player_id} ({next_player.player_state.name}) ---")
 
         if next_player.player_state == PlayerState.LAYING_TRACK:
-            is_complete, _ = self.check_player_route_completion(next_player)
-            if is_complete:
-                self.handle_route_completion(next_player)
+            is_complete, chosen_start, optimal_path = self.check_player_route_completion(next_player)
+            if is_complete and chosen_start and optimal_path:
+                self.handle_route_completion(next_player, chosen_start, optimal_path)
         return True
 
     def save_game(self, filename: str) -> bool:

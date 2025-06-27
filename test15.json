@@ -1,0 +1,475 @@
+{
+    "num_players": 1,
+    "board": {
+        "rows": 10,
+        "cols": 10,
+        "grid": [
+            [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+            ],
+            [
+                null,
+                null,
+                {
+                    "type_name": "Curve",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Straight",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Straight",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Curve",
+                    "orientation": 180,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                null,
+                null,
+                null,
+                null
+            ],
+            [
+                null,
+                null,
+                {
+                    "type_name": "Straight",
+                    "orientation": 0,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                null,
+                {
+                    "type_name": "Curve",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Tree_JunctionTop",
+                    "orientation": 270,
+                    "has_stop_sign": true,
+                    "is_terminal": false
+                },
+                null,
+                null,
+                null,
+                null
+            ],
+            [
+                {
+                    "type_name": "Curve",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": true
+                },
+                {
+                    "type_name": "Straight",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Tree_JunctionTop",
+                    "orientation": 270,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                null,
+                {
+                    "type_name": "Straight",
+                    "orientation": 0,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Straight",
+                    "orientation": 0,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                null,
+                null,
+                null,
+                null
+            ],
+            [
+                {
+                    "type_name": "Curve",
+                    "orientation": 0,
+                    "has_stop_sign": false,
+                    "is_terminal": true
+                },
+                {
+                    "type_name": "Straight",
+                    "orientation": 90,
+                    "has_stop_sign": true,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Tree_JunctionTop",
+                    "orientation": 270,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Curve",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Tree_JunctionTop",
+                    "orientation": 0,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Tree_JunctionTop",
+                    "orientation": 270,
+                    "has_stop_sign": true,
+                    "is_terminal": false
+                },
+                null,
+                null,
+                null,
+                null
+            ],
+            [
+                null,
+                null,
+                {
+                    "type_name": "Tree_JunctionTop",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Tree_JunctionTop",
+                    "orientation": 0,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Straight",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Tree_JunctionTop",
+                    "orientation": 0,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Straight",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Curve",
+                    "orientation": 180,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                null,
+                null
+            ],
+            [
+                null,
+                null,
+                {
+                    "type_name": "Straight",
+                    "orientation": 0,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                null,
+                null,
+                null,
+                null,
+                {
+                    "type_name": "Straight",
+                    "orientation": 0,
+                    "has_stop_sign": true,
+                    "is_terminal": false
+                },
+                null,
+                null
+            ],
+            [
+                null,
+                null,
+                {
+                    "type_name": "Straight",
+                    "orientation": 180,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                null,
+                null,
+                null,
+                null,
+                {
+                    "type_name": "Curve",
+                    "orientation": 0,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Straight",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Curve",
+                    "orientation": 180,
+                    "has_stop_sign": false,
+                    "is_terminal": true
+                }
+            ],
+            [
+                null,
+                null,
+                {
+                    "type_name": "Curve",
+                    "orientation": 0,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Straight",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Straight",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Straight",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Straight",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Straight",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Straight",
+                    "orientation": 90,
+                    "has_stop_sign": false,
+                    "is_terminal": false
+                },
+                {
+                    "type_name": "Curve",
+                    "orientation": 270,
+                    "has_stop_sign": false,
+                    "is_terminal": true
+                }
+            ],
+            [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+            ]
+        ],
+        "buildings_with_stops": [
+            "A",
+            "B",
+            "C",
+            "T"
+        ],
+        "building_stop_locations": {
+            "C": [
+                6,
+                7
+            ],
+            "A": [
+                4,
+                1
+            ],
+            "B": [
+                4,
+                5
+            ],
+            "T": [
+                2,
+                5
+            ]
+        }
+    },
+    "players": [
+        {
+            "player_id": 0,
+            "hand": [
+                "Straight",
+                "Curve",
+                "Curve"
+            ],
+            "line_card": 1,
+            "route_card": {
+                "stops": [
+                    "A",
+                    "B",
+                    "C"
+                ],
+                "variant": 0
+            },
+            "player_state": "LAYING_TRACK",
+            "streetcar_position": null,
+            "required_node_index": 0,
+            "start_terminal_coord": null,
+            "arrival_direction": null
+        }
+    ],
+    "tile_draw_pile": [
+        "StraightRightCurve",
+        "DoubleCurveY",
+        "Tree_JunctionTop",
+        "Straight",
+        "DoubleCurveY",
+        "StraightLeftCurve",
+        "Straight",
+        "Straight",
+        "Curve",
+        "Tree_JunctionRight",
+        "Tree_Crossroad",
+        "Curve",
+        "Curve",
+        "DiagonalCurve",
+        "Straight",
+        "Curve",
+        "Curve",
+        "DoubleCurveY",
+        "DoubleCurveY",
+        "DiagonalCurve",
+        "DiagonalCurve",
+        "Tree_JunctionTop",
+        "Straight",
+        "Curve",
+        "StraightLeftCurve",
+        "Curve",
+        "Tree_Roundabout",
+        "DoubleCurveY",
+        "Curve",
+        "Tree_Crossroad",
+        "DoubleCurveY",
+        "Curve",
+        "Straight",
+        "DiagonalCurve",
+        "Straight",
+        "Tree_Roundabout",
+        "Straight",
+        "StraightLeftCurve",
+        "Curve",
+        "Straight",
+        "Tree_JunctionTop",
+        "Curve",
+        "Tree_Roundabout",
+        "Tree_StraightDiagonal1",
+        "Tree_Roundabout",
+        "StraightRightCurve",
+        "StraightLeftCurve",
+        "StraightLeftCurve",
+        "StraightLeftCurve",
+        "Tree_JunctionTop",
+        "Straight",
+        "StraightLeftCurve",
+        "Tree_JunctionRight",
+        "Tree_JunctionRight",
+        "Curve",
+        "DiagonalCurve",
+        "Straight",
+        "StraightRightCurve",
+        "Straight",
+        "StraightLeftCurve",
+        "Straight",
+        "Curve",
+        "StraightRightCurve",
+        "StraightRightCurve",
+        "StraightRightCurve",
+        "Straight",
+        "Straight",
+        "DoubleCurveY",
+        "Curve",
+        "StraightRightCurve",
+        "Straight",
+        "Tree_JunctionRight",
+        "Tree_Crossroad",
+        "Straight",
+        "Straight",
+        "Tree_StraightDiagonal2",
+        "Tree_Crossroad",
+        "Curve",
+        "Tree_JunctionRight",
+        "StraightLeftCurve",
+        "Tree_JunctionTop",
+        "Curve",
+        "Curve",
+        "Tree_StraightDiagonal1",
+        "StraightRightCurve",
+        "Straight",
+        "DoubleCurveY",
+        "Curve",
+        "Tree_StraightDiagonal2",
+        "StraightLeftCurve",
+        "StraightRightCurve",
+        "StraightRightCurve",
+        "Curve",
+        "DoubleCurveY",
+        "DoubleCurveY",
+        "Curve",
+        "Tree_JunctionRight",
+        "DiagonalCurve",
+        "Straight",
+        "Tree_JunctionTop",
+        "Straight"
+    ],
+    "active_player_index": 0,
+    "game_phase": "LAYING_TRACK",
+    "current_turn": 1,
+    "actions_taken": 2,
+    "winner_id": null
+}
