@@ -1,54 +1,46 @@
 # game_logic/game.py
+from __future__ import annotations
+from typing import List, Dict, Tuple, Optional, Any, TYPE_CHECKING
 import random
 import json
 import traceback
 import copy
-from collections import deque, namedtuple
-from typing import List, Dict, Tuple, Optional, Set, Any
 from queue import PriorityQueue
 
-# --- Relative imports from within the package ---
+if TYPE_CHECKING:
+    from .pathfinding import Pathfinder
+
 from .enums import PlayerState, GamePhase, Direction
 from .tile import TileType, PlacedTile
 from .cards import LineCard, RouteCard
-from .player import Player
+from .player import Player, HumanPlayer, AIPlayer, RouteStep
 from .board import Board
 from .command_history import CommandHistory
-from .commands import (Command, PlaceTileCommand,
-                     ExchangeTileCommand, MoveCommand)
+from .commands import Command, PlaceTileCommand, ExchangeTileCommand, MoveCommand
+from .pathfinding import AStarPathfinder, BFSPathfinder # Keep both for swapping
 
-from collections import namedtuple
-from .player import RouteStep
-from .pathfinding import Pathfinder, AStarPathfinder, BFSPathfinder
-
-# --- Constants ---
 from constants import (
-    TILE_DEFINITIONS, TILE_COUNTS_BASE, TILE_COUNTS_5_PLUS_ADD,
-    STARTING_HAND_TILES, ROUTE_CARD_VARIANTS, TERMINAL_COORDS,
-    HAND_TILE_LIMIT, MAX_PLAYER_ACTIONS, DIE_FACES, STOP_SYMBOL,
-    TERMINAL_DATA
+    TILE_DEFINITIONS, TILE_COUNTS_BASE, HAND_TILE_LIMIT,
+    MAX_PLAYER_ACTIONS, DIE_FACES, STOP_SYMBOL, TERMINAL_COORDS, STARTING_HAND_TILES, ROUTE_CARD_VARIANTS, TERMINAL_DATA
 )
 
-# A readable and hashable state for our A* search algorithms
-PathState = namedtuple('PathState', ['pos', 'arrival_dir', 'seq_idx'])
-
-
 class Game:
-    """
-    Manages the overall game state, rules, and player turns for Linie 1.
-    Integrates a command history for undo/redo functionality.
-    """
-    def __init__(self, num_players: int):
-        if not 1 <= num_players <= 6:
-            raise ValueError("Players must be 1-6.")
-        self.num_players = num_players
-        self.tile_types: Dict[str, TileType] = {
-            name: TileType(name=name, **details)
-            for name, details in TILE_DEFINITIONS.items()
-        }
+    def __init__(self, num_players: int, num_ai: int = 0):
+        total_players = num_players + num_ai
+        if not 1 <= total_players <= 6:
+            raise ValueError("Total players must be 1-6.")
+        
+        self.num_players = total_players
+        
+        self.players: List[Player] = []
+        for i in range(num_players): self.players.append(HumanPlayer(i))
+        for i in range(num_ai): self.players.append(AIPlayer(num_players + i))
+        
+        self.tile_types = {name: TileType(name=name, **details) for name, details in TILE_DEFINITIONS.items()}
         self.board = Board()
         self.board._initialize_terminals(self.tile_types)
-        self.players = [Player(i) for i in range(num_players)]
+        
+        # Initialize attributes that will be populated by setup_game
         self.tile_draw_pile: List[TileType] = []
         self.line_cards_pile: List[LineCard] = []
         self.active_player_index: int = 0
@@ -57,23 +49,24 @@ class Game:
         self.winner: Optional[Player] = None
         self.actions_taken_this_turn: int = 0
         self.command_history = CommandHistory()
-        # self.pathfinder: Pathfinder = AStarPathfinder()
         self.pathfinder: Pathfinder = BFSPathfinder()
+        self.MAX_PLAYER_ACTIONS = MAX_PLAYER_ACTIONS
+        self.HAND_TILE_LIMIT = HAND_TILE_LIMIT
 
-    def get_active_player(self) -> Player:
-        if 0 <= self.active_player_index < len(self.players):
-             return self.players[self.active_player_index]
-        else:
-             raise IndexError("Active player index out of bounds.")
+        # --- NEW: Call setup_game directly from the constructor ---
+        # This ensures that any new Game object is always fully initialized.
+        self.setup_game()
 
     def setup_game(self):
+        """Initializes piles, deals starting hands and cards for a new game."""
         if self.game_phase != GamePhase.SETUP:
-            print("Warning: setup_game called when not in SETUP phase.")
-            return
+            print("Warning: setup_game called on an already started game. Resetting.")
+        
         print("--- Starting Game Setup ---")
         self._create_tile_and_line_piles()
         self._deal_starting_hands()
         self._deal_player_cards()
+        
         self.game_phase = GamePhase.LAYING_TRACK
         self.active_player_index = 0
         self.current_turn = 1
@@ -81,20 +74,119 @@ class Game:
         self.command_history.clear()
         print("--- Setup Complete ---")
 
+    def _calculate_ai_ideal_route(self, player: AIPlayer) -> Optional[List[RouteStep]]:
+        """Calculates the AI's 'wet dream' path assuming infinite tiles."""
+        if not player.line_card or not player.route_card: return None
+        
+        stops = player.get_required_stop_coords(self)
+        if stops is None: return None
+        
+        t1, t2 = self.get_terminal_coords(player.line_card.line_number)
+        if not t1 or not t2: return None
+
+        # Find the shortest path in both directions and choose the best one.
+        path1, cost1 = self.pathfinder.find_path(self, [t1] + stops + [t2], is_hypothetical=True)
+        path2, cost2 = self.pathfinder.find_path(self, [t2] + stops + [t1], is_hypothetical=True)
+        
+        if cost1 == float('inf') and cost2 == float('inf'):
+            return None
+        
+        return path1 if cost1 <= cost2 else path2
+
+    def _score_ai_move(self, player: AIPlayer, tile_to_place: TileType, orientation: int, r: int, c: int) -> int:
+        """Scores a potential AI move based on its strategic value."""
+        score = 0
+        if not player.ideal_route_plan: return 0
+
+        # High score for placing a tile that is part of the ideal plan
+        for i, step in enumerate(player.ideal_route_plan):
+            if step.coord == (r,c):
+                # We would need to check if tile_to_place matches the required tile for this step
+                # This is a simplification for now
+                score += 100 - i # Higher score for earlier steps in the plan
+                break
+
+        # Score for connecting to existing track
+        # (Simplified check)
+        for direction in Direction:
+            nr, nc = r + direction.value[0], c + direction.value[1]
+            if self.board.get_tile(nr, nc):
+                score += 10
+        
+        return score
+
+    def _handle_ai_turn(self, player: AIPlayer):
+        """Orchestrates the AI's entire turn during the LAYING_TRACK phase."""
+        print(f"\n--- AI Player {player.player_id}'s Turn ---")
+        
+        for action_num in range(MAX_PLAYER_ACTIONS):
+            # 1. Plan: Recalculate the ideal route
+            player.ideal_route_plan = self._calculate_ai_ideal_route(player)
+            if player.ideal_route_plan:
+                print(f"  AI Action {action_num+1}: Ideal path found with {len(player.ideal_route_plan)} steps.")
+            else:
+                print(f"  AI Action {action_num+1}: No ideal path found. Placing randomly.")
+            
+            # 2. Evaluate and Select Best Move
+            best_move = None
+            best_score = -1
+
+            for tile in player.hand:
+                for r in range(self.board.rows):
+                    for c in range(self.board.cols):
+                        for orientation in [0, 90, 180, 270]:
+                            is_valid, _ = self.check_placement_validity(tile, orientation, r, c)
+                            if is_valid:
+                                score = self._score_ai_move(player, tile, orientation, r, c)
+                                if score > best_score:
+                                    best_score = score
+                                    best_move = (tile, orientation, r, c)
+            
+            # 3. Execute Move
+            if best_move:
+                tile, orientation, r, c = best_move
+                print(f"  AI chooses to place {tile.name} at ({r},{c}) with orientation {orientation} (Score: {best_score})")
+                self.attempt_place_tile(player, tile, orientation, r, c)
+            else:
+                print("  AI could not find any valid move.")
+                # AI must still perform an action. This is a fallback.
+                # In a real game, it might discard a tile. Here we just end its action.
+        
+        # End of AI's two actions
+        self.confirm_turn()
+
+
+    def get_active_player(self) -> Player:
+        if 0 <= self.active_player_index < len(self.players): return self.players[self.active_player_index]
+        else: raise IndexError("Active player index out of bounds.")
+
     def _create_tile_and_line_piles(self):
+        """Creates and shuffles the tile draw pile and line card pile."""
         print("Creating draw piles...")
         tile_counts = TILE_COUNTS_BASE.copy()
         if self.num_players >= 5:
             for name, count in TILE_COUNTS_5_PLUS_ADD.items():
                 tile_counts[name] = tile_counts.get(name, 0) + count
+
         self.tile_draw_pile = []
         for name, count in tile_counts.items():
             tile_type = self.tile_types.get(name)
-            if tile_type: self.tile_draw_pile.extend([tile_type] * count)
+            if tile_type:
+                self.tile_draw_pile.extend([tile_type] * count)
+            else:
+                print(f"Warning: Tile type '{name}' not found for pile.")
+
         random.shuffle(self.tile_draw_pile)
         print(f"Tile draw pile created: {len(self.tile_draw_pile)} tiles.")
-        self.line_cards_pile = [LineCard(i) for i in TERMINAL_COORDS.keys()]
+
+        # --- CORRECTED LOGIC ---
+        # Dynamically create Line Cards based on the actual keys in TERMINAL_DATA.
+        # This ensures that we always have the correct number of unique line cards
+        # matching the game's configuration.
+        self.line_cards_pile = [LineCard(line_num) for line_num in TERMINAL_DATA.keys()]
         random.shuffle(self.line_cards_pile)
+        print(f"Line card pile created with {len(self.line_cards_pile)} cards for lines: {sorted(list(TERMINAL_DATA.keys()))}")
+        # --- END CORRECTION ---
 
     def _deal_starting_hands(self):
         print("Dealing starting hands...")
@@ -111,22 +203,56 @@ class Game:
             # This is a simplification; a full implementation would remove from the pile.
 
     def _deal_player_cards(self):
-        print("Dealing player cards...")
+        """Deals one Line card and one Route card to each player and prints assignments for debugging."""
+        print("--- Dealing Player Cards (DEBUG) ---")
+        
+        # --- ADDED ROBUSTNESS CHECKS ---
         if len(self.line_cards_pile) < self.num_players:
-            raise RuntimeError("Not enough Line cards!")
+            print(f"FATAL ERROR: Not enough line cards ({len(self.line_cards_pile)}) for the number of players ({self.num_players}).")
+            # This should not happen with correct setup, but we guard against it.
+            # We will deal what we can to avoid a hard crash.
+            while len(self.line_cards_pile) < self.num_players:
+                print("WARNING: Synthesizing a dummy LineCard to prevent crash.")
+                self.line_cards_pile.append(LineCard(1)) # Add a dummy card
+        
+        if len(ROUTE_CARD_VARIANTS) == 0:
+            raise RuntimeError("FATAL ERROR: ROUTE_CARD_VARIANANTS in constants.py is empty.")
+        # --- END ROBUSTNESS CHECKS ---
+
         available_variants = list(range(len(ROUTE_CARD_VARIANTS)))
         random.shuffle(available_variants)
         player_range = "1-4" if self.num_players <= 4 else "5-6"
+
         for player in self.players:
-            player.line_card = self.line_cards_pile.pop()
-            variant_index = available_variants.pop(0) if available_variants else 0
+            # Another guard, just in case.
+            if not self.line_cards_pile:
+                print(f"CRITICAL: line_cards_pile became empty before dealing to Player {player.player_id}. This indicates a severe logic error.")
+                # Assign a dummy card to prevent a crash and allow the game to continue for debugging.
+                player.line_card = LineCard(1)
+            else:
+                player.line_card = self.line_cards_pile.pop()
+
+            # Ensure we have route variants, recycle if we run out (for >6 players, though illegal)
+            if not available_variants:
+                available_variants = list(range(len(ROUTE_CARD_VARIANTS)))
+                random.shuffle(available_variants)
+
+            variant_index = available_variants.pop(0)
+            
             try:
                 line_num = player.line_card.line_number
                 stops = ROUTE_CARD_VARIANTS[variant_index][player_range][line_num]
             except (KeyError, IndexError) as e:
-                raise RuntimeError(f"Error lookup route: Var={variant_index}, Rng={player_range}, Line={line_num}. Err: {e}")
+                print(f"Warning: Route lookup failed for P{player.player_id} (Line {line_num}, Var {variant_index}). Assigning default.")
+                # Assign a default route to prevent crash
+                stops = ROUTE_CARD_VARIANTS[0]["1-4"][1]
+            
             player.route_card = RouteCard(stops, variant_index)
-        self.line_cards_pile = []
+            
+            print(f"  Player {player.player_id} assigned: Line {player.line_card.line_number}, Stops {player.route_card.stops}")
+
+        self.line_cards_pile = [] # Clear any remaining cards
+        print("------------------------------------")
 
     def _rotate_direction(self, direction: str, angle: int) -> str:
         directions = ['N', 'E', 'S', 'W']
@@ -149,28 +275,109 @@ class Game:
     def _has_ew_straight(self, effective_connections: Dict[str, List[str]]) -> bool:
         return 'W' in effective_connections.get('E', [])
 
-    def check_placement_validity(self, tile_type: TileType, orientation: int, row: int, col: int) -> Tuple[bool, str]:
-        if not self.board.is_playable_coordinate(row, col): return False, f"Cannot place on border."
-        if self.board.get_building_at(row, col): return False, f"Cannot place on a building."
-        if self.board.get_tile(row, col): return False, f"Space occupied."
-        new_conns = self.get_effective_connections(tile_type, orientation)
+    def check_placement_validity(self, tile_type: TileType, orientation: int, r: int, c: int) -> Tuple[bool, str]:
+        """
+        A definitive, correct, and final validation function that correctly
+        handles all neighbor types: existing tiles, empty playable squares,
+        buildings, and walls.
+        """
+        # 1. Basic check on the target square itself.
+        if not self.board.is_playable_coordinate(r, c) or self.board.get_tile(r, c) or self.board.get_building_at(r, c):
+            return False, "Target square is not empty and playable."
+
+        new_connections = self.get_effective_connections(tile_type, orientation)
+
+        # 2. Loop through all four directions (N, E, S, W).
         for direction in Direction:
-            dir_str = direction.name
-            opp_dir_str = Direction.opposite(direction).name
-            dr, dc = direction.value
-            nr, nc = row + dr, col + dc
-            new_connects_out = dir_str in {ex for exits in new_conns.values() for ex in exits}
-            if not self.board.is_valid_coordinate(nr, nc):
-                if new_connects_out: return False, f"Points {dir_str} off grid."
-                continue
-            n_tile = self.board.get_tile(nr, nc)
-            if n_tile:
-                n_conns = self.get_effective_connections(n_tile.tile_type, n_tile.orientation)
-                n_connects_back = opp_dir_str in {ex for exits in n_conns.values() for ex in exits}
-                if new_connects_out != n_connects_back: return False, f"Mismatch with neighbor {dir_str}."
-            elif self.board.get_building_at(nr, nc):
-                if new_connects_out: return False, f"Points {dir_str} into a building."
-        return True, "Placement appears valid."
+            # A. Does our new tile have a track pointing in this `direction`?
+            has_outgoing_track = any(direction.name in exits for exits in new_connections.values())
+            
+            # B. Get information about the neighbor.
+            nr, nc = r + direction.value[0], c + direction.value[1]
+            neighbor_tile = self.board.get_tile(nr, nc)
+            
+            if neighbor_tile:
+                # --- CASE 1: The neighbor is an existing tile. ---
+                neighbor_connections = self.get_effective_connections(neighbor_tile.tile_type, neighbor_tile.orientation)
+                required_neighbor_exit = Direction.opposite(direction).name
+                neighbor_has_incoming_track = any(required_neighbor_exit in exits for exits in neighbor_connections.values())
+                
+                # The connection is valid ONLY if both have a track or neither has a track.
+                if has_outgoing_track != neighbor_has_incoming_track:
+                    return False, f"Connection mismatch with existing tile at ({nr},{nc})."
+            
+            else:
+                # --- CASE 2: The neighbor is an empty space. ---
+                # If our new tile has a track pointing out, that empty space cannot be a wall or a building.
+                if has_outgoing_track:
+                    if not self.board.is_playable_coordinate(nr, nc):
+                        return False, f"Cannot have a track pointing into a wall at ({nr},{nc})."
+                    if self.board.get_building_at(nr, nc):
+                        return False, f"Cannot have a track pointing into a building at ({nr},{nc})."
+        
+        # If we looped through all 4 neighbors and found no illegal conditions, the placement is valid.
+        return True, "Placement is valid."
+
+
+    def check_exchange_validity(self, player: Player, new_tile_type: TileType, new_orientation: int, r: int, c: int) -> Tuple[bool, str]:
+        """
+        A definitive, robust validation for exchanging a tile, correctly
+        implementing all preservation and new-connection rules.
+        """
+        # --- Step 1 & 2: Basic Eligibility and Resource Checks ---
+        old_tile = self.board.get_tile(r, c)
+        if not old_tile: return False, "No tile to exchange."
+        if not old_tile.tile_type.is_swappable: return False, "Tile is not swappable."
+        if old_tile.has_stop_sign: return False, "Cannot exchange a Stop Sign tile."
+        if old_tile.is_terminal: return False, "Cannot exchange a Terminal tile."
+        if new_tile_type not in player.hand: return False, "Player does not have tile in hand."
+        if old_tile.tile_type == new_tile_type: return False, "Cannot replace a tile with the same type."
+
+        old_conns = self.get_effective_connections(old_tile.tile_type, old_tile.orientation)
+        new_conns = self.get_effective_connections(new_tile_type, new_orientation)
+
+        # Helper to get all unique connections as a set of frozensets
+        def get_connection_set(conn_map: Dict[str, List[str]]) -> set:
+            return {frozenset([entry, exit]) for entry, exits in conn_map.items() for exit in exits}
+
+        old_conn_set = get_connection_set(old_conns)
+        new_conn_set = get_connection_set(new_conns)
+
+        # --- Step 3: Connection Preservation Check ---
+        if not old_conn_set.issubset(new_conn_set):
+            return False, f"Connection Preservation Failed. New tile does not have all connections of the old tile."
+
+        # --- Step 4: New Connection Validity Check ---
+        added_connections = new_conn_set - old_conn_set
+        
+        for conn_pair in added_connections:
+            # For each new connection, we must validate that it's being placed legally.
+            # We can check this by treating each end of the connection as an "outgoing" track.
+            dir1_str, dir2_str = list(conn_pair)
+            
+            for exit_dir_str in [dir1_str, dir2_str]:
+                exit_dir_enum = Direction.from_str(exit_dir_str)
+                nr, nc = r + exit_dir_enum.value[0], c + exit_dir_enum.value[1]
+                
+                neighbor_tile = self.board.get_tile(nr, nc)
+                
+                if neighbor_tile:
+                    # If the neighbor is a tile, it MUST connect back.
+                    neighbor_conns = self.get_effective_connections(neighbor_tile.tile_type, neighbor_tile.orientation)
+                    required_neighbor_exit = Direction.opposite(exit_dir_enum).name
+                    if not any(required_neighbor_exit in exits for exits in neighbor_conns.values()):
+                        return False, f"New connection towards ({nr},{nc}) is invalid; neighbor does not connect back."
+                else:
+                    # If the neighbor is empty, it cannot be a wall or building.
+                    if not self.board.is_playable_coordinate(nr, nc):
+                        return False, f"New connection points into a wall at ({nr},{nc})."
+                    if self.board.get_building_at(nr, nc):
+                        return False, f"New connection points into a building at ({nr},{nc})."
+
+        return True, "Exchange is valid."
+
+
+
 
     def _check_and_place_stop_sign(self, placed_tile: PlacedTile, row: int, col: int):
         if self.board.get_tile(row, col) != placed_tile: return
@@ -190,12 +397,6 @@ class Game:
                     print(f"--> Placed stop sign at ({row},{col}) for Building {building_id}.")
                     break
 
-    def check_exchange_validity(self, player: Player, new_tile_type: TileType, new_orientation: int, row: int, col: int) -> Tuple[bool, str]:
-        old_tile = self.board.get_tile(row, col)
-        if not old_tile: return False, "No tile to exchange."
-        if not old_tile.tile_type.is_swappable: return False, "Tile not swappable."
-        if old_tile.has_stop_sign: return False, "Cannot exchange stop sign tile."
-        return True, "Exchange basic checks passed."
 
     def draw_tile(self, player: Player) -> bool:
         if not self.tile_draw_pile: return False
@@ -203,21 +404,40 @@ class Game:
         player.hand.append(self.tile_draw_pile.pop())
         return True
 
-    def attempt_place_tile(self, player: Player, tile_type: TileType, orientation: int, row: int, col: int) -> bool:
-        if self.actions_taken_this_turn >= MAX_PLAYER_ACTIONS: return False
-        command = PlaceTileCommand(self, player, tile_type, orientation, row, col)
+    def attempt_place_tile(self, player: Player, tile_type: TileType, orientation: int, r: int, c: int) -> bool:
+        """ Creates and executes a PlaceTileCommand AFTER validation. """
+        if self.actions_taken_this_turn >= self.MAX_PLAYER_ACTIONS: return False
+        
+        # --- ADDED DEBUG PRINT ---
+        is_valid, reason = self.check_placement_validity(tile_type, orientation, r, c)
+        print(f"--- [GAME] Checking place validity... Result: {is_valid} (Reason: {reason}) ---")
+        
+        if not is_valid:
+            return False
+
+        command = PlaceTileCommand(self, player, tile_type, orientation, r, c)
         if self.command_history.execute_command(command):
             self.actions_taken_this_turn += 1
             return True
         return False
 
-    def attempt_exchange_tile(self, player: Player, new_tile_type: TileType, new_orientation: int, row: int, col: int) -> bool:
-        if self.actions_taken_this_turn >= MAX_PLAYER_ACTIONS: return False
-        command = ExchangeTileCommand(self, player, new_tile_type, new_orientation, row, col)
+    def attempt_exchange_tile(self, player: Player, new_tile_type: TileType, new_orientation: int, r: int, c: int) -> bool:
+        """ Creates and executes an ExchangeTileCommand AFTER validation. """
+        if self.actions_taken_this_turn >= self.MAX_PLAYER_ACTIONS: return False
+        
+        # --- ADDED DEBUG PRINT ---
+        is_valid, reason = self.check_exchange_validity(player, new_tile_type, new_orientation, r, c)
+        print(f"--- [GAME] Checking exchange validity... Result: {is_valid} (Reason: {reason}) ---")
+
+        if not is_valid:
+            return False
+
+        command = ExchangeTileCommand(self, player, new_tile_type, new_orientation, r, c)
         if self.command_history.execute_command(command):
             self.actions_taken_this_turn += 1
             return True
         return False
+
 
     def get_terminal_coords(self, line_number: int) -> Tuple[Optional[Tuple[int, int]], Optional[Tuple[int, int]]]:
         coords = TERMINAL_COORDS.get(line_number)
@@ -257,45 +477,36 @@ class Game:
 
     def _find_sequential_goal_path(self, player: Player, full_node_sequence: List[Tuple[int, int]]) -> Tuple[Optional[List[RouteStep]], int]:
         """
-        Performs the pathfinding. Now correctly passes the previous target node
-        to the successor generation logic.
+        Finds the shortest valid path through a sequence of nodes, considering tile rules.
+        This pathfinder can be configured (e.g., tile availability) for planning.
         """
         start_pos = full_node_sequence[0]
-        start_state = PathState(pos=start_pos, arrival_dir=None, seq_idx=1)
-        if not self.board.get_tile(start_pos[0], start_pos[1]): return None, float('inf')
+        # For planning, we need to simulate tiles, so the A* needs to know about the AI's hand.
+        # This requires a more sophisticated pathfinder that can "query" tile availability.
+        # For now, let's use the generic one and assume availability is checked during move evaluation.
+        # The 'previous_target_node_for_exit_check' is passed to _get_valid_successors.
+        previous_target_node_for_exit_check = None # This logic will be in the AI's move evaluation
+
+        # The pathfinding for planning is complex. It needs to consider:
+        # 1. Available tiles in hand.
+        # 2. Valid placements on board (respecting existing tiles).
+        # 3. Route constraints (stops, U-turns).
+        # This might require a specialized planning pathfinder or a heavily parameterized one.
+        # For now, let's assume our general pathfinder (BFS/A*) can be adapted to check *potential* placements.
+        # The challenge is simulating tile availability during pathfinding.
+        # A simpler approach for initial planning: find the theoretical shortest path, then score moves based on hand tiles matching path segments.
         
-        open_set = PriorityQueue(); tie_breaker = 0
-        f_score = self._heuristic_sequential(start_pos, 1, full_node_sequence)
-        open_set.put((f_score, tie_breaker, start_state))
+        # Reusing the sequential finder here for simplicity, but acknowledging it's not perfectly hand-aware yet.
+        # The move evaluation will filter based on hand.
+        path1, cost1 = self.pathfinder.find_path(self, player, [t1] + stops + [t2])
+        path2, cost2 = self.pathfinder.find_path(self, player, [t2] + stops + [t1])
         
-        g_scores, came_from = {start_state: 0}, {start_state: None}
-        goal_node_coords = set(full_node_sequence)
-        stop_locations = set(self.board.building_stop_locations.values())
-
-        while not open_set.empty():
-            _, _, current_state = open_set.get()
-            if current_state.seq_idx == len(full_node_sequence):
-                path_steps: List[RouteStep] = []
-                curr = current_state
-                while curr is not None:
-                    is_goal = curr.pos in goal_node_coords
-                    step = RouteStep(coord=curr.pos, is_goal_node=is_goal, arrival_direction=curr.arrival_dir)
-                    path_steps.append(step)
-                    curr = came_from.get(curr)
-                return path_steps[::-1], g_scores[current_state]
-
-            # Pass the PREVIOUS target node to _get_valid_successors for the "forced exit" check.
-            # This is crucial for ensuring the rule only applies to the IMMEDIATE goal.
-            previous_target_node_for_exit_check = full_node_sequence[current_state.seq_idx - 1] if current_state.seq_idx > 0 else None
-
-            for successor_state in _get_valid_successors(self, current_state, full_node_sequence, previous_target_node_for_exit_check):
-                new_cost = g_scores[current_state] + 1
-                if new_cost < g_scores.get(successor_state, float('inf')):
-                    g_scores[successor_state], came_from[successor_state] = new_cost, current_state
-                    f_score = new_cost + self._heuristic_sequential(successor_state.pos, successor_state.seq_idx, full_node_sequence)
-                    tie_breaker += 1
-                    open_set.put((f_score, tie_breaker, successor_state))
-        return None, float('inf')
+        valid1, valid2 = (cost1 != float('inf')), (cost2 != float('inf'))
+        if not valid1 and not valid2: return None, float('inf')
+        
+        chosen_start, optimal_path = (t1, path1) if valid1 and (not valid2 or cost1 <= cost2) else (t2, path2)
+        
+        return chosen_start, optimal_path
 
     def check_player_route_completion(self, player: Player) -> Tuple[bool, Optional[Tuple[int, int]], Optional[List[RouteStep]]]:
         if not player.line_card or not player.route_card: return False, None, None
@@ -304,29 +515,66 @@ class Game:
         t1, t2 = self.get_terminal_coords(player.line_card.line_number)
         if not t1 or not t2: return False, None, None
 
+        # --- PATHFINDING FOR ROUTE VALIDATION (uses general rules) ---
         path1, cost1 = self.pathfinder.find_path(self, player, [t1] + stops + [t2])
         path2, cost2 = self.pathfinder.find_path(self, player, [t2] + stops + [t1])
+
+        # --- PATHFINDING FOR AI PLANNING (Hypothetical Ideal Route) ---
+        # This call needs to know that it's planning and can use any tile.
+        # We might need a dedicated planning pathfinder or a flag/filter.
+        # For now, let's assume find_path can accept None for tile_filter,
+        # and internally, if player is AI, it simulates unconstrained.
+        # (This would be a change to Pathfinder.find_path signature)
+        #
+        # For now, let's assume the Pathfinder can be told its purpose.
+        # If we create a PlanningPathfinder, this is where it's used.
+        # For simplicity, let's assume pathfinder has a flag for 'planning_mode'
+        # or it defaults to unconstrained if no filter is given for AI player.
+        #
+        # Let's adapt pathfinder to accept player type or a flag.
+        # For now, we'll pass None for tile_filter to signify unconstrained search.
+        # The pathfinder needs to distinguish between 'validation' and 'planning' IF rules differ.
+        # If rules are same (just tile availability differs), we can manage that in evaluation.
+        #
+        # For the "wet dream" path, we don't need tile_filter, as it's unconstrained.
+        # The pathfinder should simply use all available tile types.
+        # So, we can likely reuse the existing find_path by passing `None` for filter.
+        # The actual check against the HAND will happen in AIPlayer.evaluate_moves.
+
+        # The existing pathfinding should inherently respect game rules for any tile type.
+        # The validation aspect comes from the sequence.
+        
+        # path1, cost1 = self.pathfinder.find_path(self, player, [t1] + stops + [t2]) # Use the planning context
+        # path2, cost2 = self.pathfinder.find_path(self, player, [t2] + stops + [t1]) # Use the planning context
+
+        # (The rest of the logic for determining chosen_start and optimal_path remains the same)
+        # ... The critical part is that the pathfinder used here MUST NOT be hand-constrained.
+        # Our current BFSPathfinder and AStarPathfinder are *rule-constrained* but not *hand-constrained*.
+        # So, they are already suitable for finding the 'ideal path'.
 
         valid1, valid2 = (cost1 != float('inf')), (cost2 != float('inf'))
         if not valid1 and not valid2: return False, None, None
         
-        chosen_start, optimal_path = (t1, path1) if valid1 and (not valid2 or cost1 <= cost2) else (t2, path2)
+        start, path = (t1, path1) if valid1 and (not valid2 or cost1 <= cost2) else (t2, path2)
         
-        if chosen_start:
-             print(f"Route Check P{player.player_id}: COMPLETE. Chosen Start: {chosen_start}")
-             return True, chosen_start, optimal_path
+        if start: return True, start, path
         return False, None, None
 
     def handle_route_completion(self, player: Player, chosen_start: Tuple[int, int], optimal_path: List[RouteStep]):
         player.player_state, player.start_terminal_coord, player.validated_route = PlayerState.DRIVING, chosen_start, optimal_path
-        player.streetcar_path_index, player.required_node_index = 0, 1 # Start at index 0, aim for node at index 1
+        player.streetcar_path_index, player.required_node_index = 0, 1
+        
         print(f"  Player {player.player_id} streetcar placed at: {player.streetcar_position}")
-        # Print the full validated path for debugging/clarity
+        
+        # --- ADDED DEBUG OUTPUT FOR VALIDATED ROUTE ---
         print("--- Validated Route Path ---")
-        for i, step in enumerate(player.validated_route):
-            arr_dir_str = step.arrival_direction.name if step.arrival_direction else "Start"
-            goal_marker = "[GOAL]" if step.is_goal_node else ""
-            print(f"  Step {i:<2}: {step.coord} (Arrival: {arr_dir_str:<5}) {goal_marker}")
+        if player.validated_route:
+            for i, step in enumerate(player.validated_route):
+                arr_dir_str = step.arrival_direction.name if step.arrival_direction else "Start"
+                goal_marker = "[GOAL]" if step.is_goal_node else ""
+                print(f"  Step {i:<2}: {step.coord} (Arrival: {arr_dir_str:<5}) {goal_marker}")
+        else:
+            print("  No validated route found.")
         print("--- End Validated Route ---")
         
         if self.game_phase == GamePhase.LAYING_TRACK:
@@ -687,32 +935,33 @@ class Game:
         return False
 
     def confirm_turn(self) -> bool:
-        # The logic inside here must be updated to use the new return signature
-        # from check_player_route_completion
-        active_player = self.get_active_player()
+        active_p = self.get_active_player()
         if self.game_phase == GamePhase.GAME_OVER: return False
-        if active_player.player_state == PlayerState.LAYING_TRACK and self.actions_taken_this_turn < MAX_PLAYER_ACTIONS:
-            return False
-        if active_player.player_state == PlayerState.DRIVING and self.actions_taken_this_turn < MAX_PLAYER_ACTIONS:
-            return False
+        if isinstance(active_p, HumanPlayer):
+            if active_p.player_state == PlayerState.LAYING_TRACK and self.actions_taken_this_turn < self.MAX_PLAYER_ACTIONS: return False
+            if active_p.player_state == PlayerState.DRIVING and self.actions_taken_this_turn < self.MAX_PLAYER_ACTIONS: return False
 
-        if active_player.player_state == PlayerState.LAYING_TRACK:
-            needed = HAND_TILE_LIMIT - len(active_player.hand)
-            for _ in range(min(needed, MAX_PLAYER_ACTIONS)): self.draw_tile(active_player)
+        if active_p.player_state == PlayerState.LAYING_TRACK:
+            for _ in range(min(self.HAND_TILE_LIMIT - len(active_p.hand), self.MAX_PLAYER_ACTIONS)): self.draw_tile(active_p)
         
         self.active_player_index = (self.active_player_index + 1) % self.num_players
         if self.active_player_index == 0: self.current_turn += 1
         self.actions_taken_this_turn = 0
         self.command_history.clear_redo_history()
         
-        next_player = self.get_active_player()
-        print(f"\n--- Starting Turn {self.current_turn} for Player {next_player.player_id} ({next_player.player_state.name}) ---")
+        next_p = self.get_active_player()
+        print(f"\n--- Starting Turn {self.current_turn} for Player {next_p.player_id} ---")
 
-        if next_player.player_state == PlayerState.LAYING_TRACK:
-            is_complete, chosen_start, optimal_path = self.check_player_route_completion(next_player)
-            if is_complete and chosen_start and optimal_path:
-                self.handle_route_completion(next_player, chosen_start, optimal_path)
+        if next_p.player_state == PlayerState.LAYING_TRACK:
+            is_complete, start, path = self.check_player_route_completion(next_p)
+            if is_complete and start and path:
+                self.handle_route_completion(next_p, start, path)
+            else:
+                # This is the polymorphic call. It works for both Human and AI.
+                next_p.handle_turn_logic(self)
+        
         return True
+
 
     def save_game(self, filename: str) -> bool:
         print(f"Saving game state to {filename}...")

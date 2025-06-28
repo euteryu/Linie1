@@ -5,7 +5,10 @@ from visualizer import Linie1Visualizer
 if __name__ == '__main__':
     print("Starting Linie 1...")
     try:
-        app = Linie1Visualizer(1) # 1 Player When Testing / Single Player (Not implemented)
+        # Example: To start a game with 1 human and 1 AI player, you would change this line.
+        # For now, we'll keep it as 1 human player.
+        # You can change this to: app = Linie1Visualizer(num_players=1, num_ai=1)
+        app = Linie1Visualizer(num_players=1, num_ai=1) 
         app.run()
     except ImportError as e:
          print(f"\nError: Pygame not found or import failed.")

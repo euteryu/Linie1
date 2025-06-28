@@ -208,17 +208,33 @@ class PlaceTileCommand(Command):
         self.player, self.tile_type, self.orientation, self.row, self.col = player, tile_type, orientation, row, col
         self._original_hand_contains_tile, self._stop_sign_placed, self._building_id_stopped = False, False, None
     def execute(self) -> bool:
-        if self.tile_type not in self.player.hand: return False
+        # --- ADDED DEBUG PRINT ---
+        print(f"--- [COMMAND] Executing PlaceTileCommand: P{self.player.player_id} places {self.tile_type.name} at ({self.row},{self.col}) ---")
+
+        # 1. Check if player has the tile (already validated, but good practice)
+        if self.tile_type not in self.player.hand:
+            print(f"  [COMMAND-ERROR] Player lacks {self.tile_type.name}.")
+            return False
         self._original_hand_contains_tile = True
-        is_valid, _ = self.game.check_placement_validity(self.tile_type, self.orientation, self.row, self.col)
-        if not is_valid: return False
+
+        # 2. Perform action
+        print(f"  [COMMAND-STATE] Removing '{self.tile_type.name}' from Player {self.player.player_id}'s hand.")
         self.player.hand.remove(self.tile_type)
+        
         placed_tile = PlacedTile(self.tile_type, self.orientation)
+        print(f"  [COMMAND-STATE] Setting tile on board at ({self.row},{self.col}) to: {placed_tile}")
         self.game.board.set_tile(self.row, self.col, placed_tile)
+
+        # 3. Check for stop sign
         building_before = self.game.board.buildings_with_stops.copy()
         self.game._check_and_place_stop_sign(placed_tile, self.row, self.col)
         newly_stopped = self.game.board.buildings_with_stops - building_before
-        if newly_stopped: self._stop_sign_placed, self._building_id_stopped = True, newly_stopped.pop()
+        if newly_stopped:
+             self._stop_sign_placed = True
+             self._building_id_stopped = newly_stopped.pop()
+             print(f"  [COMMAND-STATE] Stop sign created for building {self._building_id_stopped}.")
+
+        print(f"--- [COMMAND] PlaceTileCommand Execute SUCCESS ---")
         return True
     def undo(self) -> bool:
         if self._stop_sign_placed and self._building_id_stopped:
@@ -238,14 +254,34 @@ class ExchangeTileCommand(Command):
         self.player, self.new_tile_type, self.new_orientation, self.row, self.col = player, new_tile_type, new_orientation, row, col
         self._original_hand_contains_tile, self._old_placed_tile_data = False, None
     def execute(self) -> bool:
-        if self.new_tile_type not in self.player.hand: return False
+        # --- ADDED DEBUG PRINT ---
+        print(f"--- [COMMAND] Executing ExchangeTileCommand: P{self.player.player_id} at ({self.row},{self.col}) with {self.new_tile_type.name} ---")
+        
+        if self.new_tile_type not in self.player.hand:
+            print(f"  [COMMAND-ERROR] Player lacks {self.new_tile_type.name}.")
+            return False
         self._original_hand_contains_tile = True
+
         old_placed_tile = self.game.board.get_tile(self.row, self.col)
-        if not old_placed_tile or not old_placed_tile.tile_type.is_swappable: return False
+        if not old_placed_tile:
+            print(f"  [COMMAND-ERROR] No tile on board at ({self.row},{self.col}) to exchange.")
+            return False
+
+        # Store old tile data for undo
         self._old_placed_tile_data = old_placed_tile.to_dict()
+        print(f"  [COMMAND-STATE] Storing old tile for undo: {old_placed_tile}")
+
+        # Perform exchange
+        print(f"  [COMMAND-STATE] Removing '{self.new_tile_type.name}' from Player {self.player.player_id}'s hand.")
         self.player.hand.remove(self.new_tile_type)
+        print(f"  [COMMAND-STATE] Adding '{old_placed_tile.tile_type.name}' to Player {self.player.player_id}'s hand.")
         self.player.hand.append(old_placed_tile.tile_type)
-        self.game.board.set_tile(self.row, self.col, PlacedTile(self.new_tile_type, self.new_orientation))
+        
+        new_placed_tile = PlacedTile(self.new_tile_type, self.new_orientation)
+        print(f"  [COMMAND-STATE] Setting tile on board at ({self.row},{self.col}) to: {new_placed_tile}")
+        self.game.board.set_tile(self.row, self.col, new_placed_tile)
+
+        print("--- [COMMAND] ExchangeTileCommand Execute SUCCESS ---")
         return True
     def undo(self) -> bool:
         if self._old_placed_tile_data is None: return False

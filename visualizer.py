@@ -141,10 +141,8 @@ class Linie1Visualizer:
     """
     Manages the Pygame window, main loop, drawing, and input delegation
     based on the current game state.
-
-    Default 1 Player. Pass in another # @ main.py to change this.
     """
-    def __init__(self, num_players=1):
+    def __init__(self, num_players=1, num_ai=0): # <-- MODIFIED: Added num_ai parameter
         self.num_players = num_players
 
         pygame.init()
@@ -173,14 +171,14 @@ class Linie1Visualizer:
 
         # --- Create Game instance ---
         try:
-            self.game = Game(num_players=num_players)
-            # Ensure setup runs if game starts in SETUP phase
-            if self.game.game_phase == GamePhase.SETUP:
-                self.game.setup_game()
+            # MODIFIED: Pass num_ai to the Game constructor
+            self.game = Game(num_players=num_players, num_ai=num_ai)
         except Exception as e:
              print(f"FATAL: Game initialization failed: {e}")
+             import traceback
              traceback.print_exc()
              pygame.quit()
+             import sys
              sys.exit()
 
 

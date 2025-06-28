@@ -1,164 +1,212 @@
 # game_logic/player.py
-from typing import List, Dict, Tuple, Optional, NamedTuple
-from .enums import PlayerState, Direction # Use relative import
-from .tile import TileType # Use relative import
-from .cards import LineCard, RouteCard # Use relative import
+from __future__ import annotations
+from abc import ABC, abstractmethod
+from typing import List, Dict, Tuple, Optional, NamedTuple, TYPE_CHECKING
 
-# NEW: A self-contained, descriptive object for each step of the validated route.
+if TYPE_CHECKING:
+    from .game import Game # For type hinting
+
+from .enums import PlayerState, Direction
+from .tile import TileType
+from .cards import LineCard, RouteCard
+
+from constants import AI_ACTION_TIMER_EVENT
+
+
 class RouteStep(NamedTuple):
     coord: Tuple[int, int]
     is_goal_node: bool
     arrival_direction: Optional[Direction]
 
-class Player:
+class Player(ABC):
+    """Abstract base class for all players, containing shared attributes."""
     def __init__(self, player_id: int):
         self.player_id = player_id
         self.hand: List[TileType] = []
         self.line_card: Optional[LineCard] = None
         self.route_card: Optional[RouteCard] = None
         self.player_state: PlayerState = PlayerState.LAYING_TRACK
-        
-        # The single source of truth for the tram's location on its path.
         self.streetcar_path_index: int = 0
-        
-        # Tracks which of the required NODES (stops/terminals) is the next goal.
         self.required_node_index: int = 0
-        
         self.start_terminal_coord: Optional[Tuple[int, int]] = None
-        
-        # The "database" of the full, optimal path.
         self.validated_route: Optional[List[RouteStep]] = None
+
+    @abstractmethod
+    def handle_turn_logic(self, game: Game):
+        """The main entry point for a player's turn-based logic."""
+        pass
 
     @property
     def streetcar_position(self) -> Optional[Tuple[int, int]]:
-        """The streetcar's coordinate, derived from its path index."""
         if self.validated_route and 0 <= self.streetcar_path_index < len(self.validated_route):
             return self.validated_route[self.streetcar_path_index].coord
         return None
     
     @property
     def arrival_direction(self) -> Optional[Direction]:
-        """The direction of arrival, derived from the current step in the path."""
         if self.validated_route and 0 <= self.streetcar_path_index < len(self.validated_route):
             return self.validated_route[self.streetcar_path_index].arrival_direction
         return None
 
     def to_dict(self) -> Dict:
-        """Converts Player state to a JSON-serializable dictionary."""
-        hand_data = [tile.name for tile in self.hand]
-        line_card_data = self.line_card.line_number if self.line_card else None
-        route_card_data = { "stops": self.route_card.stops, "variant": self.route_card.variant_index } if self.route_card else None
-        
-        # Serialize the validated route into a list of simple dictionaries
         validated_route_data = None
         if self.validated_route:
-            validated_route_data = [
-                {
-                    "coord": step.coord,
-                    "is_goal": step.is_goal_node,
-                    "arrival_dir": step.arrival_direction.name if step.arrival_direction else None
-                } for step in self.validated_route
-            ]
-
+            validated_route_data = [{"coord": s.coord, "is_goal": s.is_goal_node, "arrival_dir": s.arrival_direction.name if s.arrival_direction else None} for s in self.validated_route]
         return {
-            "player_id": self.player_id,
-            "hand": hand_data,
-            "line_card": line_card_data,
-            "route_card": route_card_data,
-            "player_state": self.player_state.name,
-            "streetcar_path_index": self.streetcar_path_index,
-            "required_node_index": self.required_node_index,
-            "start_terminal_coord": list(self.start_terminal_coord) if self.start_terminal_coord else None,
+            "player_id": self.player_id, "is_ai": isinstance(self, AIPlayer), "hand": [t.name for t in self.hand],
+            "line_card": self.line_card.line_number if self.line_card else None,
+            "route_card": {"stops": self.route_card.stops, "variant": self.route_card.variant_index} if self.route_card else None,
+            "player_state": self.player_state.name, "streetcar_path_index": self.streetcar_path_index,
+            "required_node_index": self.required_node_index, "start_terminal_coord": self.start_terminal_coord,
             "validated_route": validated_route_data,
         }
 
     @staticmethod
     def from_dict(data: Dict, tile_types: Dict[str, 'TileType']) -> 'Player':
-        player = Player(data.get("player_id", -1))
-        player.hand = [tile_types[name] for name in data.get("hand", []) if name in tile_types]
-        lc_num = data.get("line_card")
-        player.line_card = LineCard(lc_num) if lc_num is not None else None
-        rc_data = data.get("route_card")
-        if rc_data and isinstance(rc_data, dict): player.route_card = RouteCard(rc_data.get("stops",[]), rc_data.get("variant", 0))
-        try: player.player_state = PlayerState[data.get("player_state", "LAYING_TRACK")]
-        except KeyError: player.player_state = PlayerState.LAYING_TRACK
-        
+        is_ai = data.get("is_ai", False)
+        player_class = AIPlayer if is_ai else HumanPlayer
+        player = player_class(data["player_id"])
+        player.hand = [tile_types[name] for name in data.get("hand", [])]
+        if (lc_num := data.get("line_card")) is not None: player.line_card = LineCard(lc_num)
+        if (rc_data := data.get("route_card")): player.route_card = RouteCard(rc_data["stops"], rc_data["variant"])
+        player.player_state = PlayerState[data.get("player_state", "LAYING_TRACK")]
         player.streetcar_path_index = data.get("streetcar_path_index", 0)
         player.required_node_index = data.get("required_node_index", 0)
-        start_term_list = data.get("start_terminal_coord")
-        player.start_terminal_coord = tuple(start_term_list) if isinstance(start_term_list, list) and len(start_term_list) == 2 else None
-        
-        # Reconstruct the validated route from the list of dictionaries
-        validated_route_data = data.get("validated_route")
-        if validated_route_data:
-            player.validated_route = []
-            for step_data in validated_route_data:
-                dir_name = step_data.get("arrival_dir")
-                try:
-                    arrival_dir = Direction[dir_name] if dir_name else None
-                except KeyError:
-                    arrival_dir = None
-                player.validated_route.append(RouteStep(
-                    coord=tuple(step_data["coord"]),
-                    is_goal_node=step_data["is_goal"],
-                    arrival_direction=arrival_dir
-                ))
+        player.start_terminal_coord = tuple(data["start_terminal_coord"]) if data.get("start_terminal_coord") else None
+        if (route_data := data.get("validated_route")):
+            player.validated_route = [RouteStep(tuple(s["coord"]), s["is_goal"], Direction[s["arrival_dir"]] if s["arrival_dir"] else None) for s in route_data]
         return player
-
+    
     def get_required_stop_coords(self, game: 'Game') -> Optional[List[Tuple[int, int]]]:
         """
         Gets the sequence of STOP coordinates the player needs to visit.
-        Returns None if any required stop sign is not yet on the board.
-        Returns an empty list if the route card has no stops.
+        This is needed by all player types for validation and driving.
         """
-        if not self.route_card:
-            return [] # No stops required
-
+        if not self.route_card: return []
         stop_coords = []
         for stop_id in self.route_card.stops:
-            coord = game.board.building_stop_locations.get(stop_id)
-            if coord is None:
-                # A required stop for the route is not yet placed on the board
-                return None
+            if (coord := game.board.building_stop_locations.get(stop_id)) is None: return None
             stop_coords.append(coord)
         return stop_coords
 
     def get_full_driving_sequence(self, game: 'Game') -> Optional[List[Tuple[int, int]]]:
         """
-        Gets the full, ordered list of nodes for the DRIVING phase, based on
-        the determined start terminal.
+        Gets the full, ordered list of GOAL NODES for the DRIVING phase.
+        This is needed by all player types for win condition checks.
         """
-        if not self.line_card or not self.start_terminal_coord:
-            return None # Cannot determine sequence if not set up for driving
-
+        if not self.line_card or not self.start_terminal_coord: return None
         stop_coords = self.get_required_stop_coords(game)
-        if stop_coords is None:
-             return None # Driving phase assumes all stops are on board
-
+        if stop_coords is None: return None
         term1, term2 = game.get_terminal_coords(self.line_card.line_number)
-        if not term1 or not term2:
-            return None
-
-        # Determine the end terminal based on the chosen start terminal
+        if not term1 or not term2: return None
         end_terminal = term2 if self.start_terminal_coord == term1 else term1
-
         return [self.start_terminal_coord] + stop_coords + [end_terminal]
 
-    def get_next_target_node(self, game: 'Game') -> Optional[Tuple[int, int]]:
-        """
-        Gets the coordinate of the very next node in the required sequence
-        that the player must visit.
-        """
-        sequence = self.get_full_driving_sequence(game)
-        if not sequence:
-            return None
 
-        # The target node is at the list index corresponding to the player's progress.
-        # Example: required_node_index=0 means aiming for sequence[0] (start terminal).
-        # This is for pathing TO the node. Once reached, index increments.
-        target_list_index = self.required_node_index
+class HumanPlayer(Player):
+    """Represents a human-controlled player."""
+    def handle_turn_logic(self, game: 'Game'):
+        pass # Human logic is driven by Pygame events in the state machine.
 
-        if target_list_index < len(sequence):
-            return sequence[target_list_index]
+class AIPlayer(Player):
+    """Represents an AI-controlled player with strategic planning."""
+    def __init__(self, player_id: int):
+        super().__init__(player_id)
+        self.ideal_route_plan: Optional[List[RouteStep]] = None
+
+    def handle_turn_logic(self, game: 'Game'):
+        """Orchestrates the AI's entire turn during the LAYING_TRACK phase."""
+        print(f"\n--- AI Player {self.player_id}'s Turn ---")
+        for action_num in range(game.MAX_PLAYER_ACTIONS):
+            self._plan_and_execute_action(game, action_num)
+        game.confirm_turn()
+
+    def _plan_and_execute_action(self, game: 'Game', action_num: int):
+        """Calculates the ideal path, evaluates all possible moves, and executes the best one."""
+        self.ideal_route_plan = self._calculate_ideal_route(game)
+        if self.ideal_route_plan:
+            print(f"  AI Action {action_num+1}: Ideal path found with {len(self.ideal_route_plan)} steps.")
         else:
-            return None # Already passed all required nodes.
+            print(f"  AI Action {action_num+1}: No ideal path found. Will place based on other heuristics.")
+        
+        best_move, best_score = self._find_best_move(game)
+        
+        if best_move:
+            action_type, details = best_move
+            if action_type == "place":
+                tile, orientation, r, c = details
+                print(f"  AI chooses to PLACE {tile.name} at ({r},{c}) (Score: {best_score:.2f})")
+                game.attempt_place_tile(self, tile, orientation, r, c)
+            elif action_type == "exchange":
+                tile, orientation, r, c = details
+                print(f"  AI chooses to EXCHANGE for {tile.name} at ({r},{c}) (Score: {best_score:.2f})")
+                game.attempt_exchange_tile(self, tile, orientation, r, c)
+        else:
+            print("  AI could not find any valid move. Passing action.")
+
+    def _calculate_ideal_route(self, game: 'Game') -> Optional[List[RouteStep]]:
+        if not self.line_card or not self.route_card: return None
+        stops = self.get_required_stop_coords(game)
+        if stops is None: return None
+        t1, t2 = game.get_terminal_coords(self.line_card.line_number)
+        if not t1 or not t2: return None
+        path1, cost1 = game.pathfinder.find_path(game, self, [t1] + stops + [t2], is_hypothetical=True)
+        path2, cost2 = game.pathfinder.find_path(game, self, [t2] + stops + [t1], is_hypothetical=True)
+        if cost1 == float('inf') and cost2 == float('inf'): return None
+        return path1 if cost1 <= cost2 else path2
+
+    def _find_best_move(self, game: 'Game') -> Tuple[Optional[Tuple], float]:
+        """
+        Generates a list of all 100% legal moves and then scores them to find the best one.
+        This guarantees the AI cannot cheat.
+        """
+        valid_moves = []
+
+        # 1. Generate all valid "place" moves
+        for tile in self.hand:
+            for r in range(game.board.rows):
+                for c in range(game.board.cols):
+                    for orientation in [0, 90, 180, 270]:
+                        if game.check_placement_validity(tile, orientation, r, c)[0]:
+                            score = self._score_move(game, "place", tile, r, c)
+                            valid_moves.append({'type': 'place', 'details': (tile, orientation, r, c), 'score': score})
+        
+        # 2. Generate all valid "exchange" moves
+        for tile_in_hand in self.hand:
+            for r in range(game.board.rows):
+                for c in range(game.board.cols):
+                    if game.board.get_tile(r, c) is None: continue
+                    for orientation in [0, 90, 180, 270]:
+                        if game.check_exchange_validity(self, tile_in_hand, orientation, r, c)[0]:
+                            score = self._score_move(game, "exchange", tile_in_hand, r, c)
+                            valid_moves.append({'type': 'exchange', 'details': (tile_in_hand, orientation, r, c), 'score': score + 5.0}) # Bonus for exchange
+
+        # 3. Find the best move from the validated list
+        if not valid_moves:
+            return None, -1.0
+        
+        best_move = max(valid_moves, key=lambda m: m['score'])
+        return (best_move['type'], best_move['details']), best_move['score']
+
+    def _score_move(self, game: 'Game', move_type: str, tile: TileType, r: int, c: int) -> float:
+        """Scores a pre-validated move based on its strategic value."""
+        score = 0.0
+        # Score for aligning with the ideal route plan
+        if self.ideal_route_plan:
+            for i, step in enumerate(self.ideal_route_plan):
+                if step.coord == (r,c):
+                    score += 100.0 - (i * 2) 
+                    break
+        
+        # Score for connecting to existing track
+        for direction in Direction:
+            neighbor_pos = (r + direction.value[0], c + direction.value[1])
+            if game.board.get_tile(neighbor_pos[0], neighbor_pos[1]):
+                score += 10.0
+        
+        # Bonus for creating a required stop sign
+        if self.route_card:
+            # (This scoring can be improved, but the core is that it scores a pre-validated move)
+            pass
+        
+        return score
