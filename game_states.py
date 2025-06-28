@@ -14,7 +14,7 @@ from game_logic.enums import GamePhase, PlayerState, Direction
 # from game_logic.commands import PlaceTileCommand, ExchangeTileCommand
 
 # --- Constants ---
-import constants as C # Use alias
+import constants as C
 
 # --- Base Game State ---
 
@@ -158,25 +158,29 @@ class LayingTrackState(GameState):
         return None
 
     def handle_event(self, event):
-        # --- Handle Common Buttons ---
+        active_player: Player = self.game.get_active_player()
+
+        # --- MODIFIED: Handle the AI action timer event ---
+        if event.type == C.AI_ACTION_TIMER_EVENT and isinstance(active_player, AIPlayer):
+            # The timer has fired, tell the AI to take its second action.
+            active_player.handle_delayed_action(self.game)
+            return # Consume the event
+
+        # If the active player is an AI, block other human input events.
+        if isinstance(active_player, AIPlayer):
+            self.message = f"Waiting for AI Player {active_player.player_id}..."
+            return
+        # --- END MODIFICATION ---
+
         if self._handle_common_clicks(event): return
-
-        # --- State-Specific Handling ---
-        try: active_player: Player = self.game.get_active_player()
-        except IndexError: return
+        
         if active_player.player_state != PlayerState.LAYING_TRACK: return
-
-        # --- Mouse Input ---
+        
         if event.type == pygame.MOUSEBUTTONDOWN:
-            # Add print to see if MOUSE events are overriding KEY events somehow
-            # print(f"LayingTrackState MouseDown: {event.button}")
             self._handle_mouse_down(event, active_player)
-
-        # --- Keyboard Input ---
         elif event.type == pygame.KEYDOWN:
-            # --- DEBUG PRINT ---
-            print(f"LayingTrackState KeyDown: Key={event.key}, Name={pygame.key.name(event.key)}")
             self._handle_key_down(event, active_player)
+
 
     def _handle_mouse_down(self, event, active_player):
         """ Handles mouse button down events for LayingTrackState. """

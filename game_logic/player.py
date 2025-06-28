@@ -12,6 +12,8 @@ from .cards import LineCard, RouteCard
 
 from constants import AI_ACTION_TIMER_EVENT
 
+import pygame
+
 
 class RouteStep(NamedTuple):
     coord: Tuple[int, int]
@@ -113,13 +115,34 @@ class AIPlayer(Player):
     def __init__(self, player_id: int):
         super().__init__(player_id)
         self.ideal_route_plan: Optional[List[RouteStep]] = None
+        self.actions_taken_this_turn: int = 0
 
     def handle_turn_logic(self, game: 'Game'):
-        """Orchestrates the AI's entire turn during the LAYING_TRACK phase."""
+        """
+        Initiates the AI's turn by taking the FIRST action and setting a timer for the second.
+        """
         print(f"\n--- AI Player {self.player_id}'s Turn ---")
-        for action_num in range(game.MAX_PLAYER_ACTIONS):
-            self._plan_and_execute_action(game, action_num)
+        self.actions_taken_this_turn = 0
+        
+        # Take the first action immediately
+        self._plan_and_execute_action(game, 1)
+        self.actions_taken_this_turn += 1
+
+        # Set a timer to trigger the second action in 1000ms (1 second)
+        pygame.time.set_timer(AI_ACTION_TIMER_EVENT, 1000, loops=1)
+        
+    def handle_delayed_action(self, game: 'Game'):
+        """
+        Handles the second action, triggered by the pygame timer event.
+        """
+        if self.actions_taken_this_turn < game.MAX_PLAYER_ACTIONS:
+            self._plan_and_execute_action(game, 2)
+            self.actions_taken_this_turn += 1
+
+        # After the second action, confirm the turn.
+        print(f"--- AI Player {self.player_id} ends its turn. ---")
         game.confirm_turn()
+
 
     def _plan_and_execute_action(self, game: 'Game', action_num: int):
         """Calculates the ideal path, evaluates all possible moves, and executes the best one."""

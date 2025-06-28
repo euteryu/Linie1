@@ -329,3 +329,85 @@ If the neighbor is a wall or a building: The new connection is INVALID.
 If the neighbor is an existing tile: The new connection is INVALID UNLESS that neighboring tile has a connection pointing back.
 
 Your Example: The AI wanted to place a Crossroad at (1,3). This added a new connection pointing West. The neighbor at (1,2) was a vertical Straight and had no connection pointing East. Therefore, this new connection is INVALID, and the entire exchange fails.
+
+------------------
+-------------------
+
+The AI's Turn: A Step-by-Step Thought Process
+Motto: "How can I best use this action to advance my master plan?"
+
+Step 1: The "Wet Dream" - Recalculate the Ideal Route
+
+At the very start of its turn (and before each action), the AI asks itself a fundamental question: "If I had any tile in the entire game, what is the absolute shortest, rule-abiding path to connect all my required stops and terminals right now?"
+
+Action: It calls _calculate_ideal_route().
+
+Method: This uses the BFSPathfinder to perform a "hypothetical" search on the current board. The BFS guarantees it finds the path with the fewest number of tiles.
+
+Result: The AI now has a list of RouteStep objects in self.ideal_route_plan. This is its perfect blueprint, its "north star" for the turn. It might look like [Step 0: (3,0), Step 1: (4,0), Step 2: (4,1), ...].
+
+Step 2: The Reality Check - Generate All Legal Moves
+
+The AI knows its ideal plan, but it's a pragmatist. It looks at the 5 tiles in its hand and the board in front of it and asks: "Given what I actually have, what can I legally do right now?"
+
+Action: It calls _find_best_move(), which internally generates a list of every possible legal move.
+
+Method:
+
+Placement Scan: It mentally takes each tile from its hand and tries to place it on every single empty, playable square on the board, in all four orientations. For each attempt, it calls game.check_placement_validity(). If and only if the function returns True, it adds this potential move (e.g., place Curve at (5,5) orientation 90) to a list of valid_moves.
+
+Exchange Scan: It then mentally takes each tile from its hand and tries to use it to replace every single eligible tile currently on the board, in all four orientations. For each attempt, it calls game.check_exchange_validity(). If it returns True, it adds this potential exchange to the valid_moves list.
+
+Step 3: The Strategic Decision - Score Every Legal Move
+
+Now the AI has a list of everything it can do. It needs to decide what it should do. It iterates through every move in its valid_moves list and assigns it a score based on a hierarchy of priorities.
+
+Action: It calls _score_move() for each valid move.
+
+Method (The Scoring Heuristics):
+
+Priority #1: Does this move advance my Ideal Plan? (Score: up to 100)
+
+The AI checks if the coordinates of the proposed move (r, c) exist in its ideal_route_plan.
+
+If they do, it gets a high score. The score is higher for moves that fulfill an earlier step in the plan (e.g., 100 - step_index), because completing the route sequentially is important. This is the AI's primary motivation.
+
+Priority #2: Does this move create a required Stop Sign? (Score: +50)
+
+The AI checks if the move involves placing a tile with a straight component next to one of its required (but not yet completed) station buildings.
+
+If so, it gets a large, flat bonus. Securing a required stop in the correct orientation is a massive strategic advantage that prevents opponents from placing a less optimal stop tile there first.
+
+Priority #3: Does this move connect to my existing track? (Score: +10)
+
+The AI looks at the neighbors of the proposed placement. If any neighbor already contains a tile (especially one it placed), it gets a small bonus. This encourages the AI to build contiguous tracks rather than isolated "islands," which is generally good practice.
+
+Priority #4: Is this an Exchange? (Score: +5)
+
+An exchange move gets a tiny bonus. This acknowledges that exchanges are often used to solve a specific problem (like replacing an opponent's blocking tile) and are therefore slightly more valuable than a random placement.
+
+Step 4: The Final Choice - Execute the Best Move
+
+The AI now has a list of every legal move, each with a calculated score.
+
+Action: It finds the move with the highest score in the list.
+
+Execution: It calls the appropriate game command (attempt_place_tile or attempt_exchange_tile) with the details of the winning move.
+
+Tie-Breaking: If multiple moves have the exact same highest score, the current implementation simply picks the last one it found. A more advanced AI might add a random choice or a secondary heuristic (e.g., prefer moves closer to the center of the board) to break ties.
+
+This entire four-step process is repeated for the AI's second action for the turn. After its two actions are complete, it calls game.confirm_turn(), its turn ends, and it draws new tiles.
+
+---------------------
+
+in main.py right now, when i change "Linie1Visualizer(num_players=1, num_ai=1)" below to have 0 human players and 1 ai, game freezes upon start - i can't click anything on board, any AI doesn't make any starting moves either. I wanna simulate and see how 2 AI players might play each other without human players on board, so assume Linie1Visualizer(num_players=0, num_ai=2) would allow me to do this. but it doesnt - help!
+
+
+if __name__ == '__main__':
+    print("Starting Linie 1...")
+    try:
+        # Example: To start a game with 1 human and 1 AI player, you would change this line.
+        # For now, we'll keep it as 1 human player.
+        # You can change this to: app = Linie1Visualizer(num_players=1, num_ai=1)
+        app = Linie1Visualizer(num_players=1, num_ai=1) 
+        app.run()
