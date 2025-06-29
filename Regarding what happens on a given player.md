@@ -618,3 +618,113 @@ i pitted 2 ai players against each other - we've finally had player 1 ai success
 --- AI Player 0 has no valid moves and ends its turn. ---"
 
 well i see empty spaces on the board still so, while player 0 might not have 2 optimal best moves to necessarily make, they can't possibly have no valid moves to make at all as making a tile placement at any number of empty squares is still a move to make. importantly, AI must never simply pass - to run out valid moves is to suggest there is something wrong with game - e.g. not enough tiles assigned given number of players - and should raise an error about no more valid moves available and crucially the exact cause / thinking process that led to this being its conclusion please in console output for my sanity check. in fact, a priority that could contribute here might be working the sequence backwards in such scenarios if a valid move that satiates its desired sequential placement / exchange cannot be made, how about placing / exchanging tiles from end terminal backwards to its last required stop and so on? and also wanna see in console per move the reasoning making up the scoring of a particular action. Note, ai players must always make 2 valid moves, no more no less, per every turn before that turn ends successfully. no passing allowed, else this implies something wrong with algo thinking or game state fundamentally!
+
+----------------------
+
+--- Starting Turn 43 for Player 0 ---
+
+--- AI Player 0 is thinking... ---
+  AI chooses to PLACE Straight at (6,2) (Total Score: 56.00 -> [base: 1.0, backwards_plan: 35.0, connectivity: 20.0])
+--- [GAME] Checking place validity... Result: True (Reason: Placement is valid.) ---
+--- [COMMAND] Executing PlaceTileCommand: P0 places Straight at (6,2) ---
+  [COMMAND-STATE] Removing 'Straight' from Player 0's hand.
+  [COMMAND-STATE] Setting tile on board at (6,2) to: Placed(Straight, 90deg)
+--- [COMMAND] PlaceTileCommand Execute SUCCESS ---
+Command 'PlaceTileCommand' executed. History size: 169, Index: 168
+  AI chooses to PLACE Straight at (7,1) (Total Score: 56.00 -> [base: 1.0, backwards_plan: 35.0, connectivity: 20.0])
+--- [GAME] Checking place validity... Result: True (Reason: Placement is valid.) ---
+--- [COMMAND] Executing PlaceTileCommand: P0 places Straight at (7,1) ---
+  [COMMAND-STATE] Removing 'Straight' from Player 0's hand.
+  [COMMAND-STATE] Setting tile on board at (7,1) to: Placed(Straight, 90deg)
+--- [COMMAND] PlaceTileCommand Execute SUCCESS ---
+Command 'PlaceTileCommand' executed. History size: 170, Index: 169
+
+--- Starting Turn 43 for Player 1 ---
+
+--- AI Player 1 is thinking... ---
+
+An unexpected error occurred:
+FATAL: AI Player 1 could not find a single legal move. Hand: []. This indicates a game state error or a lack of available tiles/squares.
+Traceback (most recent call last):
+  File "/home/minseok/Games/Linie1/main.py", line 12, in <module>
+    app.run()
+  File "/home/minseok/Games/Linie1/visualizer.py", line 327, in run
+    self.current_state.handle_event(event)
+  File "/home/minseok/Games/Linie1/game_states.py", line 166, in handle_event
+    active_player.handle_delayed_action(self.game)
+  File "/home/minseok/Games/Linie1/game_logic/player.py", line 148, in handle_delayed_action
+    game.confirm_turn()
+  File "/home/minseok/Games/Linie1/game_logic/game.py", line 971, in confirm_turn
+    next_p.handle_turn_logic(self)
+  File "/home/minseok/Games/Linie1/game_logic/player.py", line 142, in handle_turn_logic
+    raise RuntimeError(f"FATAL: AI Player {self.player_id} could not find a single legal move. Hand: {[t.name for t in self.hand]}. This indicates a game state error or a lack of available tiles/squares.")
+RuntimeError: FATAL: AI Player 1 could not find a single legal move. Hand: []. This indicates a game state error or a lack of available tiles/squares.
+
+after this runtime error raised board game closed itslef and program stopped running. but instead, i wanna bel able to check there truly isn't a valid move available - can we please adapt to stop/halt the game instead of entirely quitting when no legal move apparently found so I can verify logic visually on board? and also, per start of turn i wanna see their at-hand 5 tiles printed on console output
+
+-----------------
+
+--- Starting Turn 284 for Player 1 ---
+
+--- AI Player 1 is thinking... (Hand: []) ---
+==================================================
+FATAL LOGIC ERROR: AI Player 1 could not find a single legal move.
+Hand: []
+The game will now halt for this AI. Please inspect the board.
+==================================================
+
+--- Starting Turn 285 for Player 0 ---
+
+--- AI Player 0 is thinking... (Hand: []) ---
+
+An unexpected error occurred:
+maximum recursion depth exceeded while calling a Python object
+Traceback (most recent call last):
+  File "/home/minseok/Games/Linie1/main.py", line 12, in <module>
+    app.run()
+  File "/home/minseok/Games/Linie1/visualizer.py", line 327, in run
+    self.current_state.handle_event(event)
+  File "/home/minseok/Games/Linie1/game_states.py", line 166, in handle_event
+    active_player.handle_delayed_action(self.game)
+  File "/home/minseok/Games/Linie1/game_logic/player.py", line 164, in handle_delayed_action
+    game.confirm_turn()
+  File "/home/minseok/Games/Linie1/game_logic/game.py", line 971, in confirm_turn
+    next_p.handle_turn_logic(self)
+  File "/home/minseok/Games/Linie1/game_logic/player.py", line 146, in handle_turn_logic
+    game.confirm_turn()
+  File "/home/minseok/Games/Linie1/game_logic/game.py", line 971, in confirm_turn
+    next_p.handle_turn_logic(self)
+  File "/home/minseok/Games/Linie1/game_logic/player.py", line 155, in handle_turn_logic
+    game.confirm_turn()
+  File "/home/minseok/Games/Linie1/game_logic/game.py", line 971, in confirm_turn
+    next_p.handle_turn_logic(self)
+
+( ... ...  cutting out some console output for brevity )
+
+  File "/usr/lib/python3.10/copy.py", line 172, in deepcopy
+    y = _reconstruct(x, memo, *rv)
+  File "/usr/lib/python3.10/copy.py", line 271, in _reconstruct
+    state = deepcopy(state, memo)
+  File "/usr/lib/python3.10/copy.py", line 146, in deepcopy
+    y = copier(x, memo)
+  File "/usr/lib/python3.10/copy.py", line 231, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+  File "/usr/lib/python3.10/copy.py", line 172, in deepcopy
+    y = _reconstruct(x, memo, *rv)
+  File "/usr/lib/python3.10/copy.py", line 271, in _reconstruct
+    state = deepcopy(state, memo)
+  File "/usr/lib/python3.10/copy.py", line 146, in deepcopy
+    y = copier(x, memo)
+  File "/usr/lib/python3.10/copy.py", line 231, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+  File "/usr/lib/python3.10/copy.py", line 146, in deepcopy
+    y = copier(x, memo)
+  File "/usr/lib/python3.10/copy.py", line 231, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+  File "/usr/lib/python3.10/copy.py", line 146, in deepcopy
+    y = copier(x, memo)
+  File "/usr/lib/python3.10/copy.py", line 203, in _deepcopy_list
+    memo[id(x)] = y
+RecursionError: maximum recursion depth exceeded while calling a Python object
+
+while the board game kept running as i wanted, it didn't help that the console output did not stop printing indefinitely until recursionerror just crashed the program and along with it the board game shut off too. is there way to ensure as soon as no more valid legal move available for any player, to prevent console and game from running but not crashing entirely - just halt both?

@@ -121,7 +121,7 @@ class HumanPlayer(Player):
         pass # Human logic is driven by Pygame events in the state machine.
 
 class AIPlayer(Player):
-    """Represents an AI-controlled player with a sophisticated strategic engine."""
+    """Represents an AI-controlled player with a sophisticated, resilient strategic engine."""
     def __init__(self, player_id: int):
         super().__init__(player_id)
         self.ideal_route_plan: Optional[List[RouteStep]] = None
@@ -131,93 +131,99 @@ class AIPlayer(Player):
         """Orchestrates the AI's entire turn, from planning to execution with delays."""
         if game.game_phase == GamePhase.GAME_OVER: return
 
-        print(f"\n--- AI Player {self.player_id} is thinking... ---")
+        # --- ADDED: Print AI's hand for debugging ---
+        hand_str = ", ".join([t.name for t in self.hand])
+        print(f"\n--- AI Player {self.player_id} is thinking... (Hand: [{hand_str}]) ---")
         
-        # 1. Plan the entire turn (both moves) at once.
         self._plan_full_turn(game)
         
-        # 2. Execute the first action immediately.
         if self.actions_to_perform:
             self._execute_next_action(game)
-            # 3. If there's a second action, set a timer for it.
             if self.actions_to_perform:
                 pygame.time.set_timer(AI_ACTION_TIMER_EVENT, 1, loops=1)
-            else: # If only one move was possible
+            else: 
+                print(f"--- AI Player {self.player_id} only had one valid move. Ending turn. ---")
                 game.confirm_turn()
-        else: # If no moves were possible at all
-            print(f"--- AI Player {self.player_id} has no valid moves and ends its turn. ---")
+        else:
+            # --- MODIFIED: Halt gracefully instead of crashing ---
+            print("="*50)
+            print(f"FATAL LOGIC ERROR: AI Player {self.player_id} could not find a single legal move.")
+            print(f"Hand: {[t.name for t in self.hand]}")
+            print("The game will now halt for this AI. Please inspect the board.")
+            print("="*50)
+            # End the turn without making a move. This passes control and keeps the game alive.
             game.confirm_turn()
+            # --- END MODIFICATION ---
 
     def handle_delayed_action(self, game: 'Game'):
-        """Executes the second planned action, triggered by the pygame timer."""
-        print(f"--- AI Player {self.player_id} takes its second action. ---")
+        """Executes the second planned action."""
         if self.actions_to_perform:
             self._execute_next_action(game)
         
+        print(f"--- AI Player {self.player_id} ends its turn. ---")
         game.confirm_turn()
 
     def _execute_next_action(self, game: 'Game'):
         """Pops the next action from the planned list and executes it."""
         move = self.actions_to_perform.pop(0)
-        action_type, details = move['type'], move['details']
+        action_type, details, score_breakdown = move['type'], move['details'], move['score_breakdown']
+        
+        score_str = ", ".join([f"{k}: {v:.1f}" for k, v in score_breakdown.items() if v > 0])
+        print(f"  AI chooses to {action_type.upper()} {details[0].name} at ({details[2]},{details[3]}) (Total Score: {move['score']:.2f} -> [{score_str}])")
         
         if action_type == "place":
-            tile, orientation, r, c = details
-            print(f"  AI chooses to PLACE {tile.name} at ({r},{c}) (Score: {move['score']:.2f})")
-            game.attempt_place_tile(self, tile, orientation, r, c)
+            game.attempt_place_tile(self, *details)
         elif action_type == "exchange":
-            tile, orientation, r, c = details
-            print(f"  AI chooses to EXCHANGE for {tile.name} at ({r},{c}) (Score: {move['score']:.2f})")
-            game.attempt_exchange_tile(self, tile, orientation, r, c)
+            game.attempt_exchange_tile(self, *details)
+
 
     def _plan_full_turn(self, game: 'Game'):
-        """The AI's brain: Plans the best two actions for the turn."""
+        """The AI's brain: Plans the best two actions for the turn by simulating."""
         self.actions_to_perform = []
-        
-        # Create a deep copy of the game state to simulate on
         sim_game = game.copy_for_simulation()
-        sim_player = sim_game.players[self.player_id]
+        sim_player = next(p for p in sim_game.players if p.player_id == self.player_id)
 
         for i in range(MAX_PLAYER_ACTIONS):
-            # Find the single best move in the current (or simulated) state
             best_move = self._find_best_move_in_state(sim_game, sim_player)
-            
             if best_move:
                 self.actions_to_perform.append(best_move)
-                # Apply the chosen move to the simulation to plan the next action correctly
+                # Apply the move to the simulation for accurate planning of the second action
                 action_type, details = best_move['type'], best_move['details']
                 tile, orientation, r, c = details
                 if action_type == "place":
                     sim_game.board.set_tile(r, c, PlacedTile(tile, orientation))
-                    sim_player.hand.remove(tile)
-                # (A full simulation would also handle exchange logic)
+                    if tile in sim_player.hand: sim_player.hand.remove(tile)
+                elif action_type == "exchange":
+                    old_tile = sim_game.board.get_tile(r,c)
+                    if old_tile and tile in sim_player.hand:
+                        sim_player.hand.remove(tile)
+                        sim_player.hand.append(old_tile.tile_type)
+                        sim_game.board.set_tile(r,c, PlacedTile(tile, orientation))
             else:
-                break # No more moves can be made
+                break
 
     def _find_best_move_in_state(self, game: 'Game', player: 'Player') -> Optional[Dict]:
-        """Analyzes a game state and finds the single best action to take."""
-        # 1. Calculate the "wet dream" path based on the current board state
+        """Analyzes a game state and finds the single best action to take. Never gives up."""
         ideal_plan = self._calculate_ideal_route(game, player)
-
-        # 2. Generate all 100% legal moves
         valid_moves = []
-        # Placement moves
+
+        # 1. Generate all legal moves and score them.
         for tile in player.hand:
+            # Placements
             for r in range(game.board.rows):
                 for c in range(game.board.cols):
                     for o in [0, 90, 180, 270]:
                         if game.check_placement_validity(tile, o, r, c)[0]:
-                            score = self._score_move(game, player, ideal_plan, "place", tile, o, r, c)
-                            valid_moves.append({'type': 'place', 'details': (tile, o, r, c), 'score': score})
-        # Exchange moves
-        for tile in player.hand:
+                            score, breakdown = self._score_move(game, player, ideal_plan, "place", tile, o, r, c)
+                            valid_moves.append({'type': 'place', 'details': (tile, o, r, c), 'score': score, 'score_breakdown': breakdown})
+            # Exchanges
             for r in range(game.board.rows):
                 for c in range(game.board.cols):
                     if game.board.get_tile(r, c):
                         for o in [0, 90, 180, 270]:
                             if game.check_exchange_validity(player, tile, o, r, c)[0]:
-                                score = self._score_move(game, player, ideal_plan, "exchange", tile, o, r, c)
-                                valid_moves.append({'type': 'exchange', 'details': (tile, o, r, c), 'score': score})
+                                score, breakdown = self._score_move(game, player, ideal_plan, "exchange", tile, o, r, c)
+                                valid_moves.append({'type': 'exchange', 'details': (tile, o, r, c), 'score': score, 'score_breakdown': breakdown})
 
         if not valid_moves:
             return None
@@ -238,35 +244,56 @@ class AIPlayer(Player):
         if cost1 == float('inf') and cost2 == float('inf'): return None
         return path1 if cost1 <= cost2 else path2
 
-    def _score_move(self, game: 'Game', player: 'Player', ideal_plan: Optional[List[RouteStep]], move_type: str, tile: TileType, orientation: int, r: int, c: int) -> float:
-        """Scores a pre-validated move based on its strategic value."""
-        score = 1.0  # Base score for any legal move
+    def _score_move(self, game: 'Game', player: 'Player', ideal_plan: Optional[List[RouteStep]], move_type: str, tile: TileType, orientation: int, r: int, c: int) -> Tuple[float, Dict[str, float]]:
+        """Scores a pre-validated move and returns the score breakdown."""
+        score = 1.0  # Base score for any legal move, ensuring AI never passes.
+        breakdown = {'base': score}
 
         # Priority 1: Fulfilling the Ideal Plan
         if ideal_plan:
             for i, step in enumerate(ideal_plan):
                 if step.coord == (r, c):
-                    score += 200.0 - (i * 5)  # Heavily reward moves that are on the ideal path
-                    # We would add more logic here to check if the tile type matches the ideal
-                    break
+                    # Higher score for moves earlier in the plan
+                    path_score = 200.0 - (i * 5)
+                    score += path_score
+                    breakdown['ideal_path'] = path_score
+                    break # Stop after finding the first match
         
         # Priority 2: Creating a Required Stop
         if player.route_card:
             for d in Direction:
                 building_id = game.board.get_building_at(r + d.value[0], c + d.value[1])
-                if building_id and building_id in player.route_card.stops:
+                # Check if this building is a required stop AND doesn't have a stop sign yet
+                if building_id and building_id in player.route_card.stops and building_id not in game.board.buildings_with_stops:
                     conns = game.get_effective_connections(tile, orientation)
                     is_parallel = (d in [Direction.N, Direction.S] and game._has_ew_straight(conns)) or \
                                   (d in [Direction.E, Direction.W] and game._has_ns_straight(conns))
                     if is_parallel:
-                        score += 100.0
-                        
-        # Priority 3: General Connectivity
+                        score += 150.0
+                        breakdown['stop_creation'] = 150.0
+        
+        # Priority 3: Working Backwards from Terminals (Plan B)
+        # If the move doesn't fit the ideal plan, see if it helps build from the end
+        if 'ideal_path' not in breakdown and player.line_card:
+            _, term2 = game.get_terminal_coords(player.line_card.line_number)
+            if term2:
+                dist = abs(r - term2[0]) + abs(c - term2[1])
+                # Lower score than ideal path, but better than random
+                backwards_score = 50.0 - dist
+                score += backwards_score
+                breakdown['backwards_plan'] = backwards_score
+
+        # Priority 4: General Connectivity
+        connectivity_score = 0
         for d in Direction:
             if game.board.get_tile(r + d.value[0], c + d.value[1]):
-                score += 20.0
+                connectivity_score += 10.0
+        if connectivity_score > 0:
+            score += connectivity_score
+            breakdown['connectivity'] = connectivity_score
                 
         if move_type == "exchange":
-            score += 10.0 # Small bonus for solving a problem via exchange
+            score += 5.0
+            breakdown['exchange_bonus'] = 5.0
 
-        return score
+        return score, breakdown
