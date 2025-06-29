@@ -398,16 +398,216 @@ Tie-Breaking: If multiple moves have the exact same highest score, the current i
 
 This entire four-step process is repeated for the AI's second action for the turn. After its two actions are complete, it calls game.confirm_turn(), its turn ends, and it draws new tiles.
 
----------------------
+--------------------------------------
+------------------------------------
 
-in main.py right now, when i change "Linie1Visualizer(num_players=1, num_ai=1)" below to have 0 human players and 1 ai, game freezes upon start - i can't click anything on board, any AI doesn't make any starting moves either. I wanna simulate and see how 2 AI players might play each other without human players on board, so assume Linie1Visualizer(num_players=0, num_ai=2) would allow me to do this. but it doesnt - help!
+We must rehaul ai thinking from scratch again cuz right now it's kinda buggy.
+At each turn, AI player's thinking involves evaluating various conditions about the board & what it knows / can infer about various move possibilities, and then deciding finally upon & making 2 possible best moves at that turn afforded to it to be able to successfully end that turn. Each possible move during evaluation will be weighted and rated in some sort of scoring, and the 2 best moves will be the #1 and #2 top-scoring moves it came up with.
+In the spirit of rehauling the ai thinking, ideal path below refers not to what we've been workign with previously, but rather a path that ignores all tile rules for the time being. Ideal route is a north star that Note at start, all players are assigned a line and required stops that they must travel for completing their line route. e.g. Line 1, X -> Y.
+
+"Step 1: identify station buildings required, make a stop tile associated with it if not already exists first."
+get coord of station building(s) it must pass. look at all its 4 neighbours and see if there is a stop tile already associated with this station. If exists, store that tile permanently in its ideal route (as stop tiles cannot be replaced, we know no matter what, trains that have this stop tile's associated with station building to pass through must make use of this tile in its complete route later.) BUT if no stop tile in neighbour of required station building is found: then must make a stop tile - but where to place the stop tile, to the building tile's n, e, s, or w port? Use heuristic - I suggest euclidean distance from station tile to the nearest terminal it has been assigned. So for example above, we know there are 2 terminal ends opposite side of board for given line 1, term1_a and term1_b. Now, term1_a consists of two terminal 1_a tiles (1_a_i and 1_a_ii), and term1_b consists of two terminal 1_b tiles (1_b_i and 1_b_ii). For station building X, for each of its 4 neighbouring tiles' centres, find euclidean distance from their centre to the midpoint of terminal 1_a_i and 1_a_ii. Also find euclidean distance from each of its 4 neighbouring tiles' centres to the midpoint of terminal 1_b_i and 1_b_ii. i.e. there should be 4 (neighbours) * 2 (terminal area end locations) = 8 possible calculations made. From X's perspective, find out which of those 8 calculations is shortest, then the corresponding neighbour and terminal end area become chosen as desired nodes it must visit in this ideal path and in subsequent turns priority #1 is to lay down a track with straight component to create a stop tile (if not already found for that building it needs to pass by that turn) at that desired coord. Same check applied for rest of required stops, so in this example do similar for Station tile Y. The shortest calculation from station stop tile to terminal ends should also inform which of the terminal end areas should become start & end nodes. i.e. Term1_a -> X -> Y -> Term1_b VS. Term1_b -> X -> Y -> Term1_a.
+Note that each terminal end area consists of 2 tiles each. If we suppose terminal 1_a area is closer than 1_b area is from our 1st required stop node, that being Station X here, then it matters less whether tram should start its journey from 1_a_i or 1_a_ii, as during driving phase whichever leads to faster route completion will be chosen as start, and vice versa which of 1_b_i or 1_b_ii becomes final end coord in journey matters not as game ends as soon as tram reaches either end tile. At early turns of the game for this AI player, highest priority bonus scoring should be given towards making a placement move that creates a stop tile at desired coord figured out from comparisons above.
+
+"Step 2: Pure ideal route ignoring real-world board conditions, and only a hypothetical board that considers its required nodes, terminal positions and station building tiles"
+To find wet dream ideal path at start of every turn of that AI player, AI player should map out the fastest possible route connecting the terminal ends while passing through required stops in order. Since Step 1 informs us coords for stop tiles, let's presume in this ideal path we placed stop tiles at those desired coords. Now consider, what is shortest path from start to X, X to Y, then Y to end? Since this is still in wet dream hypothetical world without consideration of other tiles on board for now, guess Manhattan style placement is optimal. So e.g. if start from Step 1 is determined (0,1), stop tile associated with Building X (2,2) is a vertical straight tile at (2,1), stop tile associated with Building Y (2,4) is a horizontal straight tile at (3,4), and end is (3,6). Then shortest tiles from start to X could go (0,1) -> (1,1) vertical straight -> (2,1) vertical straight -> (3,1) curve connecting north & east port -> (3,2) horizontal straight tile -> (3,3) horizontal straight tile -> (3,4) horizontal straight tile -> (3,5) horizontal straight tile -> (3,6) end. This would be ideal sequence of tiles in ideal path.
+
+"Step 3: compare back to real world circumstance with respect to at-hand 5 available tiles and already placed tiles on the real board. First for each tile in ideal path list, see its location coord, and see if there is already a tile at this location that exists (prolly due to opponent placing a tile there, or current player having placed there previously). If there isn't already tile at this location, bravo, we don't have to update our ideal path list and safely move to next tile in index of ideal path. If there is however already a tile, we must check which connections that tile possesses - if these connections align with the connection(s) we desire in our ideal path for this location coord, bravo, update our ideal path at this loc with the already placed tiletype and move to checking next index; but if connections of original already placed tile here do not align with desired connection from ideal path here, then we have three choices broadly: first imagine from a hypothethical infinite deck of unlimited tiletype choice, what tile type would be needed here that both preserves original tiles' connections while adding necessary desired location advised by ideal path's tile at that coord? then see if such a tile is at-hand and if this possible then update ideal path with this tiletype (as well as adding priority bonus score weighting to make this move ASAP while player still has this tiletype at-hand before anyone else replaces something less desirable at desired loc.). But if at-hand tile cannot suffice, then consider how this original tile may be utilised in a new ideal path - i.e. time to incorporate and embrace this already placed tile and figure out and update another ideal path from here to next required node with caveat being this tile's connections must be utilised. This is likely a recursive element until ideal path can be updated to be validated against real world board circumstance states, as to be able to actually make tile move, all tile placement / exchange rules are non-negotiably to be adhered to in real world. This is rather complex step admittedly, and to use example sequence from step 2 let's imagine opponent had placed, before AI player had even been able to make a single placement move, a curve with connection n and e ports, at (1,1). Unless the AI player had at-hand right now a StraightLeftCurve oriented to have connections n with s, and  n with e ports, then even if (2,1) turns out to be shortest euclidean distance away between Building X's neighbour to its left west direction (proposed stop tile from step 2 if you recall) and start node, right now it's not prudent or even legal to be honest to make a placement move of vertical straight at (2,1) as doing so in real world would not receive conncetion at (2,1)'s northern port from (1,1)'s southern port. This entirely messes up the ideal path forged in our hypothetical wet dream world that doesn't consider real world already-placed tiles, and a new ideal path needs updating that takes into account that, at this turn, it's not possible to place a stop tile as proposed and desired at (2,1), though this doesn't necessarily rule out (2,1) being forever off-limits for stop tile placement since at-hand tiles are replenished up to 5 tiles every turn for players respectively. And since ideal path is recalculated for all possibilities at each turn for AI player, this dynamic quality should help determine."
+
+"Step 4: from step 3 the AI player should by now have full sequence stored somewhere that sequentially contains (from start to end, passing through required stop tile nodes) the exact coordinates and the tiletype that respects real world conditions & constraints at those coordinate locations to the best of its knowledge of the real world board state at this turn in the game. It should note which of those tiles in this sequence (which should have successfully adaptably marry ideal dream world-conceived route with real world conditions) are already placed down on the actual real world map, and note which tiles still remain that need further populating. It should have kept track of various weights and scoring that inform which move to make and at which coord location during this turn - this may need fine-tuning! - taking into account the at-hand tiles. So we know top priority is to create stop tiles - if not already made for required associated Building node on its proposed line. Next priority for weighting is to connect the stop tiles together. Then next priority is to connect the first stop tile to starting terminal node. Then next priority is to connect the last stop to end terminal node. Low priority if above priorities cannot be validly made during this turn is to make a valid placement / exchange move on any random free tiles on the map (essentially wasting this move, patiently hoping that the replenished tiles will give desired tiletype to satiate above higher priorities in their next turns). Crucial to note, even if one of the top priorities would be to join up path between stop tile segments, even within this priority are sub-priorities: to use direct example from step 2, between the stop tiles (2,1) -> ... -> (3,4) there are at least 3 placement / exchange moves to be made to join these two coords up (assuming fastest possible joining here). Assuming having gone through all steps listed above those 3 tile placements are still valid moves to be made, which of those 3 moves should be prioritised first? I advise AI player should have slightly higher weighting going sequentially along index of path from earlier stop tile to the later stop tile, i.e. joining first outward from (3,1) then (3,2) then (3,3), though other priorities could mean the two moves this turn could prioritise overall the joining from start terminal to stop tile X first. It all comes down to final two best weighted move to close this current turn, and so careful tuning of weighting is crucial to be able to quickly connect up tiles for complete route."
 
 
-if __name__ == '__main__':
-    print("Starting Linie 1...")
-    try:
-        # Example: To start a game with 1 human and 1 AI player, you would change this line.
-        # For now, we'll keep it as 1 human player.
-        # You can change this to: app = Linie1Visualizer(num_players=1, num_ai=1)
-        app = Linie1Visualizer(num_players=1, num_ai=1) 
-        app.run()
+"Step 5: Hopefully soon their route will be connected up fully, this route connection will be checked at each turn - already implemented I believe, at least it works for checking human player's connections are validly complete atm - and AI player can then move on to driving phase!"
+
+This thinking is nuanced, lots of edge cases, and some recursive thinking likely involved. Explain to me the high level steps AI should think through when evaluating at each turn the best 2 moves it must make to advance its turn. Explain how its route will be planned out and followed - importantly validly, no illegal moves should be made - ensure legal move validity before actually makign it each turn, feed back to think again if highest weighted move is illegal to next rated move etc. I guess? Explain the AI thought process and algorithms - doesn't necessarily have to be A* BFS DFS if you know something that would aid better for this - that will be involved and better phrased than I have so I can check your understanding fully.
+
+---------------------------------------
+---------------------------------------
+---------------------------------------
+---------------------------------------
+---------------------------------------
+
+Your explanation is exceptionally clear, and it paints a vivid picture of the AI's strategic challenge. You've nailed the complexity of the laying track phase: it's a dynamic puzzle of planning, resource management, and reaction to an evolving environment.
+
+I completely understand the AI's need to:
+
+Plan a Hypothetical "Dream" Route: This is its north star, an aspirational path assuming perfect tile availability and no interference.
+
+Assess Real-World Constraints: Consider its actual hand, the current board state, and the rules.
+
+Evaluate Moves: Score potential actions (placing or exchanging tiles) based on how well they advance the AI towards its dream route, secure goal tiles, maintain connectivity, and manage resources.
+
+Execute Top Moves: Make the two best-scoring legal moves.
+
+Adapt: Re-evaluate everything on the next turn as the board state changes.
+
+You're also spot on about the recursive nature and the complexity of planning when the ideal path is blocked or the required tiles aren't in hand. This is where AI strategy truly shines.
+
+AI Player's Thought Process: Laying Track Phase
+
+Here's how I'll structure the AI's "mind" and the algorithms involved, incorporating all your excellent points:
+
+Core AI Player Class Structure:
+
+The AIPlayer class will manage these key pieces of information and logic:
+
+line_card, route_card: Player's objectives.
+
+hand: Current tile resources.
+
+validated_route: The optimal, rule-abiding path, calculated once for the driving phase. (This is the "ideal path" for human players, but for AI planning, we'll generate a new hypothetical one each turn).
+
+current_ideal_route_plan: The hypothetical route calculated at the start of the AI's turn. This is what the AI strives for.
+
+current_track_end: The current coordinate and orientation where the AI's track is physically connected on the board.
+
+player_state: LAYING_TRACK or DRIVING.
+
+New: possible_moves: A list of all legal moves (placements/exchanges) available to the AI this turn.
+
+New: scored_moves: A list of (move, score) pairs generated by evaluating possible_moves.
+
+AI's Turn: High-Level Steps & Algorithms
+
+Here's the detailed breakdown of what the AI player goes through each turn:
+
+Phase 1: Assessment and Ideal Path Planning (Start of Turn)
+
+Know Your Objectives:
+
+Retrieve self.line_card and self.route_card.
+
+Determine your start_terminal_coord and all required_stop_coords in order.
+
+Determine your final end_terminal_coord.
+
+This gives you your target sequence of (coord, is_goal_node) pairs: [start_term, stop1, stop2, ..., end_term].
+
+Calculate Hypothetical "Dream" Route (_calculate_ideal_route_plan):
+
+Goal: Find the absolute shortest sequence of tiles that connects your start terminal to your end terminal, passing through your required stops in order.
+
+Algorithm: Use a tile-unconstrained BFS or A* search for this.
+
+Input to Pathfinder:
+
+Start node: start_terminal_coord.
+
+Sequence of goal nodes: [stop1, stop2, ..., end_terminal]. (The pathfinder needs to know these goals and their order).
+
+Board state: The current board, BUT the pathfinder should be told to IGNORE existing tiles for blockage, and instead, consider what tile would be needed at each step to maintain valid connections.
+
+Tile Availability Ignored: The pathfinder can "imagine" it has access to any tile type and orientation.
+
+Rule Adherence: The pathfinder must respect all placement rules (connectivity, U-turns, valid stop entries/exits) when simulating paths.
+
+Output: A list of RouteStep objects representing the ideal sequence of (coord, is_goal_node, arrival_direction).
+
+Constraint Handling in Planning:
+
+If a required stop node S is encountered in the hypothetical path, the pathfinder must ensure that the segment leading to S uses a valid entry direction, and if S is the next goal, the exit from S must also be along a straight track segment. If no such path is possible with any tile type, that route becomes invalid.
+
+Phase 2: Evaluate Real-World Moves (For Each of the AI's 2 Actions)
+
+The AI now knows its dream path but must operate with real-world limitations.
+
+Generate All Legal Moves:
+
+For each tile in the AI's hand:
+
+For each empty, playable square (r, c) on the board:
+
+For each orientation (0, 90, 180, 270):
+
+Check if placing this tile with this orientation at (r, c) is legal (using check_placement_validity).
+
+If legal, add it to a list of valid_moves.
+
+For each tile in the AI's hand:
+
+For each tile currently on the board at (r, c):
+
+For each orientation:
+
+Check if (r, c) is eligible for exchange (not terminal, stop, wall, etc.).
+
+Check if check_exchange_validity passes for replacing old_tile with hand_tile at (r, c) and orientation.
+
+If legal, add this potential exchange to valid_moves.
+
+Score Every Legal Move:
+
+For each move in valid_moves:
+
+Calculate a score based on the following criteria, weighted by priority:
+
+Scoring Heuristics (Highest Priority First):
+
+A. Fulfilling the Immediate Goal (Highest Score):
+
+Does this move place a tile at the current_ideal_route_plan[player.required_node_index].coord?
+
+Yes, AND the placed tile matches the ideal tile type/orientation: Huge bonus.
+
+Yes, AND the placed tile makes progress towards the ideal connection (e.g., creates a segment that the ideal path would use): Large bonus.
+
+Yes, BUT the tile doesn't match ideal and may block it later: Moderate penalty, or very low score.
+
+B. Creating a Required Stop Sign:
+
+Does placing this tile (with its orientation) create a stop sign for a building that is a required stop on the AI's ideal_route_plan?
+
+YES: Significant bonus. Securing a stop is very important.
+
+C. Advancing Along the Ideal Path (General Progress):
+
+Does this move extend the AI's currently placed track in a direction that aligns with the current_ideal_route_plan?
+
+If the ideal path suggests going North from the AI's current track end, and the AI can place a tile that connects North, that's a bonus.
+
+Priority within this: Prefer moves that are earlier in the current_ideal_route_plan sequence.
+
+D. General Connectivity & Board Presence:
+
+Does this move connect to the AI's existing track? (Bonus)
+
+Does it connect to any existing track (even opponent's, if strategic)? (Small bonus)
+
+Does it simply place a tile on an empty valid spot? (Small base score for this action, to prevent AI from passing if it has no other good moves).
+
+E. Tile Resource Utility:
+
+Does the AI have this tile type in hand? (Assumed, as it's from hand).
+
+Does this tile offer crucial connections needed for the ideal_route_plan (e.g., a specific curve)? (Bonus)
+
+F. Opponent Disruption (Low Priority):
+
+If this move creates a dead end for an opponent's likely path, or occupies a critical junction for them, give a small bonus.
+
+G. Exchange Bonus:
+
+If the move is an exchange, add a small bonus, as exchanges are often strategic responses.
+
+Select Best 2 Moves:
+
+After scoring all legal moves, the AI selects the top two moves based on their scores. If there are fewer than two legal moves, it takes what it can.
+
+Execute Moves:
+
+The AI performs its first best move.
+
+It then schedules its second move using a timer (as we implemented).
+
+When the timer fires, it performs its second best move.
+
+Finally, it calls game.confirm_turn().
+
+This refined understanding clarifies the AI's complex decision-making process. The key is the iterative scoring of all legal moves against a dynamic, evolving ideal_route_plan, balanced with the realities of its hand and the board.
+
+Now, I can proceed to refactor the AIPlayer's logic to implement this sophisticated evaluation and selection process. I'll focus on these methods: _calculate_ideal_route, _find_best_move, and _score_move, ensuring they correctly use the ideal_route_plan and explore all valid moves.
+
+---------------------------------------
+---------------------------------------
+---------------------------------------
+---------------------------------------

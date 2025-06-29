@@ -74,6 +74,16 @@ class Game:
         self.command_history.clear()
         print("--- Setup Complete ---")
 
+        # --- NEW: Proactive AI Turn Start ---
+        # After setup is complete, check if the first player is an AI.
+        # If so, we must manually trigger their turn to start the game.
+        first_player = self.get_active_player()
+        if isinstance(first_player, AIPlayer):
+            print(f"--- Game initiated by AI Player {first_player.player_id}. Kicking off turn... ---")
+            first_player.handle_turn_logic(self)
+        # --- END NEW ---
+
+
     def _calculate_ai_ideal_route(self, player: AIPlayer) -> Optional[List[RouteStep]]:
         """Calculates the AI's 'wet dream' path assuming infinite tiles."""
         if not player.line_card or not player.route_card: return None

@@ -6,7 +6,7 @@ from typing import List, Dict, Tuple, Optional, NamedTuple, TYPE_CHECKING
 if TYPE_CHECKING:
     from .game import Game # For type hinting
 
-from .enums import PlayerState, Direction
+from .enums import PlayerState, GamePhase, Direction
 from .tile import TileType
 from .cards import LineCard, RouteCard
 
@@ -118,39 +118,31 @@ class AIPlayer(Player):
         self.actions_taken_this_turn: int = 0
 
     def handle_turn_logic(self, game: 'Game'):
-        """
-        Initiates the AI's turn by taking the FIRST action and setting a timer for the second.
-        """
-        print(f"\n--- AI Player {self.player_id}'s Turn ---")
+        """Initiates the AI's turn by taking the FIRST action and setting a timer."""
+        if game.game_phase == GamePhase.GAME_OVER: return
+
+        print(f"\n--- AI Player {self.player_id}'s Turn (Action 1) ---")
         self.actions_taken_this_turn = 0
         
-        # Take the first action immediately
-        self._plan_and_execute_action(game, 1)
+        self._plan_and_execute_action(game)
         self.actions_taken_this_turn += 1
 
-        # Set a timer to trigger the second action in 1000ms (1 second)
-        pygame.time.set_timer(AI_ACTION_TIMER_EVENT, 1000, loops=1)
+        if game.game_phase != GamePhase.GAME_OVER:
+            pygame.time.set_timer(AI_ACTION_TIMER_EVENT, 1, loops=1)
         
     def handle_delayed_action(self, game: 'Game'):
-        """
-        Handles the second action, triggered by the pygame timer event.
-        """
+        """Handles the second action, triggered by the pygame timer event."""
+        print(f"--- AI Player {self.player_id}'s Turn (Action 2) ---")
         if self.actions_taken_this_turn < game.MAX_PLAYER_ACTIONS:
-            self._plan_and_execute_action(game, 2)
+            self._plan_and_execute_action(game)
             self.actions_taken_this_turn += 1
 
-        # After the second action, confirm the turn.
         print(f"--- AI Player {self.player_id} ends its turn. ---")
         game.confirm_turn()
 
-
-    def _plan_and_execute_action(self, game: 'Game', action_num: int):
+    def _plan_and_execute_action(self, game: 'Game'):
         """Calculates the ideal path, evaluates all possible moves, and executes the best one."""
         self.ideal_route_plan = self._calculate_ideal_route(game)
-        if self.ideal_route_plan:
-            print(f"  AI Action {action_num+1}: Ideal path found with {len(self.ideal_route_plan)} steps.")
-        else:
-            print(f"  AI Action {action_num+1}: No ideal path found. Will place based on other heuristics.")
         
         best_move, best_score = self._find_best_move(game)
         
@@ -165,7 +157,9 @@ class AIPlayer(Player):
                 print(f"  AI chooses to EXCHANGE for {tile.name} at ({r},{c}) (Score: {best_score:.2f})")
                 game.attempt_exchange_tile(self, tile, orientation, r, c)
         else:
-            print("  AI could not find any valid move. Passing action.")
+            # This should now only happen if the AI has no tiles and no valid exchanges.
+            print("  AI has absolutely no legal moves available.")
+
 
     def _calculate_ideal_route(self, game: 'Game') -> Optional[List[RouteStep]]:
         if not self.line_card or not self.route_card: return None
@@ -181,39 +175,43 @@ class AIPlayer(Player):
     def _find_best_move(self, game: 'Game') -> Tuple[Optional[Tuple], float]:
         """
         Generates a list of all 100% legal moves and then scores them to find the best one.
-        This guarantees the AI cannot cheat.
         """
         valid_moves = []
 
-        # 1. Generate all valid "place" moves
+        # 1. Evaluate all valid "place" moves
         for tile in self.hand:
             for r in range(game.board.rows):
                 for c in range(game.board.cols):
                     for orientation in [0, 90, 180, 270]:
                         if game.check_placement_validity(tile, orientation, r, c)[0]:
-                            score = self._score_move(game, "place", tile, r, c)
+                            # --- FIX: Pass 'orientation' to the scoring function ---
+                            score = self._score_move(game, "place", tile, orientation, r, c)
                             valid_moves.append({'type': 'place', 'details': (tile, orientation, r, c), 'score': score})
         
-        # 2. Generate all valid "exchange" moves
+        # 2. Evaluate all valid "exchange" moves
         for tile_in_hand in self.hand:
             for r in range(game.board.rows):
                 for c in range(game.board.cols):
                     if game.board.get_tile(r, c) is None: continue
                     for orientation in [0, 90, 180, 270]:
                         if game.check_exchange_validity(self, tile_in_hand, orientation, r, c)[0]:
-                            score = self._score_move(game, "exchange", tile_in_hand, r, c)
-                            valid_moves.append({'type': 'exchange', 'details': (tile_in_hand, orientation, r, c), 'score': score + 5.0}) # Bonus for exchange
+                            # --- FIX: Pass 'orientation' to the scoring function ---
+                            score = self._score_move(game, "exchange", tile_in_hand, orientation, r, c)
+                            valid_moves.append({'type': 'exchange', 'details': (tile_in_hand, orientation, r, c), 'score': score + 5.0})
 
-        # 3. Find the best move from the validated list
         if not valid_moves:
             return None, -1.0
         
         best_move = max(valid_moves, key=lambda m: m['score'])
         return (best_move['type'], best_move['details']), best_move['score']
 
-    def _score_move(self, game: 'Game', move_type: str, tile: TileType, r: int, c: int) -> float:
-        """Scores a pre-validated move based on its strategic value."""
-        score = 0.0
+    def _score_move(self, game: 'Game', move_type: str, tile: TileType, orientation: int, r: int, c: int) -> float:
+        """
+        Scores a pre-validated move based on its strategic value.
+        Now correctly accepts the 'orientation' parameter.
+        """
+        score = 0.1
+        
         # Score for aligning with the ideal route plan
         if self.ideal_route_plan:
             for i, step in enumerate(self.ideal_route_plan):
@@ -229,7 +227,15 @@ class AIPlayer(Player):
         
         # Bonus for creating a required stop sign
         if self.route_card:
-            # (This scoring can be improved, but the core is that it scores a pre-validated move)
-            pass
+            for direction in Direction:
+                neighbor_pos = (r + direction.value[0], c + direction.value[1])
+                building_id = game.board.get_building_at(neighbor_pos[0], neighbor_pos[1])
+                if building_id and building_id in self.route_card.stops:
+                    # --- FIX: 'orientation' is now available to be used here ---
+                    conns = game.get_effective_connections(tile, orientation)
+                    is_parallel = (direction in [Direction.N, Direction.S] and game._has_ns_straight(conns)) or \
+                                  (direction in [Direction.E, Direction.W] and game._has_ns_straight(conns))
+                    if is_parallel:
+                        score += 50.0
         
         return score
