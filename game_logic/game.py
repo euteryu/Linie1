@@ -1016,3 +1016,24 @@ class Game:
             return game
         except Exception as e:
             print(f"!!! Error loading game from {filename}: {e} !!!"); traceback.print_exc(); return None
+        
+
+    def copy_for_simulation(self) -> 'Game':
+        """
+        Creates a deep copy of the essential game state for AI planning.
+        This is crucial for the AI to simulate its first move and then plan its second.
+        """
+        # Create a new Game instance without running its full __init__ setup
+        sim_game = object.__new__(Game)
+        
+        # Copy essential attributes
+        sim_game.num_players = self.num_players
+        sim_game.tile_types = self.tile_types
+        sim_game.pathfinder = self.pathfinder
+        sim_game.MAX_PLAYER_ACTIONS = self.MAX_PLAYER_ACTIONS
+        
+        # Deep copy the mutable, important state
+        sim_game.board = copy.deepcopy(self.board)
+        sim_game.players = copy.deepcopy(self.players)
+        
+        return sim_game

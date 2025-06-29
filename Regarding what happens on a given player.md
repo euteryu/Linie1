@@ -611,3 +611,10 @@ Now, I can proceed to refactor the AIPlayer's logic to implement this sophistica
 ---------------------------------------
 ---------------------------------------
 ---------------------------------------
+
+
+i pitted 2 ai players against each other - we've finally had player 1 ai successfully coming up with complete route and moved on to driving phase hurray! but i notice player 0 ai console output after certain number of turns is this: "--- Starting Turn 91 for Player 0 ---
+--- AI Player 0 is thinking... ---
+--- AI Player 0 has no valid moves and ends its turn. ---"
+
+well i see empty spaces on the board still so, while player 0 might not have 2 optimal best moves to necessarily make, they can't possibly have no valid moves to make at all as making a tile placement at any number of empty squares is still a move to make. importantly, AI must never simply pass - to run out valid moves is to suggest there is something wrong with game - e.g. not enough tiles assigned given number of players - and should raise an error about no more valid moves available and crucially the exact cause / thinking process that led to this being its conclusion please in console output for my sanity check. in fact, a priority that could contribute here might be working the sequence backwards in such scenarios if a valid move that satiates its desired sequential placement / exchange cannot be made, how about placing / exchanging tiles from end terminal backwards to its last required stop and so on? and also wanna see in console per move the reasoning making up the scoring of a particular action. Note, ai players must always make 2 valid moves, no more no less, per every turn before that turn ends successfully. no passing allowed, else this implies something wrong with algo thinking or game state fundamentally!
