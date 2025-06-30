@@ -850,3 +850,73 @@ The New, Improved User Flow
     Press Enter to Commit: Once the player has staged their desired moves (and they are all green), pressing Enter will execute the CombinedActionCommand and attempt to end the turn.
 
 This flow separates "building a move" from "staging a move" from "committing the turn," giving the player maximum control and clarity.
+
+-----
+----
+
+Question 1: Is the AI aware of the advanced "stage-commit" tactics?
+
+Short Answer: No, it is not. Your assessment is 100% correct.
+
+Detailed Explanation:
+
+The current AI is a sequential, greedy planner. Here's how it thinks, which will clarify its blind spot:
+
+    _plan_full_turn: This is the AI's brain.
+
+    It calls _find_best_move_in_state to find the single best move based on the current, real board state. Let's say it finds "Move A."
+
+    It then simulates placing "Move A" on a copy of the board.
+
+    It calls _find_best_move_in_state a second time, but this time against the new, simulated board state (with "Move A" already on it) to find the best "Move B."
+
+The AI never considers pairs of moves simultaneously. In your brilliant "two crossroads" example:
+
+    The AI would evaluate placing the first crossroad at (2,2). The check_exchange_validity would run against the real board where (2,3) is still a straight tile. The move would be invalid and receive a score of 0.
+
+    The AI would never choose this invalid move as its "Move A," and therefore would never get to the second step of its simulation where placing the second crossroad would make the first one valid.
+
+How could this be fixed?
+Implementing an AI that can "see" these combinations is a significant leap in complexity. It would require changing the AI from a sequential planner to a combinatorial planner. Instead of finding the best single move, it would have to:
+
+    Generate all possible pairs of moves from its hand.
+
+    For each pair, simulate them both on a hypothetical board.
+
+    Run the validation and scoring function on that hypothetical board.
+
+    Choose the highest-scoring pair.
+
+This is computationally very expensive and is a major new feature, not a simple bug fix. For now, it's a known limitation and a fascinating challenge for a future "Grandmaster AI" version. Your current AI is a very strong "Advanced" player that makes locally optimal moves.
+
+in future, players will have different levels of difficulty mode. So humans can go up against "easy AI" - the sequential planner algo atm - and "hard AI" mode that uses combinatorial planning. maybe i'll think of "super hard" mode in future too, maybe even machine learning trained involved! point being, i need robust scaleable means of allowing players to specify ai's difficulty. and right now, I want hard ai mode so in the code too have a hard ai utilise this combinatorial approach - advise how, why and where to add this new code(s) and give full complete program for entire sections changed.
+
+---
+
+in future, players will have different levels of difficulty mode. So humans can go up against "easy AI" - the sequential planner algo atm - and "hard AI" mode that uses combinatorial planning. maybe i'll think of "super hard" mode in future too, maybe even machine learning trained involved! point being, i need robust scaleable means of allowing players to specify ai's difficulty, without these hard ai mode additions breaking easy ai code from working if easy ai algo favoured by human players in menu. and right now, I want hard ai mode so in the code too have a hard ai utilise this combinatorial approach - advise how, why and where to add this new code(s) and give full complete program for entire sections changed.
+
+
+--- Starting Turn 42 for Player 2 ---
+Executing Move: P2 to path index 62
+--> Move Execute SUCCESS. Landed at (6, 2). Win: False
+Command 'Move P2 to path index 62' executed. History size: 219, Index: 218
+
+--- Starting Turn 43 for Player 0 ---
+
+--- AI Player 0 is thinking... (Hand: [DiagonalCurve, DiagonalCurve, StraightLeftCurve, DiagonalCurve, DiagonalCurve]) ---
+==================================================
+FATAL LOGIC ERROR: AI Player 0 could not find a single legal move.
+Hand: ['DiagonalCurve', 'DiagonalCurve', 'StraightLeftCurve', 'DiagonalCurve', 'DiagonalCurve']
+AI is passing its turn.
+==================================================
+
+--- Starting Turn 43 for Player 1 ---
+
+--- AI Player 1 is thinking... (Hand: [Straight, Straight, Tree_JunctionRight, StraightRightCurve, StraightRightCurve]) ---
+==================================================
+FATAL LOGIC ERROR: AI Player 1 could not find a single legal move.
+Hand: ['Straight', 'Straight', 'Tree_JunctionRight', 'StraightRightCurve', 'StraightRightCurve']
+AI is passing its turn.
+==================================================
+
+combinatorial approach in ai thinking necessary as despite two-stage-fine-but-one-stage-might-not-fine scenario leads to AI player getting stuck in "no legal move available" loop despite having at-hand suitable tiles to satiate legal move had it combinatorially considered all exchanges possible anywhere.

@@ -21,7 +21,9 @@ from .pathfinding import AStarPathfinder, BFSPathfinder # Keep both for swapping
 
 from constants import (
     TILE_DEFINITIONS, TILE_COUNTS_BASE, HAND_TILE_LIMIT,
-    MAX_PLAYER_ACTIONS, DIE_FACES, STOP_SYMBOL, TERMINAL_COORDS, STARTING_HAND_TILES, ROUTE_CARD_VARIANTS, TERMINAL_DATA
+    MAX_PLAYER_ACTIONS, DIE_FACES, STOP_SYMBOL, TERMINAL_COORDS,
+    STARTING_HAND_TILES, ROUTE_CARD_VARIANTS, TERMINAL_DATA,
+    TILE_COUNTS_5_PLUS_ADD
 )
 
 class Game:
@@ -73,6 +75,17 @@ class Game:
         self.actions_taken_this_turn = 0
         self.command_history.clear()
         print("--- Setup Complete ---")
+
+        # --- THIS IS THE FIX ---
+        # After setup is complete, check if the first player is an AI.
+        # If so, we must manually trigger their turn to start the game, as there
+        # will be no human input to get the event loop rolling.
+        first_player = self.get_active_player()
+        if isinstance(first_player, AIPlayer):
+            print(f"--- Game initiated by AI Player {first_player.player_id}. Kicking off turn... ---")
+            # This is the proactive call that was missing.
+            first_player.handle_turn_logic(self)
+        # --- END OF FIX ---
 
 
     def _calculate_ai_ideal_route(self, player: AIPlayer) -> Optional[List[RouteStep]]:
@@ -951,28 +964,40 @@ class Game:
     def confirm_turn(self) -> bool:
         active_p = self.get_active_player()
         if self.game_phase == GamePhase.GAME_OVER: return False
+
+        # This check is for Human Players who might try to end the turn early.
         if isinstance(active_p, HumanPlayer):
             if active_p.player_state == PlayerState.LAYING_TRACK and self.actions_taken_this_turn < self.MAX_PLAYER_ACTIONS: return False
-            if active_p.player_state == PlayerState.DRIVING and self.actions_taken_this_turn < self.MAX_PLAYER_ACTIONS: return False
+            # Driving turns end automatically after the one move action.
 
+        # Draw tiles at the end of the turn for LAYING_TRACK phase
         if active_p.player_state == PlayerState.LAYING_TRACK:
-            for _ in range(min(self.HAND_TILE_LIMIT - len(active_p.hand), self.MAX_PLAYER_ACTIONS)): self.draw_tile(active_p)
+            for _ in range(min(self.HAND_TILE_LIMIT - len(active_p.hand), self.MAX_PLAYER_ACTIONS)):
+                self.draw_tile(active_p)
         
+        # Advance to the next player
         self.active_player_index = (self.active_player_index + 1) % self.num_players
         if self.active_player_index == 0: self.current_turn += 1
         self.actions_taken_this_turn = 0
         self.command_history.clear_redo_history()
         
         next_p = self.get_active_player()
-        print(f"\n--- Starting Turn {self.current_turn} for Player {next_p.player_id} ---")
+        print(f"\n--- Starting Turn {self.current_turn} for Player {next_p.player_id} ({next_p.player_state.name}) ---")
 
+        # --- THIS IS THE FIX ---
+        # We must proactively trigger the next player's turn logic, regardless of their state.
+        # The Player object itself will decide what to do (lay track or drive).
+
+        # First, check if a player who is laying track can NOW switch to driving.
         if next_p.player_state == PlayerState.LAYING_TRACK:
             is_complete, start, path = self.check_player_route_completion(next_p)
             if is_complete and start and path:
                 self.handle_route_completion(next_p, start, path)
-            else:
-                # This is the polymorphic call. It works for both Human and AI.
-                next_p.handle_turn_logic(self)
+                # The player state is now DRIVING.
+
+        # Now, call the universal turn handler. It will correctly dispatch to
+        # the driving logic if the player's state is DRIVING.
+        next_p.handle_turn_logic(self)
         
         return True
 

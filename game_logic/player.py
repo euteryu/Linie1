@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 from .enums import PlayerState, Direction, GamePhase
 from .tile import TileType, PlacedTile
 from .cards import LineCard, RouteCard
-from constants import AI_ACTION_TIMER_EVENT, MAX_PLAYER_ACTIONS
+from constants import AI_ACTION_TIMER_EVENT, MAX_PLAYER_ACTIONS, AI_MOVE_DELAY_MS
 
 
 class RouteStep(NamedTuple):
@@ -129,31 +129,44 @@ class AIPlayer(Player):
 
     def handle_turn_logic(self, game: 'Game'):
         """Orchestrates the AI's entire turn, from planning to execution with delays."""
-        if game.game_phase == GamePhase.GAME_OVER: return
+        if game.game_phase == GamePhase.GAME_OVER:
+            return
 
-        # --- ADDED: Print AI's hand for debugging ---
-        hand_str = ", ".join([t.name for t in self.hand])
-        print(f"\n--- AI Player {self.player_id} is thinking... (Hand: [{hand_str}]) ---")
-        
-        self._plan_full_turn(game)
-        
-        if self.actions_to_perform:
-            self._execute_next_action(game)
+        if self.player_state == PlayerState.DRIVING:
+            # --- Driving Phase Logic ---
+            print(f"\n--- AI Player {self.player_id}'s Turn (Driving) ---")
+            
+            # 1. AI "rolls" the die programmatically.
+            roll_result = game.roll_special_die()
+            print(f"  AI Player {self.player_id} rolls a '{roll_result}'.")
+            
+            # 2. AI "presses the button" by calling the game's driving logic.
+            # The game logic will handle the move, turn confirmation, and win checks.
+            game.attempt_driving_move(self, roll_result)
+            
+        elif self.player_state == PlayerState.LAYING_TRACK:
+            # --- Laying Track Phase Logic (The original logic) ---
+            hand_str = ", ".join([t.name for t in self.hand])
+            print(f"\n--- AI Player {self.player_id} is thinking... (Hand: [{hand_str}]) ---")
+            
+            self._plan_full_turn(game)
+            
             if self.actions_to_perform:
-                pygame.time.set_timer(AI_ACTION_TIMER_EVENT, 1, loops=1)
-            else: 
-                print(f"--- AI Player {self.player_id} only had one valid move. Ending turn. ---")
+                self._execute_next_action(game)
+                if self.actions_to_perform:
+                    # Set a timer for the second action to make it feel less instant.
+                    pygame.time.set_timer(AI_ACTION_TIMER_EVENT, AI_MOVE_DELAY_MS, loops=1) # 500ms delay
+                else: 
+                    # This can happen if the AI only finds one valid move.
+                    print(f"--- AI Player {self.player_id} only had one valid move. Ending turn. ---")
+                    game.confirm_turn()
+            else:
+                print("="*50)
+                print(f"FATAL LOGIC ERROR: AI Player {self.player_id} could not find a single legal move.")
+                print(f"Hand: {[t.name for t in self.hand]}")
+                print("AI is passing its turn.")
+                print("="*50)
                 game.confirm_turn()
-        else:
-            # --- MODIFIED: Halt gracefully instead of crashing ---
-            print("="*50)
-            print(f"FATAL LOGIC ERROR: AI Player {self.player_id} could not find a single legal move.")
-            print(f"Hand: {[t.name for t in self.hand]}")
-            print("The game will now halt for this AI. Please inspect the board.")
-            print("="*50)
-            # End the turn without making a move. This passes control and keeps the game alive.
-            game.confirm_turn()
-            # --- END MODIFICATION ---
 
     def handle_delayed_action(self, game: 'Game'):
         """Executes the second planned action."""

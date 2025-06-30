@@ -8,7 +8,7 @@ if __name__ == '__main__':
         # Example: To start a game with 1 human and 1 AI player, you would change this line.
         # For now, we'll keep it as 1 human player.
         # You can change this to: app = Linie1Visualizer(num_players=1, num_ai=1)
-        app = Linie1Visualizer(num_players=1, num_ai=4) 
+        app = Linie1Visualizer(num_players=0, num_ai=3) 
         app.run()
     except ImportError as e:
          print(f"\nError: Pygame not found or import failed.")
