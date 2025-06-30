@@ -1,7 +1,7 @@
 # game_logic/commands.py
+import copy
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
-from typing import Tuple, Optional
+from typing import TYPE_CHECKING, Tuple, Optional, List, Dict, Any
 from .tile import TileType, PlacedTile
 from .player import Player
 from .enums import PlayerState # If needed
@@ -331,3 +331,108 @@ class MoveCommand(Command):
 
     def get_description(self) -> str:
          return f"Move P{self.player.player_id} to path index {self.target_path_index}"
+    
+class CombinedActionCommand(Command):
+    def __init__(self, game: 'Game', player: Player, staged_moves: List[Dict]):
+        super().__init__(game)
+        self.player = player
+        # Make a deep copy to ensure the command is independent of the UI state
+        self.moves_to_perform = copy.deepcopy(staged_moves)
+        self._undo_data = [] # To store info needed to reverse each action
+
+    def execute(self) -> bool:
+        # Check if this command would exceed the action limit BEFORE executing
+        if self.game.actions_taken_this_turn + len(self.moves_to_perform) > self.game.MAX_PLAYER_ACTIONS:
+            print(f"Command Error: Cannot perform {len(self.moves_to_perform)} actions. "
+                f"({self.game.actions_taken_this_turn}/{self.game.MAX_PLAYER_ACTIONS} already taken).")
+            return False
+
+        self._undo_data = []
+        # Execute each move in order
+        for move in self.moves_to_perform:
+            coord_r, coord_c = move['coord']
+            tile_to_use = move['tile_type']
+
+            if move['action_type'] == 'place':
+                # --- Place Logic ---
+                undo_info = {
+                    'type': 'place', 'coord': (coord_r, coord_c),
+                    'tile_type': tile_to_use, 'stop_placed': False, 'building_id': None
+                }
+                self.player.hand.remove(tile_to_use)
+                placed_tile = PlacedTile(tile_to_use, move['orientation'])
+                self.game.board.set_tile(coord_r, coord_c, placed_tile)
+
+                building_before = self.game.board.buildings_with_stops.copy()
+                self.game._check_and_place_stop_sign(placed_tile, coord_r, coord_c)
+                newly_stopped = self.game.board.buildings_with_stops - building_before
+                if newly_stopped:
+                    undo_info['stop_placed'] = True
+                    undo_info['building_id'] = newly_stopped.pop()
+                self._undo_data.append(undo_info)
+
+            elif move['action_type'] == 'exchange':
+                # --- Exchange Logic ---
+                old_tile = self.game.board.get_tile(coord_r, coord_c)
+                if not old_tile: return False
+                undo_info = {
+                    'type': 'exchange', 'coord': (coord_r, coord_c),
+                    'new_tile': tile_to_use, 'old_tile_data': old_tile.to_dict()
+                }
+                self._undo_data.append(undo_info)
+                self.player.hand.remove(tile_to_use)
+                self.player.hand.append(old_tile.tile_type)
+                new_placed_tile = PlacedTile(tile_to_use, move['orientation'])
+                self.game.board.set_tile(coord_r, coord_c, new_placed_tile)
+
+        # Update the action counter
+        self.game.actions_taken_this_turn += len(self.moves_to_perform)
+        
+        # *** THIS IS THE FIX ***
+        # If the player has now completed their actions, end their turn.
+        if self.game.actions_taken_this_turn >= self.game.MAX_PLAYER_ACTIONS:
+            self.game.confirm_turn()
+
+        return True
+
+    def undo(self) -> bool:
+        # *** THIS IS THE FIX ***
+        # If we are undoing a turn-ending move, we must revert the turn advancement.
+        # This requires adding state to the command to know if it ended the turn.
+        # For now, a simpler approach is to handle this in the game's undo logic.
+        # We will assume a simple decrement is sufficient for now.
+        
+        # Revert action counter first
+        self.game.actions_taken_this_turn -= len(self._undo_data)
+
+        # Undo in reverse order
+        for undo_action in reversed(self._undo_data):
+            coord_r, coord_c = undo_action['coord']
+            if undo_action['type'] == 'place':
+                if undo_action['stop_placed'] and undo_action['building_id']:
+                    building_id = undo_action['building_id']
+                    tile = self.game.board.get_tile(coord_r, coord_c)
+                    if tile and tile.has_stop_sign:
+                        tile.has_stop_sign = False
+                        self.game.board.buildings_with_stops.discard(building_id)
+                        if building_id in self.game.board.building_stop_locations:
+                            del self.game.board.building_stop_locations[building_id]
+                self.game.board.set_tile(coord_r, coord_c, None)
+                # Be careful with tile object identity if deepcopy isn't used everywhere
+                tile_to_return = next((t for t in self.game.tile_types.values() if t.name == undo_action['tile_type'].name), None)
+                if tile_to_return: self.player.hand.append(tile_to_return)
+
+            elif undo_action['type'] == 'exchange':
+                old_tile_reconstructed = PlacedTile.from_dict(undo_action['old_tile_data'], self.game.tile_types)
+                if not old_tile_reconstructed: return False
+                self.game.board.set_tile(coord_r, coord_c, old_tile_reconstructed)
+                # Be careful with tile object identity
+                new_tile_type_obj = next((t for t in self.game.tile_types.values() if t.name == undo_action['new_tile'].name), None)
+                old_tile_type_obj = old_tile_reconstructed.tile_type
+                if old_tile_type_obj in self.player.hand: self.player.hand.remove(old_tile_type_obj)
+                if new_tile_type_obj: self.player.hand.append(new_tile_type_obj)
+                
+        return True
+
+    def get_description(self) -> str:
+        return f"Commit {len(self.moves_to_perform)} staged actions"

@@ -1,17 +1,16 @@
 # game_states.py
-from typing import Optional, TypeVar, Dict, Any
+from typing import Optional, Dict, Any, List
 import pygame
 import tkinter as tk
 from tkinter import filedialog
+import copy
 
 # --- Relative Imports from Game Logic ---
-# Import main Game class and specific classes if needed for type hints
 from game_logic.game import Game
 from game_logic.player import Player, HumanPlayer, AIPlayer
 from game_logic.tile import TileType, PlacedTile
 from game_logic.enums import GamePhase, PlayerState, Direction
-# Import Command classes if needed for type hints, though usually not
-# from game_logic.commands import PlaceTileCommand, ExchangeTileCommand
+from game_logic.commands import CombinedActionCommand # Make sure to create this new command
 
 # --- Constants ---
 import constants as C
@@ -22,34 +21,23 @@ class GameState:
     """Abstract base class for different game phases/states."""
     def __init__(self, visualizer):
         self.visualizer = visualizer
-        # Ensure game reference is correctly typed if possible
-        self.game: Game = visualizer.game # Get game reference
+        self.game: Game = visualizer.game
 
     def handle_event(self, event):
-        """Handles Pygame events specific to this state."""
         raise NotImplementedError
 
     def update(self, dt):
-        """Updates state logic over time (e.g., animations)."""
-        pass # Not used currently
+        pass
 
     def draw(self, screen):
-        """Draws the game screen specific to this state."""
         raise NotImplementedError
 
-    # --- Common Event Handling for Buttons ---
     def _handle_common_clicks(self, event) -> bool:
-        """
-        Handles clicks common to most states: Save, Load, Undo, Redo.
-        Returns True if the event was handled, False otherwise.
-        """
         if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
-            return False # Only handle left mouse clicks
+            return False
 
         mouse_pos = event.pos
         handled = False
-
-        # Check standard buttons
         if self.visualizer.save_button_rect.collidepoint(mouse_pos):
             self.save_game_action()
             handled = True
@@ -57,24 +45,19 @@ class GameState:
             self.load_game_action()
             handled = True
         elif self.visualizer.undo_button_rect.collidepoint(mouse_pos):
-            self.undo_action() # New method for undo button click
+            self.undo_action()
             handled = True
         elif self.visualizer.redo_button_rect.collidepoint(mouse_pos):
-            self.redo_action() # New method for redo button click
+            self.redo_action()
             handled = True
         elif self.visualizer.debug_toggle_button_rect.collidepoint(mouse_pos):
-            self.toggle_debug_action() # New method for debug toggle
+            self.toggle_debug_action()
             handled = True
-
         return handled
 
-    # --- Action Methods Called by Click Handlers ---
-
     def save_game_action(self):
-        """Opens file dialog and calls game save."""
-        # (Implementation remains the same, using filedialog)
         if not self.visualizer.tk_root: print("Error: Tkinter needed."); return
-        filepath = filedialog.asksaveasfilename( # ... options ...
+        filepath = filedialog.asksaveasfilename(
             title="Save Game", defaultextension=".json",
             filetypes=[("Linie 1 Saves", "*.json"), ("All", "*.*")]
         )
@@ -83,274 +66,210 @@ class GameState:
              else: self.set_message("Error Saving Game.")
         else: self.set_message("Save Cancelled.")
 
-
     def load_game_action(self):
-        """Opens file dialog and calls game load."""
-        # (Implementation remains the same, using filedialog)
         if not self.visualizer.tk_root: print("Error: Tkinter needed."); return
-        filepath = filedialog.askopenfilename( # ... options ...
-             title="Load Game",
-             filetypes=[("Linie 1 Saves", "*.json"), ("All", "*.*")]
+        filepath = filedialog.askopenfilename(
+             title="Load Game", filetypes=[("Linie 1 Saves", "*.json"), ("All", "*.*")]
         )
         if filepath:
-            # Pass existing tile type definitions to load_game
             loaded_game = Game.load_game(filepath, self.game.tile_types)
             if loaded_game:
-                # CRITICAL: Replace game instance in visualizer & current state
                 self.visualizer.game = loaded_game
                 self.game = loaded_game
-                # Let visualizer update state based on loaded game phase/player
                 self.visualizer.update_current_state_for_player()
-                # Reset any local UI state in the *new* state object if needed
-                # (The current state object might be replaced)
-                # self.set_message("Game Loaded.") # Message set by new state?
             else: self.set_message("Error Loading Game.")
         else: self.set_message("Load Cancelled.")
 
     def undo_action(self):
-        """Calls the game's undo logic."""
-        if self.game.undo_last_action(): self.set_message("Action Undone.")
-        else: self.set_message("Nothing to undo.")
+        # In the new flow, undo should clear staged moves first.
+        if hasattr(self, 'staged_moves') and self.staged_moves:
+            self.staged_moves = []
+            self.set_message("Staging cleared.")
+        elif self.game.undo_last_action():
+            self.set_message("Action Undone.")
+        else:
+            self.set_message("Nothing to undo.")
 
     def redo_action(self):
-        """Calls the game's redo logic."""
         if self.game.redo_last_action(): self.set_message("Action Redone.")
         else: self.set_message("Nothing to redo.")
 
     def toggle_debug_action(self):
-         """Toggles debug mode and updates messages."""
          self.visualizer.debug_mode = not self.visualizer.debug_mode
          mode_str = "ON" if self.visualizer.debug_mode else "OFF"
          self.set_message(f"Debug Mode {mode_str}")
-         # Clear selections when toggling mode
-         if hasattr(self, 'selected_tile_index'): self.selected_tile_index = None
-         if hasattr(self, 'debug_selected_tile_type'): self.debug_selected_tile_type = None
+         if hasattr(self, 'staged_moves'): self.staged_moves = []
 
-    # Helper to set message consistently (can be overridden by states)
     def set_message(self, msg: str):
-        """Sets the message attribute if it exists."""
-        if hasattr(self, 'message'):
-            self.message = msg
-        else: # Should not happen if states declare message attribute
-             print(f"State Warning: Cannot set message '{msg}'")
-
+        if hasattr(self, 'message'): self.message = msg
+        else: print(f"State Warning: Cannot set message '{msg}'")
 
 # --- Laying Track State ---
 
 class LayingTrackState(GameState):
-    """Handles input and drawing when players are placing tiles."""
+    """Handles input and drawing for the new 'staging' user flow."""
     def __init__(self, visualizer):
         super().__init__(visualizer)
-        self.selected_tile_index: Optional[int] = None
-        self.debug_selected_tile_type: Optional[TileType] = None
-        self.current_orientation = 0
-        self.message = "Select tile and place/exchange."
-        # Rects for hand tiles, updated during draw
+        self.staged_moves: List[Dict[str, Any]] = []
+        self.move_in_progress: Optional[Dict[str, Any]] = None
+        self.message = "Select an interactable board square."
         self.current_hand_rects: Dict[int, pygame.Rect] = {}
 
-    def get_selected_tile_for_preview(self) -> Optional[TileType]:
-        """ Gets the tile type to show in preview/UI based on mode. """
-        # (Implementation remains the same)
-        if self.visualizer.debug_mode and self.debug_selected_tile_type: return self.debug_selected_tile_type # ... rest ...
-        elif not self.visualizer.debug_mode and self.selected_tile_index is not None:
-            player = self.game.get_active_player(); # ... null checks ...
-            if player and 0 <= self.selected_tile_index < len(player.hand): return player.hand[self.selected_tile_index]
-        return None
+    def _reset_move_in_progress(self):
+        """Helper to safely clear the move being built."""
+        self.move_in_progress = None
+        self._validate_all_staged_moves() # Re-validate when a potential move is cancelled
 
     def handle_event(self, event):
+        # (AI handling logic remains the same)
         active_player: Player = self.game.get_active_player()
-
-        # --- MODIFIED: Handle the AI action timer event ---
         if event.type == C.AI_ACTION_TIMER_EVENT and isinstance(active_player, AIPlayer):
-            # The timer has fired, tell the AI to take its second action.
-            active_player.handle_delayed_action(self.game)
-            return # Consume the event
-
-        # If the active player is an AI, block other human input events.
+            active_player.handle_delayed_action(self.game); return
         if isinstance(active_player, AIPlayer):
-            self.message = f"Waiting for AI Player {active_player.player_id}..."
-            return
-        # --- END MODIFICATION ---
+            self.message = f"Waiting for AI Player {active_player.player_id}..."; return
 
         if self._handle_common_clicks(event): return
-        
         if active_player.player_state != PlayerState.LAYING_TRACK: return
-        
+
         if event.type == pygame.MOUSEBUTTONDOWN:
             self._handle_mouse_down(event, active_player)
         elif event.type == pygame.KEYDOWN:
             self._handle_key_down(event, active_player)
 
-
     def _handle_mouse_down(self, event, active_player):
-        """ Handles mouse button down events for LayingTrackState. """
         mouse_pos = event.pos
 
-        # --- Debug Palette Click ---
-        if self.visualizer.debug_mode:
-            clicked_palette = False
-            for index, rect in self.visualizer.debug_tile_rects.items():
-                if rect.collidepoint(mouse_pos) and event.button == 1:
-                    selected = self.visualizer.debug_tile_types[index]
-                    self.debug_selected_tile_type = selected
-                    self.selected_tile_index = None
-                    self.current_orientation = 0
-                    self.message = f"Debug Select: {selected.name}"
-                    clicked_palette = True
-                    break
-            if clicked_palette: return # Consume event
+        # --- 1. BOARD CLICK LOGIC ---
+        if (C.BOARD_X_OFFSET <= mouse_pos[0] < C.BOARD_X_OFFSET + C.BOARD_DRAW_WIDTH and
+            C.BOARD_Y_OFFSET <= mouse_pos[1] < C.BOARD_Y_OFFSET + C.BOARD_DRAW_HEIGHT):
+            
+            grid_r, grid_c = (mouse_pos[1] - C.BOARD_Y_OFFSET) // C.TILE_SIZE + C.PLAYABLE_ROWS[0], \
+                             (mouse_pos[0] - C.BOARD_X_OFFSET) // C.TILE_SIZE + C.PLAYABLE_COLS[0]
+            
+            self._reset_move_in_progress()
 
-        # --- Hand Click (Normal Mode) ---
-        elif not self.visualizer.debug_mode:
-            clicked_hand = False
+            # --- STRICT UPFRONT VALIDATION ---
+            if not self.game.board.is_valid_coordinate(grid_r, grid_c):
+                self.message = "Cannot select a square outside the grid."; return
+            if self.game.board.get_building_at(grid_r, grid_c):
+                self.message = "Cannot place tiles on a building."; return
+            if any(m['coord'] == (grid_r, grid_c) for m in self.staged_moves):
+                self.message = "This square is already part of a staged move."; return
+
+            target_tile = self.game.board.get_tile(grid_r, grid_c)
+            # Can't interact with terminals or non-swappable tree tiles
+            if target_tile and (target_tile.is_terminal or not target_tile.tile_type.is_swappable):
+                 self.message = "This tile is permanent and cannot be exchanged."; return
+
+            # If all checks pass, start building the move
+            self.move_in_progress = {'coord': (grid_r, grid_c)}
+            self.message = f"Selected {self.move_in_progress['coord']}. Now click a tile from your hand."
+            return
+
+        # --- 2. HAND CLICK LOGIC ---
+        if self.move_in_progress and self.move_in_progress.get('coord'):
             for index, rect in self.current_hand_rects.items():
                 if rect.collidepoint(mouse_pos) and event.button == 1:
-                    if self.selected_tile_index != index:
-                         self.selected_tile_index = index
-                         self.debug_selected_tile_type = None
-                         self.current_orientation = 0
-                         sel_type = self.get_selected_tile_for_preview()
-                         self.message = f"Selected: {sel_type.name}" if sel_type else "Error"
-                    clicked_hand = True
-                    break
-            if clicked_hand: return # Consume event
+                    if any(m['hand_index'] == index for m in self.staged_moves):
+                        self.message = "This tile is already part of a staged move."; return
 
-        # --- Board Click ---
-        if C.BOARD_X_OFFSET <= mouse_pos[0] < C.BOARD_X_OFFSET + C.BOARD_DRAW_WIDTH and \
-           C.BOARD_Y_OFFSET <= mouse_pos[1] < C.BOARD_Y_OFFSET + C.BOARD_DRAW_HEIGHT:
-            grid_col = (mouse_pos[0] - C.BOARD_X_OFFSET) // C.TILE_SIZE + C.PLAYABLE_COLS[0]
-            grid_row = (mouse_pos[1] - C.BOARD_Y_OFFSET) // C.TILE_SIZE + C.PLAYABLE_ROWS[0]
-
-            if event.button == 1: # Left Click -> Attempt Action
-                self._attempt_board_action(active_player, grid_row, grid_col)
-            elif event.button == 3: # Right Click -> Rotate
-                self._rotate_selection()
-
+                    if self.move_in_progress.get('hand_index') == index:
+                        self.move_in_progress.pop('hand_index', None); self.move_in_progress.pop('tile_type', None)
+                        self.message = f"Deselected hand tile. Targeting {self.move_in_progress['coord']}."
+                    else:
+                        self.move_in_progress['hand_index'] = index
+                        self.move_in_progress['tile_type'] = active_player.hand[index]
+                        self.move_in_progress['orientation'] = 0
+                        self.message = f"Selected hand tile. [R] to rotate, [S] to stage."
+                    
+                    self._validate_all_staged_moves(); return
 
     def _handle_key_down(self, event, active_player):
-        """ Handles key down events for LayingTrackState. """
-        # --- DEBUG PRINT ---
-        # print(f"  _handle_key_down received: {pygame.key.name(event.key)}")
-
-        if event.key == pygame.K_r: # Rotate
-            # print("  'R' key detected, calling _rotate_selection...") # DEBUG
-            self._rotate_selection()
-            # return # Optional: Consume event if needed
-
-        # ... (handle Enter, Ctrl+Z/Y) ...
         mods = pygame.key.get_mods()
-        if event.key == pygame.K_z and (mods & pygame.KMOD_CTRL):
-             self.undo_action()
-        elif event.key == pygame.K_y and (mods & pygame.KMOD_CTRL):
-             self.redo_action()
-        elif event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
-             if not self.visualizer.debug_mode:
-                  self._confirm_turn_action()
+        if event.key == pygame.K_z and (mods & pygame.KMOD_CTRL): self.undo_action(); return
+        if event.key == pygame.K_y and (mods & pygame.KMOD_CTRL): self.redo_action(); return
 
+        if event.key == pygame.K_r:
+            if self.move_in_progress and 'orientation' in self.move_in_progress:
+                self.move_in_progress['orientation'] = (self.move_in_progress['orientation'] + 90) % 360
+            elif self.staged_moves:
+                self.staged_moves[-1]['orientation'] = (self.staged_moves[-1]['orientation'] + 90) % 360
+            self._validate_all_staged_moves(); self.message = "Rotated selection."
 
-    def _rotate_selection(self):
-        """ Rotates the current tile selection. """
-        self.current_orientation = (self.current_orientation + 90) % 360
-        selected_type = self.get_selected_tile_for_preview()
-        msg = f"Orientation: {self.current_orientation}°"
-        if selected_type: msg += f" for {selected_type.name}"
-        self.message = msg
+        elif event.key == pygame.K_ESCAPE:
+            if self.move_in_progress: self._reset_move_in_progress(); self.message = "Selection cleared."
+            elif self.staged_moves: self.staged_moves = []; self.message = "All staged moves cleared."
 
-        # --- DEBUG PRINT ---
-        print(f"  Rotated preview to {self.current_orientation}. Message: '{self.message}'")
-
-    def _attempt_board_action(self, player, row, col):
-        """ Attempts Place or Exchange based on target and mode. """
-        tile_to_use = self.get_selected_tile_for_preview()
-        if not tile_to_use:
-            self.message = "Select a tile first."; return
-
-        if not self.game.board.is_valid_coordinate(row, col):
-             self.message = "Clicked outside valid grid."; return
-
-        target_tile = self.game.board.get_tile(row, col)
-        success = False
-        action_type = ""
-
-        # ... (AI/debug mode logic is unchanged) ...
-
-        # --- NORMAL ACTION (uses Commands) ---
-        if target_tile is None: # Attempt PLACE
-            if self.game.board.is_playable_coordinate(row, col):
-                 # --- ADDED DEBUG PRINT ---
-                 print(f"\n--- [UI] Initiating PLACE: Player {player.player_id} with {tile_to_use.name} at ({row},{col}) ---")
-                 success = self.game.attempt_place_tile(player, tile_to_use, self.current_orientation, row, col)
-                 action_type = "Place"
-            else: self.message = "Cannot place tile here."
-        else: # Attempt EXCHANGE
-            if self.game.board.is_playable_coordinate(row, col):
-                 # --- ADDED DEBUG PRINT ---
-                 print(f"\n--- [UI] Initiating EXCHANGE: Player {player.player_id} with {tile_to_use.name} for existing tile at ({row},{col}) ---")
-                 success = self.game.attempt_exchange_tile(player, tile_to_use, self.current_orientation, row, col)
-                 action_type = "Exchange"
-            else: self.message = "Cannot exchange terminal/border."
-
-        # Update UI message based on command result
-        if action_type:
-            if success:
-                 acts = self.game.actions_taken_this_turn
-                 self.message = f"{action_type} OK ({acts}/{self.game.MAX_PLAYER_ACTIONS})"
-                 self.selected_tile_index = None # Clear selection
-                 self.current_orientation = 0
+        # --- 'S' KEY TO STAGE A MOVE ---
+        elif event.key == pygame.K_s:
+            if self.move_in_progress and 'tile_type' in self.move_in_progress:
+                if len(self.staged_moves) >= C.MAX_PLAYER_ACTIONS:
+                    self.message = "Cannot stage more than max actions."; return
+                
+                # Add the move to the staging list and clear the builder
+                coord = self.move_in_progress['coord']
+                self.move_in_progress['action_type'] = 'exchange' if self.game.board.get_tile(*coord) else 'place'
+                self.staged_moves.append(self.move_in_progress)
+                self.move_in_progress = None
+                self._validate_all_staged_moves()
+                self.message = f"Staged {len(self.staged_moves)}/{C.MAX_PLAYER_ACTIONS} moves. Select next square."
             else:
-                 self.message = f"{action_type} Failed."
+                self.message = "Nothing to stage. Select a square and a tile first."
 
+        # --- 'ENTER' KEY TO COMMIT THE TURN ---
+        elif event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
+            if self.move_in_progress:
+                self.message = "A move is being built. Press [S] to stage it first."; return
+            if not self.staged_moves:
+                self.message = "Nothing to commit."; return
+            
+            if all(move['is_valid'] for move in self.staged_moves):
+                command = CombinedActionCommand(self.game, active_player, self.staged_moves)
+                if self.game.command_history.execute_command(command):
+                    self.staged_moves = []
+                else: self.message = "Commit failed: Invalid action count."
+            else:
+                self.message = "Cannot commit: one or more moves are invalid (red)."
 
-
-    def _confirm_turn_action(self):
-        """ Attempts to confirm the turn via the game logic. """
-        # Check action count before calling confirm
-        if self.game.actions_taken_this_turn < C.MAX_PLAYER_ACTIONS:
-             # Optional: Allow early end if > 0? For now, require max.
-             self.message = f"Need {C.MAX_PLAYER_ACTIONS} actions to confirm."
-             return
-
-        if self.game.confirm_turn():
-            # Success! Turn advanced. Message will be updated by new state/turn.
-            # Reset local UI state for the *next* turn (though state might change)
-            self.message = "Turn Confirmed." # Temp message shown briefly
-            self.selected_tile_index = None
-            self.debug_selected_tile_type = None
-            self.current_orientation = 0
-        else:
-            # Should not happen if action check above is correct, but safety belt.
-             self.message = "Cannot confirm turn now."
-
+    def _validate_all_staged_moves(self):
+        player = self.game.get_active_player()
+        all_hypothetical_moves = self.staged_moves[:]
+        if self.move_in_progress and 'tile_type' in self.move_in_progress:
+            all_hypothetical_moves.append(self.move_in_progress)
+        
+        for i, move_to_validate in enumerate(all_hypothetical_moves):
+            other_moves = all_hypothetical_moves[:i] + all_hypothetical_moves[i+1:]
+            coord_r, coord_c = move_to_validate['coord']
+            action = 'exchange' if self.game.board.get_tile(coord_r, coord_c) else 'place'
+            
+            is_valid, reason = False, "Not enough info"
+            if 'tile_type' in move_to_validate:
+                orientation = move_to_validate.get('orientation', 0)
+                if action == 'place':
+                    is_valid, reason = self.game.check_placement_validity(move_to_validate['tile_type'], orientation, coord_r, coord_c, hypothetical_moves=other_moves)
+                else:
+                    is_valid, reason = self.game.check_exchange_validity(player, move_to_validate['tile_type'], orientation, coord_r, coord_c, hypothetical_moves=other_moves)
+            move_to_validate['is_valid'] = is_valid
 
     def draw(self, screen):
-        # Draw board, then Hand OR Debug Panel
         self.visualizer.draw_board(screen)
+        if self.move_in_progress:
+            self.visualizer.draw_selected_coord_highlight(screen, self.move_in_progress.get('coord'))
+            if 'tile_type' in self.move_in_progress:
+                self.visualizer.draw_live_preview(screen, self.move_in_progress)
+        self.visualizer.draw_staged_moves(screen, self.staged_moves)
+
         if self.visualizer.debug_mode:
-            self.visualizer.draw_debug_panel(
-                screen, self.debug_selected_tile_type
-            )
-            self.current_hand_rects = {} # Clear hand rects
+            self.visualizer.draw_debug_panel(screen, None)
         else:
             player = self.game.get_active_player()
             if player:
-                 self.current_hand_rects = self.visualizer.draw_hand(
-                     screen, player
-                 )
-            else: self.current_hand_rects = {}
-
-        # Draw UI, including confirm prompt if applicable
-        selected_type = self.get_selected_tile_for_preview()
-        confirm_prompt = ""
-        # Show confirm prompt only if max actions taken and not debug
-        if not self.visualizer.debug_mode and \
-           self.game.actions_taken_this_turn >= C.MAX_PLAYER_ACTIONS:
-             confirm_prompt = " [ENTER] to Confirm Turn."
-
-        self.visualizer.draw_ui(screen, self.message + confirm_prompt,
-                               selected_type, self.current_orientation)
-        # Draw Preview
-        self.visualizer.draw_preview(screen, selected_type,
-                                     self.current_orientation)
+                selected_hand_idx = self.move_in_progress.get('hand_index') if self.move_in_progress else None
+                self.current_hand_rects = self.visualizer.draw_hand(screen, player, self.staged_moves, selected_hand_idx)
+        
+        # New, clearer instruction text
+        instr_text = "Click Square -> Click Hand -> [S] Stage -> [Enter] Commit"
+        self.visualizer.draw_ui(screen, self.message, instr_text)
 
 # --- Driving State ---
 
@@ -360,53 +279,33 @@ class DrivingState(GameState):
         super().__init__(visualizer)
         self.message = "Roll die or select debug roll."
         self.last_roll: Optional[Any] = None
-        self.current_move_path: Optional[List[Tuple[int, int]]] = None # Store path taken this move
 
     def handle_event(self, event):
         if self._handle_common_clicks(event): return
-
         try:
             active_player = self.game.get_active_player()
             if active_player.player_state != PlayerState.DRIVING: return
         except IndexError: return
 
         roll_result: Optional[Any] = None
-
         if self.visualizer.debug_mode and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             for face, rect in self.visualizer.debug_die_rects.items():
                 if rect.collidepoint(event.pos):
                     roll_result = face; break
-        
         elif not self.visualizer.debug_mode and event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
             roll_result = self.game.roll_special_die()
         
         if roll_result is not None:
             self.last_roll = roll_result
             self.message = f"Rolled {roll_result}..."
-            # Call the correct new game logic function
             if not self.game.attempt_driving_move(active_player, roll_result):
-                # The game logic now handles its own messaging and turn ending,
-                # but we can set a fallback message if the attempt itself fails.
                 self.message = "Driving move failed to execute."
-            else:
-                # The message will be updated by the game logic upon successful move.
-                # If game is over, the state will change.
-                pass
 
-    # draw method is likely empty, but visualizer needs access to current_move_path
     def draw(self, screen):
-        # Board/Streetcars drawn by visualizer.draw_board
         self.visualizer.draw_board(screen)
-
-        # Draw UI - Driving state doesn't have 'selected tile'
-        self.visualizer.draw_ui(screen, self.message, None, 0)
-
-        # Draw last roll info separately if needed (optional)
-        roll_info_y = C.DEBUG_DIE_AREA_Y - 30 # Position near debug die
+        self.visualizer.draw_ui(screen, self.message)
         roll_display = f"Last Roll: {self.last_roll if self.last_roll is not None else '--'}"
-        self.visualizer.draw_text(screen, roll_display, C.UI_TEXT_X,
-                                  roll_info_y, size=20)
-
+        self.visualizer.draw_text(screen, roll_display, C.UI_TEXT_X, C.DEBUG_DIE_AREA_Y - 30, size=20)
 
 # --- Game Over State ---
 
@@ -418,40 +317,15 @@ class GameOverState(GameState):
         self.message = f"GAME OVER! Player {winner.player_id} Wins!" if winner else "GAME OVER!"
 
     def handle_event(self, event):
-        active_player: Player = self.game.get_active_player()
-
-        # --- NEW: Guard Clause for AI Player ---
-        # If the active player is an AI, do not process any human input events.
-        # The AI's turn is handled automatically by the game logic.
-        if isinstance(active_player, AIPlayer):
-            self.message = f"Waiting for AI Player {active_player.player_id}..."
-            return
-        # --- END NEW ---
-
         if self._handle_common_clicks(event): return
-        
-        if active_player.player_state != PlayerState.LAYING_TRACK: return
-        
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            self._handle_mouse_down(event, active_player)
-        elif event.type == pygame.KEYDOWN:
-            self._handle_key_down(event, active_player)
 
     def draw(self, screen):
-        # Draw final board state
         self.visualizer.draw_board(screen)
-        # Draw standard UI panel (buttons etc.)
-        self.visualizer.draw_ui(screen, self.message, None, 0)
-
-        # --- Draw Winner Text Centered ---
-        try:
-             font_to_use = pygame.font.SysFont(None, 40)
-        except: font_to_use = pygame.font.Font(None, 40)
-        text_surface = font_to_use.render(self.message, True, C.COLOR_STOP)
-        text_rect = text_surface.get_rect(
-            center=(C.SCREEN_WIDTH // 2, C.SCREEN_HEIGHT // 2)
-        )
-        # Optional: Background rect
+        self.visualizer.draw_ui(screen, self.message)
+        try: font = pygame.font.SysFont(None, 40)
+        except: font = pygame.font.Font(None, 40)
+        text_surface = font.render(self.message, True, C.COLOR_STOP)
+        text_rect = text_surface.get_rect(center=(C.SCREEN_WIDTH // 2, C.SCREEN_HEIGHT // 2))
         bg_rect = text_rect.inflate(20, 10)
         pygame.draw.rect(screen, C.COLOR_UI_BG, bg_rect, border_radius=5)
         pygame.draw.rect(screen, C.COLOR_BLACK, bg_rect, 2, border_radius=5)

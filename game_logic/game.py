@@ -74,15 +74,6 @@ class Game:
         self.command_history.clear()
         print("--- Setup Complete ---")
 
-        # --- NEW: Proactive AI Turn Start ---
-        # After setup is complete, check if the first player is an AI.
-        # If so, we must manually trigger their turn to start the game.
-        first_player = self.get_active_player()
-        if isinstance(first_player, AIPlayer):
-            print(f"--- Game initiated by AI Player {first_player.player_id}. Kicking off turn... ---")
-            first_player.handle_turn_logic(self)
-        # --- END NEW ---
-
 
     def _calculate_ai_ideal_route(self, player: AIPlayer) -> Optional[List[RouteStep]]:
         """Calculates the AI's 'wet dream' path assuming infinite tiles."""
@@ -285,7 +276,19 @@ class Game:
     def _has_ew_straight(self, effective_connections: Dict[str, List[str]]) -> bool:
         return 'W' in effective_connections.get('E', [])
 
-    def check_placement_validity(self, tile_type: TileType, orientation: int, r: int, c: int) -> Tuple[bool, str]:
+    # --- Helper function to query the board state, considering hypotheticals ---
+    def _get_hypothetical_tile(self, r: int, c: int, hypothetical_moves: Optional[List[Dict]] = None) -> Optional[PlacedTile]:
+        """Checks for a tile in staged moves first, then falls back to the real board."""
+        if hypothetical_moves:
+            for move in hypothetical_moves:
+                if move['coord'] == (r, c):
+                    # This move is on the square we're checking. Return a PlacedTile from it.
+                    return PlacedTile(move['tile_type'], move['orientation'])
+        # If not found in staged moves, check the real board
+        return self.board.get_tile(r, c)
+
+    # --- Modify the signature and logic of the validation functions ---
+    def check_placement_validity(self, tile_type: TileType, orientation: int, r: int, c: int, hypothetical_moves: Optional[List[Dict]] = None) -> Tuple[bool, str]:
         """
         A definitive, correct, and final validation function that correctly
         handles all neighbor types: existing tiles, empty playable squares,
@@ -304,7 +307,7 @@ class Game:
             
             # B. Get information about the neighbor.
             nr, nc = r + direction.value[0], c + direction.value[1]
-            neighbor_tile = self.board.get_tile(nr, nc)
+            neighbor_tile = self._get_hypothetical_tile(nr, nc, hypothetical_moves)
             
             if neighbor_tile:
                 # --- CASE 1: The neighbor is an existing tile. ---
@@ -329,7 +332,7 @@ class Game:
         return True, "Placement is valid."
 
 
-    def check_exchange_validity(self, player: Player, new_tile_type: TileType, new_orientation: int, r: int, c: int) -> Tuple[bool, str]:
+    def check_exchange_validity(self, player: Player, new_tile_type: TileType, new_orientation: int, r: int, c: int, hypothetical_moves: Optional[List[Dict]] = None) -> Tuple[bool, str]:
         """
         A definitive, robust validation for exchanging a tile, correctly
         implementing all preservation and new-connection rules.
@@ -369,7 +372,8 @@ class Game:
                 exit_dir_enum = Direction.from_str(exit_dir_str)
                 nr, nc = r + exit_dir_enum.value[0], c + exit_dir_enum.value[1]
                 
-                neighbor_tile = self.board.get_tile(nr, nc)
+                # neighbor_tile = self.board.get_tile(nr, nc)
+                neighbor_tile = self._get_hypothetical_tile(nr, nc, hypothetical_moves)
                 
                 if neighbor_tile:
                     # If the neighbor is a tile, it MUST connect back.

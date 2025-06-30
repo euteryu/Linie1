@@ -728,3 +728,125 @@ Traceback (most recent call last):
 RecursionError: maximum recursion depth exceeded while calling a Python object
 
 while the board game kept running as i wanted, it didn't help that the console output did not stop printing indefinitely until recursionerror just crashed the program and along with it the board game shut off too. is there way to ensure as soon as no more valid legal move available for any player, to prevent console and game from running but not crashing entirely - just halt both?
+
+----------------
+-------------
+
+Tell me what you understand of how user flow is for human players wishing to make a move.
+
+Below is my new proposed flow for humans that I want your advice on how to implement code-wise, and how it's better than current flow:
+
+    Start of Turn: The game's current state is LayingTrackState. The UI displays instructions: "Select a board square to make a move." No tiles are selected, no moves are staged.
+
+    Step 1: Select Board Square:
+
+        Player Action: The human clicks on a valid, playable square on the board.
+
+        Visual Feedback: The LayingTrackState.message updates to "Selected square (r,c). Now click a tile from your hand." The selected board square (r,c) is highlighted with a translucent orange overlay.
+
+        If Invalid Board Square Click: If the player clicks an invalid non-playable board square (wall, building, out of bounds, occupied, terminal, unswappable), an error message is displayed (e.g., "Cannot select non-playable squares or buildings."), and the staging process does not proceed.
+
+    Step 2: Select Hand Tile:
+
+        Player Action: The player clicks on a tile in their hand.
+
+        Visual Feedback:
+
+            The selected_hand_index is set.
+
+            The hand tile is highlighted.
+
+            The game checks if the selected board square (r,c) is occupied. This determines if the staged move will be a place or exchange.
+
+            A translucent preview of the selected hand tile (with default orientation 0) is drawn over the highlighted board square.
+
+        Immediate Live Validation: The _validate_single_staged_move function is called.
+
+            It checks the validity of this staged move in the context of any other staged moves already made this turn.
+
+            The preview tile on the board turns GREEN if valid, or RED if invalid.
+
+        Next Step: The message updates to "Staged move. Press R to rotate, or stage next move."
+
+    Step 3: Stage Second Move (Optional):
+
+        If the player has not yet staged two moves, they can repeat Steps 1 and 2 to propose a second move.
+
+        The UI will clearly indicate the number of staged moves (e.g., "Staged 1/2 moves.").
+
+        Crucially, the validation for the second move will consider the first staged move, and vice-versa. If either move is invalid, its preview tile turns red.
+
+    Step 4: Rotate a Staged Move:
+
+        While a move is staged (the board square is selected, but not committed), the player can press the 'R' key.
+
+        This rotates the orientation of the most recently staged move (the one on top).
+
+        The _validate_single_staged_move is re-run for that move to update its green/red validity indicator.
+
+    Step 5: Commit or Clear:
+
+        Press Enter:
+
+            The game checks if all currently staged moves have a green validity indicator.
+
+            If all are green: The moves are committed. The real board state is updated. The staged moves and selections are cleared. The turn ends, and game.confirm_turn() is called.
+
+            If any staged move is red: The message is updated (e.g., "Cannot commit: invalid move combination."). The staged moves are cleared, but the turn does NOT end. The player must make valid moves.
+
+        Press Escape:
+
+            All staged moves are cleared.
+
+            The selected_coord and selected_hand_index are reset.
+
+            The message is reset to "Select a square."
+
+You might wonder why I wanna change user flow for humans when at the moment game works fine. Well i noticed it doesn't consider the edge scenario like e.g. :
+suppose at (1,2) and (1,3) are vertical straight tiles and (1,1) is empty square. so a n - s connection, but no horizontal connections between these coords. Well what if i wanted to make horizontal connection between them? surely i can expend 2 moves during my turn if I were to have at-hand say a crossroad tile and straightleftcurve tile to be placed (1,2) and (1,3) respectively at orientations 0 - cuz then both exchanges would respect pre-existing connections (the n - s vertical connection) there as well as adding my desired horizontal connection between them? and i'd assume as long as the other new connections in my desired exchanges aren't invalid (i.e. the west connection introdcued by crossroad from (1,2) into (1,1) leads to empty square in this e.g., so it's fine) then by time i confirm my turn I would have made 2 moves. well, user flow right now won't allow me to do this, as if I attempt exchange move at (1,2) with crossroad, currently message will say the new east connection added by crossroad violates placement constraint as (1,3) doesn't have west connecting track. but conceptually i still have 2nd move action left to take before turn ends, and so if i were to make exchange move at (1,3) that does forge new connection west into (1,2), then validity checks should now check out! So conceptually while staging first move correctly identified invalid move, the 2nd staging resulted in both moves turning out valid after all... So current human user flow doesn't technically allow for this but I wanna change code to allow an example like above somehow happen - do you get what my example tryna illustrate in this context?
+
+
+Why Your Proposed Flow is Superior
+
+Your new flow is a massive improvement for several reasons:
+
+    Transactional Moves: It treats the player's entire turn (up to 2 moves) as a single "transaction." Moves are staged first and then committed together. This is the key to solving your edge case.
+
+    Intuitive Interaction: Clicking the board square first is more natural. The player's thought process is "I want to do something here," not "I have this tile, where can I put it?"
+
+    Live Visual Feedback: The red/green highlighting of staged moves provides instant, clear feedback on whether the proposed combination of moves is valid, preventing player frustration.
+
+    Flexibility: It allows players to plan, stage, and revise their entire turn before committing, leading to more strategic depth and fewer "oops" moments that require undoing. It transforms the interaction from a simple "click-commit" to a "plan-review-commit" cycle.
+
+
+------------------------------------------------
+--------------------------------------------
+-----------------------------------
+
+during turn, the fact that i can even click a non-playable tile like building square / tree tile is unacceptable - it should not be able to be clicked, period, and let user feedback "this tile cannot be clicked cuz ... "
+
+also, fix this in following scenario where at (2,2) was a straight tile orientatoin 0, at (2,3) was a straight orientation 0, and at-hand were crossroad and a crossroad: during my turn for my first action I tried clicking the coord tile (2,2) then hit crossroad from my at-hand, to attempt an exchange move for the straight there, and tile lit up trans red signifying this would be invalid (rightly so, cuz the w-e horizontal connection is not matched from (2,3)'s end, which only connects n-s at (2,3), and no west port. But i was no allowed to click enter to stage at this point in time (the exchange never occureed) when the staged move is still red (indicating invalidity of making that tile placement / exchange at that orientation.)
+
+Well from user experience POV, the glaring issue is, now while it's correct to turn color trans red in such case, but until all 2 moves have been fully committed and turn can fully end, it may just be that I could (and had in fact planned to had i had my way) make an exchange move for my 2nd action at (2,3) for my other crossroad from at-hand. then both (2,2) and (2,3) should light up green, and then i should be able to hit commit for both after all 2 action slots have filled up and both those 2 actions are green. See what happened is during this turn, when I was attempting my first action exchange move, if my proposed exchange move at tile showed red then game wouldn't allow me to stage at all by clicking enter. But you see, what I'd intended was to stage those 2 exchanges during my turn at (2,2) and (2,3) and commit all at once cuz then those tiles would be green. but i understand why it would be red in the first exchange, but i need game to allow me to still stage it - cuz staging doesn't mean committing on to actual real world board state permanently, it's merely playing around with tiles and my indicating that I would sorely wish to make a move at that tile, then decide for real if this is actually my move that validly respects all board rules. do you get what i mean to achieve here, and can you advise how to integrate in code?
+
+Let's break down the two distinct problems and the philosophy behind the fix:
+
+    Strict Upfront Validation: As you said, clicking on an un-swappable tile or an out-of-bounds area shouldn't even begin the move-building process. It's a non-starter, and the UI should reflect that immediately. The previous fix was too lenient.
+
+    "Staging the Red" - The Core Insight: This is the most important point. You want to be able to stage a move even if it's currently invalid ("red"), because you know that a subsequent staged move will make it valid ("green"). The system should not prevent you from planning your entire turn just because the first step, in isolation, is invalid. It should trust the player to build a valid combination of moves.
+
+This requires a change in philosophy for the Enter key. Pressing Enter should not be for committing the whole turn, but simply for confirming a single piece of your plan and adding it to the staging area. The final "commit" for the whole turn should be a separate, deliberate action.
+
+The New, Improved User Flow
+
+    Click Board Square: Player clicks a square. The system immediately checks if this square is fundamentally interactable. If it's a building, a wall, or a non-swappable tile, it gives an error and stops. Otherwise, it highlights the square orange.
+
+    Click Hand Tile: Player clicks a tile from their hand. The system now shows a live preview (red or green) on the orange-highlighted square.
+
+    Press S to Stage: This is the new key. Pressing S (for Stage) will take the move_in_progress (whether it's red or green) and add it to the staged_moves list. This confirms one part of your plan.
+
+    Repeat: The player can repeat steps 1-3 to stage their second move. As they do, the validity of all staged moves is re-calculated and their colors update instantly. A red move might turn green, or vice-versa.
+
+    Press Enter to Commit: Once the player has staged their desired moves (and they are all green), pressing Enter will execute the CombinedActionCommand and attempt to end the turn.
+
+This flow separates "building a move" from "staging a move" from "committing the turn," giving the player maximum control and clarity.
