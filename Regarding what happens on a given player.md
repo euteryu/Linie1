@@ -994,3 +994,10 @@ Here is the new HardStrategy. It's a multi-pass approach that is far more effici
     Fallback (Plan B): If this targeted search yields no valid two-move combinations (which is common), it gracefully falls back to the reliable EasyStrategy to ensure it always makes a good, sensible move rather than getting stuck.
 
 This approach mimics human expert play: we don't consider placing a tile on every single empty square. We focus on the 3-4 squares that actually matter for our strategy.
+
+--
+--
+
+i notice that there really are some cases when all playable tiles on board is filled up and there aren't enough appropriate at-hand tiles on players to make any more move, even with hard ai's combo plays. Here's a possible fun solution I came up with - introducing a trading / banking system where players may expend valuable resources (like steel, labour, money) to buy much-needed tiles, whose prices fluctuate depending on real time circumstances like available resources as turns progress. Or maybe even trading enabled between players? Alliances and factions and even piracy / sabotage to temporarily make certain tile unpassable for number of turns, or resource increases for meeting certain objectives (ideally train themed side quests)?
+
+After all, since this is a train tile themed game, we could set up some convincing lore narrative and thematic features that add fun elements to game beyond mere tile placement strategy as we've done now. Any other features you think might be cool to integrate into the game? And could you advise (without coding just yet) how these new features could nicely integrate, both code patterns / structure / user experience interface wise ?

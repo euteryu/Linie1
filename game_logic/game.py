@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import List, Dict, Tuple, Optional, Any, TYPE_CHECKING
 import random, json, traceback, copy
 from queue import PriorityQueue
+import pygame
 
 if TYPE_CHECKING:
     from .pathfinding import Pathfinder
@@ -18,7 +19,8 @@ from .ai_strategy import EasyStrategy, HardStrategy # Import the strategies
 
 from constants import (
     TILE_DEFINITIONS, TILE_COUNTS_BASE, TILE_COUNTS_5_PLUS_ADD, HAND_TILE_LIMIT,
-    MAX_PLAYER_ACTIONS, DIE_FACES, STOP_SYMBOL, TERMINAL_COORDS, STARTING_HAND_TILES, ROUTE_CARD_VARIANTS, TERMINAL_DATA
+    MAX_PLAYER_ACTIONS, DIE_FACES, STOP_SYMBOL, TERMINAL_COORDS, STARTING_HAND_TILES,
+    ROUTE_CARD_VARIANTS, TERMINAL_DATA, START_NEXT_TURN_EVENT
 )
 
 class Game:
@@ -968,8 +970,7 @@ class Game:
     def confirm_turn(self) -> bool:
         """
         Finalizes the current player's turn, draws tiles, advances to the next player,
-        and triggers the start of their turn.
-        Returns the new active player object.
+        and posts an event to signal the start of the next turn.
         """
         active_p = self.get_active_player()
         if self.game_phase == GamePhase.GAME_OVER: return False
@@ -994,11 +995,13 @@ class Game:
             is_complete, start, path = self.check_player_route_completion(next_p)
             if is_complete and start and path:
                 self.handle_route_completion(next_p, start, path)
-
-        next_p.handle_turn_logic(self)
         
         # --- THIS IS THE FIX ---
-        # By returning the new player, we allow the UI to react to the change.
+        # Instead of calling the logic directly, post an event.
+        # This yields control back to the main loop, allowing a screen update.
+        pygame.event.post(pygame.event.Event(START_NEXT_TURN_EVENT))
+        # --- END OF FIX ---
+        
         return True
 
 

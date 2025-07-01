@@ -13,7 +13,7 @@ import copy
 from game_logic.game import Game
 from game_logic.tile import PlacedTile, TileType
 from game_logic.enums import GamePhase, PlayerState, Direction
-from game_logic.player import Player
+from game_logic.player import Player, AIPlayer
 
 # --- State Machine ---
 from game_states import (GameState, LayingTrackState, DrivingState,
@@ -189,30 +189,53 @@ class Linie1Visualizer:
         return surfaces
 
     def run(self):
+        """ Main game loop. """
         running = True
+        
+        # --- THIS IS THE FIX ---
+        # If the first player is an AI, we need to kick off the game flow.
+        if isinstance(self.game.get_active_player(), AIPlayer):
+             pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT))
+        # --- END OF FIX ---
+        
         while running:
             dt = self.clock.tick(C.FPS) / 1000.0
             events = pygame.event.get()
 
+            # Update visualizer state based on active player *before* events
             self.update_current_state_for_player()
 
+            # Handle Events using current state
             for event in events:
                 if event.type == pygame.QUIT:
                     running = False
                     break
+
+                # --- THIS IS THE FIX ---
+                # Handle our custom game flow event
+                if event.type == C.START_NEXT_TURN_EVENT:
+                    active_player = self.game.get_active_player()
+                    if isinstance(active_player, AIPlayer):
+                        # It's an AI's turn to start, call their logic
+                        active_player.handle_turn_logic(self.game)
+                    # If it's a human, we do nothing; their turn starts when they provide input.
+                    continue # Consume the event
+                # --- END OF FIX ---
+
+                # Let current state handle all other events (mouse, keyboard, etc.)
                 if self.current_state:
                      self.current_state.handle_event(event)
+
             if not running: break
 
+            # ... (Update and Drawing logic remains the same) ...
             if self.current_state:
                  self.current_state.update(dt)
-
             self.screen.fill(C.COLOR_UI_BG)
             if self.current_state:
                 self.current_state.draw(self.screen)
             else:
                  self.draw_text(self.screen, "Error: Invalid State", 10, 10, C.COLOR_STOP)
-
             pygame.display.flip()
 
         pygame.quit()
