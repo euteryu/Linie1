@@ -154,6 +154,7 @@ class LayingTrackState(GameState):
             if target_tile and (target_tile.is_terminal or not target_tile.tile_type.is_swappable): self.message = "Tile is permanent."; return
             self.move_in_progress = {'coord': (grid_r, grid_c)}
             self.message = f"Selected {self.move_in_progress['coord']}. Click a hand tile."
+            self.visualizer.sounds.play('click') # Play the click sound
             return
         if self.move_in_progress and self.move_in_progress.get('coord'):
             for index, rect in self.current_hand_rects.items():
@@ -221,6 +222,8 @@ class LayingTrackState(GameState):
             command = CombinedActionCommand(self.game, player, self.staged_moves)
             
             if self.game.command_history.execute_command(command):
+                self.visualizer.sounds.play('commit') # Play the commit sound
+
                 if self.game.actions_taken_this_turn >= self.game.MAX_PLAYER_ACTIONS:
                     self.game.confirm_turn()
                 
@@ -228,8 +231,10 @@ class LayingTrackState(GameState):
                 self._reset_staging()
             else:
                 self.message = "Commit failed: Action limit would be exceeded."
+                self.visualizer.sounds.play('error') # Play the error sound
         else:
             self.message = "Cannot commit: one or more moves are invalid (red)."
+            self.visualizer.sounds.play('error') # Play the error sound
 
     def draw(self, screen):
         # This method's logic is correct and does not need to change.

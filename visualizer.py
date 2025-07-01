@@ -9,6 +9,8 @@ from typing import List, Dict, Tuple, Optional, Any
 from collections import deque
 import copy
 
+from sound_manager import SoundManager # Import the new class
+
 # --- Game Logic Imports ---
 from game_logic.game import Game
 from game_logic.tile import PlacedTile, TileType
@@ -101,6 +103,8 @@ class Linie1Visualizer:
         Initializes the visualizer and the game engine.
         :param players_config: A list defining the players, e.g., ['human', 'easy_ai', 'hard_ai']
         """
+        self.sounds = SoundManager()
+
         pygame.init()
         pygame.font.init()
         self.screen = pygame.display.set_mode((C.SCREEN_WIDTH, C.SCREEN_HEIGHT))
@@ -160,6 +164,9 @@ class Linie1Visualizer:
 
         self.current_state: GameState = LayingTrackState(self)
         self.update_current_state_for_player()
+
+        self.sounds.load_sounds()
+        self.sounds.play_music('main_theme')
 
     def _create_debug_tile_surfaces(self) -> Dict[str, pygame.Surface]:
         return {ttype.name: create_tile_surface(ttype, C.DEBUG_TILE_SIZE) for ttype in self.debug_tile_types}
