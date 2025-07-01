@@ -133,17 +133,21 @@ class HumanPlayer(Player):
     def handle_turn_logic(self, game: 'Game'):
         pass # Human logic is driven by Pygame events in the state machine.
 
-# --- REPLACE THE ENTIRE AIPlayer CLASS WITH THIS ---
 class AIPlayer(Player):
     """Represents an AI-controlled player that uses a pluggable strategy for planning."""
     def __init__(self, player_id: int, strategy: AIStrategy):
         super().__init__(player_id)
         self.strategy = strategy
-        self.actions_to_perform: List[Dict] = []
+        # actions_to_perform is no longer needed as the turn is synchronous
+        # self.actions_to_perform: List[Dict] = []
 
     def handle_turn_logic(self, game: 'Game'):
-        """Orchestrates the AI's entire turn by delegating to its strategy."""
-        if game.game_phase == GamePhase.GAME_OVER: return
+        """
+        Orchestrates the AI's entire turn synchronously.
+        It plans, executes all its moves, and then confirms its own turn.
+        """
+        if game.game_phase == GamePhase.GAME_OVER:
+            return
 
         if self.player_state == PlayerState.DRIVING:
             print(f"\n--- AI Player {self.player_id}'s Turn (Driving) ---")
@@ -155,47 +159,45 @@ class AIPlayer(Player):
             hand_str = ", ".join([t.name for t in self.hand])
             print(f"\n--- AI Player {self.player_id} ({self.strategy.__class__.__name__}) is thinking... (Hand: [{hand_str}]) ---")
             
-            # The strategy plans the entire turn's worth of moves
-            self.actions_to_perform = self.strategy.plan_turn(game, self)
+            # The strategy plans the entire turn's worth of moves at once.
+            planned_actions = self.strategy.plan_turn(game, self)
             
-            if self.actions_to_perform:
-                # Execute the first action immediately
-                self._execute_next_action(game)
-                
-                # If there are more actions, set a timer for the next one.
-                # Otherwise, the turn is over.
-                if self.actions_to_perform:
-                    pygame.time.set_timer(C.AI_ACTION_TIMER_EVENT, C.AI_MOVE_DELAY_MS, loops=1)
-                else:
-                    print(f"--- AI Player {self.player_id} only had one valid move. Ending turn. ---")
-                    game.confirm_turn()
+            if planned_actions:
+                # Execute all planned actions sequentially.
+                for move in planned_actions:
+                    self._execute_action(game, move)
             else:
-                # The AI couldn't find any moves at all. Pass the turn.
                 print(f"--- AI Player {self.player_id} could not find any move. Passing turn. ---")
-                game.confirm_turn()
+            
+            # After all actions are done (or if none were possible), the AI confirms its own turn.
+            print(f"--- AI Player {self.player_id} ends its turn. ---")
+            game.confirm_turn()
 
-    def _execute_next_action(self, game: 'Game'):
-        """Pops the next planned action and executes it via a command."""
-        if not self.actions_to_perform: return
-
-        move = self.actions_to_perform.pop(0)
+    def _execute_action(self, game: 'Game', move: Dict):
+        """Executes a single planned action."""
         action_type, details = move['type'], move['details']
         score_breakdown = move.get('score_breakdown', {})
         
         score_str = ", ".join([f"{k}: {v:.1f}" for k, v in score_breakdown.items() if v > 0])
         print(f"  AI chooses to {action_type.upper()} {details[0].name} at ({details[2]},{details[3]}) (Score: {move.get('score', 0):.2f} -> [{score_str}])")
         
-        # Let the game handle the command creation and execution
-        # Note: We are now using the older single-action commands because the AI plans sequentially.
-        # This is fine. The CombinedActionCommand is for the new human flow.
-        game.attempt_place_tile(self, *details) if action_type == "place" else game.attempt_exchange_tile(self, *details)
-
-    def handle_delayed_action(self, game: 'Game'):
-        """Executes the second planned action and then confirms the turn."""
-        if self.actions_to_perform:
-            print(f"--- AI Player {self.player_id} performs second action ---")
-            self._execute_next_action(game)
+        # We use the simple, non-command-based methods for the AI for speed.
+        # The game state will be directly modified.
+        success = False
+        if action_type == "place":
+            # This is a direct call to the game's logic, bypassing the command history for the AI.
+            # This is acceptable as AI doesn't need undo/redo.
+            success = game.attempt_place_tile(self, *details)
+        elif action_type == "exchange":
+            success = game.attempt_exchange_tile(self, *details)
         
-        # After the final delayed action, the AI's turn is definitively over.
-        print(f"--- AI Player {self.player_id} ends its turn. ---")
-        game.confirm_turn()
+        if not success:
+            print(f"  AI WARNING: The chosen move ({action_type} at {details}) failed validation at execution time.")
+
+    # handle_delayed_action is no longer needed and can be deleted.
+
+    # to_dict and from_dict are correct and do not need changes.
+    def to_dict(self) -> Dict:
+        data = super().to_dict()
+        data['strategy'] = 'hard' if isinstance(self.strategy, HardStrategy) else 'easy'
+        return data

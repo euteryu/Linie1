@@ -8,6 +8,9 @@ if __name__ == '__main__':
         # --- NEW CONFIGURABLE PLAYER SETUP ---
         # 'human', 'easy_ai', 'hard_ai'
         
+        # Example 1: One easy AI vs one human
+        player_setup = ['easy_ai', 'human']
+
         # Example 1: One human vs one easy AI
         # player_setup = ['human', 'easy_ai']
         
@@ -15,9 +18,12 @@ if __name__ == '__main__':
         # player_setup = ['easy_ai', 'hard_ai']
 
         # Example 3: One easy AI vs one easy AI
-        player_setup = ['easy_ai', 'easy_ai']
+        # player_setup = ['easy_ai', 'easy_ai']
         
-        # Example 4: Two humans
+        # Example 4: One hard AI vs one hard AI vs one hard AI vs one hard AI
+        # player_setup = ['hard_ai', 'hard_ai', 'hard_ai', 'hard_ai']
+
+        # Example 5: Two humans
         # player_setup = ['human', 'human']
 
         app = Linie1Visualizer(players_config=player_setup)

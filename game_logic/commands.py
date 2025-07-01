@@ -337,111 +337,105 @@ class MoveCommand(Command):
          return f"Move P{self.player.player_id} to path index {self.target_path_index}"
     
 class CombinedActionCommand(Command):
-    def __init__(self, game: 'Game', player: Player, staged_moves: List[Dict]):
+    """
+    A single command that executes multiple sub-actions (place/exchange) atomically.
+    This allows validating an entire turn's worth of moves before committing.
+    """
+    def __init__(self, game: 'Game', player: 'Player', staged_moves: List[Dict]):
         super().__init__(game)
         self.player = player
-        # Make a deep copy to ensure the command is independent of the UI state
         self.moves_to_perform = copy.deepcopy(staged_moves)
-        self._undo_data = [] # To store info needed to reverse each action
+        self._undo_data = []
 
     def execute(self) -> bool:
-        # Check if this command would exceed the action limit BEFORE executing
+        print(f"--- [COMMAND] Executing CombinedAction for P{self.player.player_id} ---")
+        
+        # --- THIS IS THE FIX ---
+        # The command MUST check against the game's state before running.
         if self.game.actions_taken_this_turn + len(self.moves_to_perform) > self.game.MAX_PLAYER_ACTIONS:
             print(f"Command Error: Cannot perform {len(self.moves_to_perform)} actions. "
-                f"({self.game.actions_taken_this_turn}/{self.game.MAX_PLAYER_ACTIONS} already taken).")
+                  f"({self.game.actions_taken_this_turn}/{self.game.MAX_PLAYER_ACTIONS} already taken).")
             return False
+        # --- END OF FIX ---
 
         self._undo_data = []
         try:
-            # Execute each move in order
             for move in self.moves_to_perform:
-                coord_r, coord_c = move['coord']
-                tile_to_use = move['tile_type']
-
+                coord = tuple(move['coord'])
+                r, c = coord
+                # Re-fetch the tile type object to ensure it's not a stale reference
+                tile_type = next(t for t in self.game.tile_types.values() if t.name == move['tile_type'].name)
+                
                 if move['action_type'] == 'place':
-                    # --- Place Logic ---
-                    # ... (your existing correct logic for place) ...
-                    undo_info = {
-                        'type': 'place', 'coord': (coord_r, coord_c),
-                        'tile_type': tile_to_use, 'stop_placed': False, 'building_id': None
-                    }
-                    self.player.hand.remove(tile_to_use)
-                    placed_tile = PlacedTile(tile_to_use, move['orientation'])
-                    self.game.board.set_tile(coord_r, coord_c, placed_tile)
+                    undo_entry = {'type': 'place', 'coord': coord, 'tile_type_name': tile_type.name, 'stop_placed': False, 'building_id': None}
+                    self.player.hand.remove(tile_type)
+                    placed_tile = PlacedTile(tile_type, move['orientation'])
+                    self.game.board.set_tile(r, c, placed_tile)
 
                     building_before = self.game.board.buildings_with_stops.copy()
-                    self.game._check_and_place_stop_sign(placed_tile, coord_r, coord_c)
+                    self.game._check_and_place_stop_sign(placed_tile, r, c)
                     newly_stopped = self.game.board.buildings_with_stops - building_before
                     if newly_stopped:
-                        undo_info['stop_placed'] = True
-                        undo_info['building_id'] = newly_stopped.pop()
-                    self._undo_data.append(undo_info)
-
+                        undo_entry['stop_placed'] = True
+                        undo_entry['building_id'] = newly_stopped.pop()
+                    self._undo_data.append(undo_entry)
+                
                 elif move['action_type'] == 'exchange':
-                    # --- Exchange Logic ---
-                    # ... (your existing correct logic for exchange) ...
-                    old_tile = self.game.board.get_tile(coord_r, coord_c)
-                    if not old_tile: return False
-                    undo_info = {
-                        'type': 'exchange', 'coord': (coord_r, coord_c),
-                        'new_tile': tile_to_use, 'old_tile_data': old_tile.to_dict()
-                    }
-                    self._undo_data.append(undo_info)
-                    self.player.hand.remove(tile_to_use)
-                    self.player.hand.append(old_tile.tile_type)
-                    new_placed_tile = PlacedTile(tile_to_use, move['orientation'])
-                    self.game.board.set_tile(coord_r, coord_c, new_placed_tile)
+                    old_placed_tile = self.game.board.get_tile(r, c)
+                    if not old_placed_tile: raise ValueError(f"Exchange failed: No tile at {coord}.")
+                    self._undo_data.append({'type': 'exchange', 'coord': coord, 'new_tile_type_name': tile_type.name, 'old_placed_tile_data': old_placed_tile.to_dict()})
+                    self.player.hand.remove(tile_type)
+                    self.player.hand.append(old_placed_tile.tile_type)
+                    new_placed_tile = PlacedTile(tile_type, move['orientation'])
+                    self.game.board.set_tile(r, c, new_placed_tile)
 
-            # Update the game's action counter
+            # --- THIS IS THE SECOND PART OF THE FIX ---
+            # The command is the single source of truth for how many actions it represents.
+            # It must update the game's counter.
             self.game.actions_taken_this_turn += len(self.moves_to_perform)
-            
-            # --- REMOVED THE confirm_turn() CALL FROM HERE ---
-            # The caller of the command is now responsible for this.
-
+            print(f"--- [COMMAND] CombinedAction Execute SUCCESS. Actions taken this turn: {self.game.actions_taken_this_turn} ---")
+            # --- END OF FIX ---
             return True
 
-        except Exception as e:
-            print(f"ERROR during CombinedAction execute: {e}")
-            self.undo() # Attempt to roll back
+        except (ValueError, KeyError, IndexError) as e:
+            print(f"--- [COMMAND-ERROR] CombinedAction failed: {e}. Rolling back... ---")
+            self.undo() # Roll back any partial execution
             return False
 
     def undo(self) -> bool:
-        # *** THIS IS THE FIX ***
-        # If we are undoing a turn-ending move, we must revert the turn advancement.
-        # This requires adding state to the command to know if it ended the turn.
-        # For now, a simpler approach is to handle this in the game's undo logic.
-        # We will assume a simple decrement is sufficient for now.
+        print(f"--- [COMMAND] Undoing CombinedAction for P{self.player.player_id} ---")
         
-        # Revert action counter first
+        # --- THIS IS THE FIX FOR UNDO ---
+        # The command must correctly decrement the action counter it previously incremented.
         self.game.actions_taken_this_turn -= len(self._undo_data)
-
-        # Undo in reverse order
+        # --- END OF FIX ---
+        
         for undo_action in reversed(self._undo_data):
-            coord_r, coord_c = undo_action['coord']
+            coord = undo_action['coord']
+            r, c = coord
+            
             if undo_action['type'] == 'place':
-                if undo_action['stop_placed'] and undo_action['building_id']:
-                    building_id = undo_action['building_id']
-                    tile = self.game.board.get_tile(coord_r, coord_c)
+                tile_to_return = self.game.tile_types[undo_action['tile_type_name']]
+                if undo_action['stop_placed'] and (building_id := undo_action['building_id']):
+                    tile = self.game.board.get_tile(r, c)
                     if tile and tile.has_stop_sign:
                         tile.has_stop_sign = False
                         self.game.board.buildings_with_stops.discard(building_id)
                         if building_id in self.game.board.building_stop_locations:
                             del self.game.board.building_stop_locations[building_id]
-                self.game.board.set_tile(coord_r, coord_c, None)
-                # Be careful with tile object identity if deepcopy isn't used everywhere
-                tile_to_return = next((t for t in self.game.tile_types.values() if t.name == undo_action['tile_type'].name), None)
-                if tile_to_return: self.player.hand.append(tile_to_return)
+                self.game.board.set_tile(r, c, None)
+                self.player.hand.append(tile_to_return)
 
             elif undo_action['type'] == 'exchange':
-                old_tile_reconstructed = PlacedTile.from_dict(undo_action['old_tile_data'], self.game.tile_types)
-                if not old_tile_reconstructed: return False
-                self.game.board.set_tile(coord_r, coord_c, old_tile_reconstructed)
-                # Be careful with tile object identity
-                new_tile_type_obj = next((t for t in self.game.tile_types.values() if t.name == undo_action['new_tile'].name), None)
-                old_tile_type_obj = old_tile_reconstructed.tile_type
-                if old_tile_type_obj in self.player.hand: self.player.hand.remove(old_tile_type_obj)
-                if new_tile_type_obj: self.player.hand.append(new_tile_type_obj)
-                
+                old_tile = PlacedTile.from_dict(undo_action['old_placed_tile_data'], self.game.tile_types)
+                new_tile_type = self.game.tile_types[undo_action['new_tile_type_name']]
+                if not old_tile: return False
+                self.game.board.set_tile(r, c, old_tile)
+                if old_tile.tile_type in self.player.hand: self.player.hand.remove(old_tile.tile_type)
+                self.player.hand.append(new_tile_type)
+
+        self._undo_data = []
+        print(f"--- [COMMAND] CombinedAction Undo SUCCESS. Actions taken this turn: {self.game.actions_taken_this_turn} ---")
         return True
 
     def get_description(self) -> str:

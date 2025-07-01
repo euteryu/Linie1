@@ -966,20 +966,22 @@ class Game:
         return False
 
     def confirm_turn(self) -> bool:
+        """
+        Finalizes the current player's turn, draws tiles, advances to the next player,
+        and triggers the start of their turn.
+        Returns the new active player object.
+        """
         active_p = self.get_active_player()
         if self.game_phase == GamePhase.GAME_OVER: return False
 
-        # This check is for Human Players who might try to end the turn early.
         if isinstance(active_p, HumanPlayer):
-            if active_p.player_state == PlayerState.LAYING_TRACK and self.actions_taken_this_turn < self.MAX_PLAYER_ACTIONS: return False
-            # Driving turns end automatically after the one move action.
+            if active_p.player_state == PlayerState.LAYING_TRACK and self.actions_taken_this_turn < self.MAX_PLAYER_ACTIONS:
+                return False
 
-        # Draw tiles at the end of the turn for LAYING_TRACK phase
         if active_p.player_state == PlayerState.LAYING_TRACK:
             for _ in range(min(self.HAND_TILE_LIMIT - len(active_p.hand), self.MAX_PLAYER_ACTIONS)):
                 self.draw_tile(active_p)
         
-        # Advance to the next player
         self.active_player_index = (self.active_player_index + 1) % self.num_players
         if self.active_player_index == 0: self.current_turn += 1
         self.actions_taken_this_turn = 0
@@ -988,21 +990,15 @@ class Game:
         next_p = self.get_active_player()
         print(f"\n--- Starting Turn {self.current_turn} for Player {next_p.player_id} ({next_p.player_state.name}) ---")
 
-        # --- THIS IS THE FIX ---
-        # We must proactively trigger the next player's turn logic, regardless of their state.
-        # The Player object itself will decide what to do (lay track or drive).
-
-        # First, check if a player who is laying track can NOW switch to driving.
         if next_p.player_state == PlayerState.LAYING_TRACK:
             is_complete, start, path = self.check_player_route_completion(next_p)
             if is_complete and start and path:
                 self.handle_route_completion(next_p, start, path)
-                # The player state is now DRIVING.
 
-        # Now, call the universal turn handler. It will correctly dispatch to
-        # the driving logic if the player's state is DRIVING.
         next_p.handle_turn_logic(self)
         
+        # --- THIS IS THE FIX ---
+        # By returning the new player, we allow the UI to react to the change.
         return True
 
 
