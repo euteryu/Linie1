@@ -1,10 +1,6 @@
-# game_logic/game.py
 from __future__ import annotations
 from typing import List, Dict, Tuple, Optional, Any, TYPE_CHECKING
-import random
-import json
-import traceback
-import copy
+import random, json, traceback, copy
 from queue import PriorityQueue
 
 if TYPE_CHECKING:
@@ -16,28 +12,38 @@ from .cards import LineCard, RouteCard
 from .player import Player, HumanPlayer, AIPlayer, RouteStep
 from .board import Board
 from .command_history import CommandHistory
-from .commands import Command, PlaceTileCommand, ExchangeTileCommand, MoveCommand
-from .pathfinding import AStarPathfinder, BFSPathfinder # Keep both for swapping
+from .commands import Command, PlaceTileCommand, ExchangeTileCommand, MoveCommand, CombinedActionCommand
+from .pathfinding import AStarPathfinder, BFSPathfinder
+from .ai_strategy import EasyStrategy, HardStrategy # Import the strategies
 
 from constants import (
-    TILE_DEFINITIONS, TILE_COUNTS_BASE, HAND_TILE_LIMIT,
-    MAX_PLAYER_ACTIONS, DIE_FACES, STOP_SYMBOL, TERMINAL_COORDS,
-    STARTING_HAND_TILES, ROUTE_CARD_VARIANTS, TERMINAL_DATA,
-    TILE_COUNTS_5_PLUS_ADD
+    TILE_DEFINITIONS, TILE_COUNTS_BASE, TILE_COUNTS_5_PLUS_ADD, HAND_TILE_LIMIT,
+    MAX_PLAYER_ACTIONS, DIE_FACES, STOP_SYMBOL, TERMINAL_COORDS, STARTING_HAND_TILES, ROUTE_CARD_VARIANTS, TERMINAL_DATA
 )
 
 class Game:
-    def __init__(self, num_players: int, num_ai: int = 0):
-        total_players = num_players + num_ai
-        if not 1 <= total_players <= 6:
+    def __init__(self, players_config: List[str]):
+        """
+        Initializes the game with a flexible player configuration.
+        Example: players_config = ['human', 'easy_ai', 'hard_ai']
+        """
+        if not 1 <= len(players_config) <= 6:
             raise ValueError("Total players must be 1-6.")
-        
-        self.num_players = total_players
-        
+
+        self.num_players = len(players_config)
         self.players: List[Player] = []
-        for i in range(num_players): self.players.append(HumanPlayer(i))
-        for i in range(num_ai): self.players.append(AIPlayer(num_players + i))
-        
+
+        # Create players based on the config list
+        for i, p_type in enumerate(players_config):
+            if p_type.lower() == 'human':
+                self.players.append(HumanPlayer(i))
+            elif p_type.lower() == 'easy_ai':
+                self.players.append(AIPlayer(i, EasyStrategy()))
+            elif p_type.lower() == 'hard_ai':
+                self.players.append(AIPlayer(i, HardStrategy()))
+            else:
+                raise ValueError(f"Unknown player type in config: {p_type}")
+
         self.tile_types = {name: TileType(name=name, **details) for name, details in TILE_DEFINITIONS.items()}
         self.board = Board()
         self.board._initialize_terminals(self.tile_types)
@@ -55,8 +61,6 @@ class Game:
         self.MAX_PLAYER_ACTIONS = MAX_PLAYER_ACTIONS
         self.HAND_TILE_LIMIT = HAND_TILE_LIMIT
 
-        # --- NEW: Call setup_game directly from the constructor ---
-        # This ensures that any new Game object is always fully initialized.
         self.setup_game()
 
     def setup_game(self):

@@ -1,14 +1,18 @@
 # game_logic/commands.py
-import copy
+from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Tuple, Optional, List, Dict, Any
+from typing import TYPE_CHECKING, Tuple, Optional, Dict, List
+import copy
+
+from .enums import PlayerState, Direction, GamePhase
 from .tile import TileType, PlacedTile
-from .player import Player
-from .enums import PlayerState # If needed
+# REMOVED: from .player import Player  <- This was the problem
 
 # Avoid circular imports using TYPE_CHECKING
 if TYPE_CHECKING:
     from .game import Game
+    # THIS IS THE FIX: Only import Player for type hinting, not at runtime.
+    from .player import Player
 
 class Command(ABC):
     """Abstract base class for executable commands with undo."""
@@ -348,52 +352,58 @@ class CombinedActionCommand(Command):
             return False
 
         self._undo_data = []
-        # Execute each move in order
-        for move in self.moves_to_perform:
-            coord_r, coord_c = move['coord']
-            tile_to_use = move['tile_type']
+        try:
+            # Execute each move in order
+            for move in self.moves_to_perform:
+                coord_r, coord_c = move['coord']
+                tile_to_use = move['tile_type']
 
-            if move['action_type'] == 'place':
-                # --- Place Logic ---
-                undo_info = {
-                    'type': 'place', 'coord': (coord_r, coord_c),
-                    'tile_type': tile_to_use, 'stop_placed': False, 'building_id': None
-                }
-                self.player.hand.remove(tile_to_use)
-                placed_tile = PlacedTile(tile_to_use, move['orientation'])
-                self.game.board.set_tile(coord_r, coord_c, placed_tile)
+                if move['action_type'] == 'place':
+                    # --- Place Logic ---
+                    # ... (your existing correct logic for place) ...
+                    undo_info = {
+                        'type': 'place', 'coord': (coord_r, coord_c),
+                        'tile_type': tile_to_use, 'stop_placed': False, 'building_id': None
+                    }
+                    self.player.hand.remove(tile_to_use)
+                    placed_tile = PlacedTile(tile_to_use, move['orientation'])
+                    self.game.board.set_tile(coord_r, coord_c, placed_tile)
 
-                building_before = self.game.board.buildings_with_stops.copy()
-                self.game._check_and_place_stop_sign(placed_tile, coord_r, coord_c)
-                newly_stopped = self.game.board.buildings_with_stops - building_before
-                if newly_stopped:
-                    undo_info['stop_placed'] = True
-                    undo_info['building_id'] = newly_stopped.pop()
-                self._undo_data.append(undo_info)
+                    building_before = self.game.board.buildings_with_stops.copy()
+                    self.game._check_and_place_stop_sign(placed_tile, coord_r, coord_c)
+                    newly_stopped = self.game.board.buildings_with_stops - building_before
+                    if newly_stopped:
+                        undo_info['stop_placed'] = True
+                        undo_info['building_id'] = newly_stopped.pop()
+                    self._undo_data.append(undo_info)
 
-            elif move['action_type'] == 'exchange':
-                # --- Exchange Logic ---
-                old_tile = self.game.board.get_tile(coord_r, coord_c)
-                if not old_tile: return False
-                undo_info = {
-                    'type': 'exchange', 'coord': (coord_r, coord_c),
-                    'new_tile': tile_to_use, 'old_tile_data': old_tile.to_dict()
-                }
-                self._undo_data.append(undo_info)
-                self.player.hand.remove(tile_to_use)
-                self.player.hand.append(old_tile.tile_type)
-                new_placed_tile = PlacedTile(tile_to_use, move['orientation'])
-                self.game.board.set_tile(coord_r, coord_c, new_placed_tile)
+                elif move['action_type'] == 'exchange':
+                    # --- Exchange Logic ---
+                    # ... (your existing correct logic for exchange) ...
+                    old_tile = self.game.board.get_tile(coord_r, coord_c)
+                    if not old_tile: return False
+                    undo_info = {
+                        'type': 'exchange', 'coord': (coord_r, coord_c),
+                        'new_tile': tile_to_use, 'old_tile_data': old_tile.to_dict()
+                    }
+                    self._undo_data.append(undo_info)
+                    self.player.hand.remove(tile_to_use)
+                    self.player.hand.append(old_tile.tile_type)
+                    new_placed_tile = PlacedTile(tile_to_use, move['orientation'])
+                    self.game.board.set_tile(coord_r, coord_c, new_placed_tile)
 
-        # Update the action counter
-        self.game.actions_taken_this_turn += len(self.moves_to_perform)
-        
-        # *** THIS IS THE FIX ***
-        # If the player has now completed their actions, end their turn.
-        if self.game.actions_taken_this_turn >= self.game.MAX_PLAYER_ACTIONS:
-            self.game.confirm_turn()
+            # Update the game's action counter
+            self.game.actions_taken_this_turn += len(self.moves_to_perform)
+            
+            # --- REMOVED THE confirm_turn() CALL FROM HERE ---
+            # The caller of the command is now responsible for this.
 
-        return True
+            return True
+
+        except Exception as e:
+            print(f"ERROR during CombinedAction execute: {e}")
+            self.undo() # Attempt to roll back
+            return False
 
     def undo(self) -> bool:
         # *** THIS IS THE FIX ***

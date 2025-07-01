@@ -271,6 +271,30 @@ class LayingTrackState(GameState):
         instr_text = "Click Square -> Click Hand -> [S] Stage -> [Enter] Commit"
         self.visualizer.draw_ui(screen, self.message, instr_text)
 
+    def _commit_staged_moves(self, player):
+        """Attempts to commit all staged moves."""
+        if self.move_in_progress:
+            self.message = "A move is being built. [S] to stage or [ESC] to clear."; return
+        if not self.staged_moves:
+            self.message = "Nothing to commit."; return
+        
+        self._validate_all_staged_moves()
+
+        if all(move.get('is_valid', False) for move in self.staged_moves):
+            command = CombinedActionCommand(self.game, player, self.staged_moves)
+            
+            if self.game.command_history.execute_command(command):
+                # SUCCESS! The command has updated the board and action count.
+                # Now, the UI state is responsible for ending the turn.
+                self.staged_moves = []
+                self.move_in_progress = None
+                self.message = "Turn committed."
+                self.game.confirm_turn() # <-- THE CALL IS MOVED HERE
+            else:
+                self.message = "Commit failed: Invalid action count."
+        else:
+            self.message = "Cannot commit: one or more moves are invalid (red)."
+
 # --- Driving State ---
 
 class DrivingState(GameState):

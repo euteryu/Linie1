@@ -889,8 +889,6 @@ Implementing an AI that can "see" these combinations is a significant leap in co
 
 This is computationally very expensive and is a major new feature, not a simple bug fix. For now, it's a known limitation and a fascinating challenge for a future "Grandmaster AI" version. Your current AI is a very strong "Advanced" player that makes locally optimal moves.
 
-in future, players will have different levels of difficulty mode. So humans can go up against "easy AI" - the sequential planner algo atm - and "hard AI" mode that uses combinatorial planning. maybe i'll think of "super hard" mode in future too, maybe even machine learning trained involved! point being, i need robust scaleable means of allowing players to specify ai's difficulty. and right now, I want hard ai mode so in the code too have a hard ai utilise this combinatorial approach - advise how, why and where to add this new code(s) and give full complete program for entire sections changed.
-
 ---
 
 in future, players will have different levels of difficulty mode. So humans can go up against "easy AI" - the sequential planner algo atm - and "hard AI" mode that uses combinatorial planning. maybe i'll think of "super hard" mode in future too, maybe even machine learning trained involved! point being, i need robust scaleable means of allowing players to specify ai's difficulty, without these hard ai mode additions breaking easy ai code from working if easy ai algo favoured by human players in menu. and right now, I want hard ai mode so in the code too have a hard ai utilise this combinatorial approach - advise how, why and where to add this new code(s) and give full complete program for entire sections changed.
@@ -920,3 +918,79 @@ AI is passing its turn.
 ==================================================
 
 combinatorial approach in ai thinking necessary as despite two-stage-fine-but-one-stage-might-not-fine scenario leads to AI player getting stuck in "no legal move available" loop despite having at-hand suitable tiles to satiate legal move had it combinatorially considered all exchanges possible anywhere.
+
+
+----
+
+--- Starting Game Setup ---
+Creating draw piles...
+Tile draw pile created: 1010 tiles.
+Line card pile created with 6 cards for lines: [1, 2, 3, 4, 5, 6]
+Dealing starting hands...
+--- Dealing Player Cards (DEBUG) ---
+Player 0 assigned: Line 4, Stops ['H', 'L']
+Player 1 assigned: Line 5, Stops ['B', 'H']
+
+--- Setup Complete ---
+--- Game initiated by AI Player 0. Kicking off turn... ---
+
+--- AI Player 0 (EasyStrategy) is thinking... (Hand: [Straight, Straight, Straight, Curve, Curve]) ---
+AI chooses to PLACE Straight at (3,11) (Score: 151.00 -> [base: 1.0, stop_creation: 150.0])
+--- [GAME] Checking place validity... Result: True (Reason: Placement is valid.) ---
+--- [COMMAND] Executing PlaceTileCommand: P0 places Straight at (3,11) ---
+[COMMAND-STATE] Removing 'Straight' from Player 0's hand.
+[COMMAND-STATE] Setting tile on board at (3,11) to: Placed(Straight, 90deg)
+--> Placed stop sign at (3,11) for Building H.
+[COMMAND-STATE] Stop sign created for building H.
+--- [COMMAND] PlaceTileCommand Execute SUCCESS ---
+Command 'PlaceTileCommand' executed. History size: 1, Index: 0
+Generating main tile surfaces...
+Tile surfaces generated.
+--- AI Player 0 performs second action ---
+AI chooses to PLACE Straight at (4,10) (Score: 151.00 -> [base: 1.0, stop_creation: 150.0])
+--- [GAME] Checking place validity... Result: True (Reason: Placement is valid.) ---
+--- [COMMAND] Executing PlaceTileCommand: P0 places Straight at (4,10) ---
+[COMMAND-STATE] Removing 'Straight' from Player 0's hand.
+[COMMAND-STATE] Setting tile on board at (4,10) to: Placed(Straight, 0deg)
+--- [COMMAND] PlaceTileCommand Execute SUCCESS ---
+Command 'PlaceTileCommand' executed. History size: 2, Index: 1
+
+ok, now game opens and runs again , progress! but after this output on concole board msg is waitign for player  0 action, and turn never advances. help
+
+------------
+-----------
+
+the combinatorial approach is not just "taking too long," it's causing a combinatorial explosion. The permutations logic is simply not a feasible strategy for a modern computer to solve in a reasonable amount of time.
+
+Let's do the math to see why:
+
+    Hand Size: 5 tiles
+
+    Playable Squares: ~144 (12x12)
+
+    Orientations: 4
+
+The number of possible pairs of moves is roughly:
+(5 tiles * 144 squares * 4 orientations) * (4 tiles * 143 squares * 4 orientations)
+This equals 2880 * 2288, which is over 6.5 million combinations.
+
+And for each of those 6.5 million pairs, you are:
+
+    Creating a deep copy of the game state.
+
+    Running two separate, complex validation checks.
+
+This will absolutely cause the game to hang indefinitely. It's not a bug in the logic, but a bug in the algorithmic feasibility.
+The Fix: A Smarter "Hard AI"
+
+We need to make the AI smarter, not just more brute-force. A true "hard" AI doesn't check every possibility; it uses heuristics to dramatically reduce the search space to only the most promising moves.
+
+Here is the new HardStrategy. It's a multi-pass approach that is far more efficient and intelligent:
+
+    High-Priority Search (Plan A): First, it identifies a small number of "high-value" target squares on the board. These are squares that are part of its ideal path or squares needed to create a required stop sign.
+
+    Targeted Combinatorial Search: It then runs the expensive combinatorial permutations logic, but only for placing tiles on this tiny subset of high-value squares. Instead of millions of combinations, it might only check a few hundred.
+
+    Fallback (Plan B): If this targeted search yields no valid two-move combinations (which is common), it gracefully falls back to the reliable EasyStrategy to ensure it always makes a good, sensible move rather than getting stuck.
+
+This approach mimics human expert play: we don't consider placing a tile on every single empty square. We focus on the 3-4 squares that actually matter for our strategy.

@@ -96,18 +96,23 @@ class Linie1Visualizer:
     Manages the Pygame window, main loop, drawing, and input delegation
     based on the current game state.
     """
-    def __init__(self, num_players=1, num_ai=0):
-        self.num_players = num_players
+    def __init__(self, players_config: List[str]):
+        """
+        Initializes the visualizer and the game engine.
+        :param players_config: A list defining the players, e.g., ['human', 'easy_ai', 'hard_ai']
+        """
         pygame.init()
         pygame.font.init()
         self.screen = pygame.display.set_mode((C.SCREEN_WIDTH, C.SCREEN_HEIGHT))
         pygame.display.set_caption("Linie 1")
         self.clock = pygame.time.Clock()
+
         try:
             self.font = pygame.font.SysFont(None, C.DEFAULT_FONT_SIZE)
         except Exception as e:
             print(f"SysFont error: {e}. Using default font.")
             self.font = pygame.font.Font(None, C.DEFAULT_FONT_SIZE)
+
         try:
             self.tk_root = tk.Tk()
             self.tk_root.withdraw()
@@ -116,13 +121,17 @@ class Linie1Visualizer:
             self.tk_root = None
 
         try:
-            self.game = Game(num_players=num_players, num_ai=num_ai)
+            # --- THIS IS THE FIX ---
+            # The visualizer now takes the player_config and passes it to the Game.
+            self.game = Game(players_config=players_config)
         except Exception as e:
-             print(f"FATAL: Game initialization failed: {e}")
-             traceback.print_exc()
-             pygame.quit()
-             sys.exit()
+            print(f"FATAL: Game initialization failed: {e}")
+            import traceback
+            traceback.print_exc()
+            pygame.quit()
+            sys.exit()
 
+        # --- The rest of the __init__ method is unchanged ---
         self.TILE_SIZE = C.TILE_SIZE
         self.HAND_TILE_SIZE = C.HAND_TILE_SIZE
         self.debug_mode = C.DEBUG_MODE

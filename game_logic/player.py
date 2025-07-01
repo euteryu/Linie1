@@ -8,9 +8,11 @@ if TYPE_CHECKING:
     from .game import Game
 
 from .enums import PlayerState, Direction, GamePhase
-from .tile import TileType, PlacedTile
+from .tile import TileType
 from .cards import LineCard, RouteCard
-from constants import AI_ACTION_TIMER_EVENT, MAX_PLAYER_ACTIONS, AI_MOVE_DELAY_MS
+from .ai_strategy import AIStrategy, EasyStrategy, HardStrategy
+# Make sure to use the new constant for the delay
+import constants as C
 
 
 class RouteStep(NamedTuple):
@@ -20,7 +22,8 @@ class RouteStep(NamedTuple):
 
 
 class Player(ABC):
-    """Abstract base class for all players, containing shared attributes."""
+    # ... (No changes to the base Player class, to_dict, from_dict, etc.) ...
+    # ... Your existing Player class is correct. ...
     def __init__(self, player_id: int):
         self.player_id = player_id
         self.hand: List[TileType] = []
@@ -50,50 +53,65 @@ class Player(ABC):
         return None
 
     def to_dict(self) -> Dict:
+        """Serializes player data to a dictionary."""
         validated_route_data = None
         if self.validated_route:
             validated_route_data = [{"coord": s.coord, "is_goal": s.is_goal_node, "arrival_dir": s.arrival_direction.name if s.arrival_direction else None} for s in self.validated_route]
-        return {
-            "player_id": self.player_id, "is_ai": isinstance(self, AIPlayer), "hand": [t.name for t in self.hand],
+        
+        # Base data common to all players
+        data = {
+            "player_id": self.player_id, "is_ai": isinstance(self, AIPlayer),
+            "hand": [t.name for t in self.hand],
             "line_card": self.line_card.line_number if self.line_card else None,
             "route_card": {"stops": self.route_card.stops, "variant": self.route_card.variant_index} if self.route_card else None,
             "player_state": self.player_state.name, "streetcar_path_index": self.streetcar_path_index,
             "required_node_index": self.required_node_index, "start_terminal_coord": self.start_terminal_coord,
             "validated_route": validated_route_data,
         }
+        
+        # Add AI-specific data
+        if isinstance(self, AIPlayer):
+            data['strategy'] = 'hard' if isinstance(self.strategy, HardStrategy) else 'easy'
+            
+        return data
 
     @staticmethod
     def from_dict(data: Dict, tile_types: Dict[str, 'TileType']) -> 'Player':
-        """Deserializes data into a HumanPlayer or AIPlayer object."""
-        # Use 'is_ai' flag from the save file to determine which class to instantiate
+        """
+        Deserializes data into a HumanPlayer or AIPlayer object with the correct strategy.
+        This is the single factory method for creating players from a save file.
+        """
         is_ai = data.get("is_ai", False)
-        player_class = AIPlayer if is_ai else HumanPlayer
-        player = player_class(data.get("player_id", -1))
+        player_id = data.get("player_id", -1)
+
+        if is_ai:
+            strategy_name = data.get('strategy', 'easy')
+            strategy = HardStrategy() if strategy_name == 'hard' else EasyStrategy()
+            player = AIPlayer(player_id, strategy)
+        else:
+            player = HumanPlayer(player_id)
         
+        # Populate the common attributes for the newly created player object
         player.hand = [tile_types[name] for name in data.get("hand", [])]
         if (lc_num := data.get("line_card")) is not None: player.line_card = LineCard(lc_num)
         if (rc_data := data.get("route_card")): player.route_card = RouteCard(rc_data.get("stops", []), rc_data.get("variant", 0))
         player.player_state = PlayerState[data.get("player_state", "LAYING_TRACK")]
         player.streetcar_path_index = data.get("streetcar_path_index", 0)
         player.required_node_index = data.get("required_node_index", 0)
-        player.start_terminal_coord = tuple(data["start_terminal_coord"]) if data.get("start_terminal_coord") else None
+        start_coord_data = data.get("start_terminal_coord")
+        player.start_terminal_coord = tuple(start_coord_data) if start_coord_data else None
         
         if (route_data := data.get("validated_route")):
-            player.validated_route = [RouteStep(tuple(s["coord"]), s["is_goal"], Direction[s["arrival_dir"]] if s["arrival_dir"] else None) for s in route_data]
+            player.validated_route = [RouteStep(
+                coord=tuple(s["coord"]),
+                is_goal_node=s["is_goal"],
+                arrival_direction=Direction[s["arrival_dir"]] if s["arrival_dir"] else None
+            ) for s in route_data]
         
-        # If it's an AI player, load its specific state
-        if isinstance(player, AIPlayer):
-            # AI state can be loaded here if needed in the future
-            pass
-            
         return player
 
     
     def get_required_stop_coords(self, game: 'Game') -> Optional[List[Tuple[int, int]]]:
-        """
-        Gets the sequence of STOP coordinates the player needs to visit.
-        This is needed by all player types for validation and driving.
-        """
         if not self.route_card: return []
         stop_coords = []
         for stop_id in self.route_card.stops:
@@ -102,10 +120,6 @@ class Player(ABC):
         return stop_coords
 
     def get_full_driving_sequence(self, game: 'Game') -> Optional[List[Tuple[int, int]]]:
-        """
-        Gets the full, ordered list of GOAL NODES for the DRIVING phase.
-        This is needed by all player types for win condition checks.
-        """
         if not self.line_card or not self.start_terminal_coord: return None
         stop_coords = self.get_required_stop_coords(game)
         if stop_coords is None: return None
@@ -114,199 +128,74 @@ class Player(ABC):
         end_terminal = term2 if self.start_terminal_coord == term1 else term1
         return [self.start_terminal_coord] + stop_coords + [end_terminal]
 
-
 class HumanPlayer(Player):
     """Represents a human-controlled player."""
     def handle_turn_logic(self, game: 'Game'):
         pass # Human logic is driven by Pygame events in the state machine.
 
+# --- REPLACE THE ENTIRE AIPlayer CLASS WITH THIS ---
 class AIPlayer(Player):
-    """Represents an AI-controlled player with a sophisticated, resilient strategic engine."""
-    def __init__(self, player_id: int):
+    """Represents an AI-controlled player that uses a pluggable strategy for planning."""
+    def __init__(self, player_id: int, strategy: AIStrategy):
         super().__init__(player_id)
-        self.ideal_route_plan: Optional[List[RouteStep]] = None
+        self.strategy = strategy
         self.actions_to_perform: List[Dict] = []
 
     def handle_turn_logic(self, game: 'Game'):
-        """Orchestrates the AI's entire turn, from planning to execution with delays."""
-        if game.game_phase == GamePhase.GAME_OVER:
-            return
+        """Orchestrates the AI's entire turn by delegating to its strategy."""
+        if game.game_phase == GamePhase.GAME_OVER: return
 
         if self.player_state == PlayerState.DRIVING:
-            # --- Driving Phase Logic ---
             print(f"\n--- AI Player {self.player_id}'s Turn (Driving) ---")
-            
-            # 1. AI "rolls" the die programmatically.
             roll_result = game.roll_special_die()
             print(f"  AI Player {self.player_id} rolls a '{roll_result}'.")
-            
-            # 2. AI "presses the button" by calling the game's driving logic.
-            # The game logic will handle the move, turn confirmation, and win checks.
             game.attempt_driving_move(self, roll_result)
-            
+        
         elif self.player_state == PlayerState.LAYING_TRACK:
-            # --- Laying Track Phase Logic (The original logic) ---
             hand_str = ", ".join([t.name for t in self.hand])
-            print(f"\n--- AI Player {self.player_id} is thinking... (Hand: [{hand_str}]) ---")
+            print(f"\n--- AI Player {self.player_id} ({self.strategy.__class__.__name__}) is thinking... (Hand: [{hand_str}]) ---")
             
-            self._plan_full_turn(game)
+            # The strategy plans the entire turn's worth of moves
+            self.actions_to_perform = self.strategy.plan_turn(game, self)
             
             if self.actions_to_perform:
+                # Execute the first action immediately
                 self._execute_next_action(game)
+                
+                # If there are more actions, set a timer for the next one.
+                # Otherwise, the turn is over.
                 if self.actions_to_perform:
-                    # Set a timer for the second action to make it feel less instant.
-                    pygame.time.set_timer(AI_ACTION_TIMER_EVENT, AI_MOVE_DELAY_MS, loops=1) # 500ms delay
-                else: 
-                    # This can happen if the AI only finds one valid move.
+                    pygame.time.set_timer(C.AI_ACTION_TIMER_EVENT, C.AI_MOVE_DELAY_MS, loops=1)
+                else:
                     print(f"--- AI Player {self.player_id} only had one valid move. Ending turn. ---")
                     game.confirm_turn()
             else:
-                print("="*50)
-                print(f"FATAL LOGIC ERROR: AI Player {self.player_id} could not find a single legal move.")
-                print(f"Hand: {[t.name for t in self.hand]}")
-                print("AI is passing its turn.")
-                print("="*50)
+                # The AI couldn't find any moves at all. Pass the turn.
+                print(f"--- AI Player {self.player_id} could not find any move. Passing turn. ---")
                 game.confirm_turn()
 
-    def handle_delayed_action(self, game: 'Game'):
-        """Executes the second planned action."""
-        if self.actions_to_perform:
-            self._execute_next_action(game)
-        
-        print(f"--- AI Player {self.player_id} ends its turn. ---")
-        game.confirm_turn()
-
     def _execute_next_action(self, game: 'Game'):
-        """Pops the next action from the planned list and executes it."""
+        """Pops the next planned action and executes it via a command."""
+        if not self.actions_to_perform: return
+
         move = self.actions_to_perform.pop(0)
-        action_type, details, score_breakdown = move['type'], move['details'], move['score_breakdown']
+        action_type, details = move['type'], move['details']
+        score_breakdown = move.get('score_breakdown', {})
         
         score_str = ", ".join([f"{k}: {v:.1f}" for k, v in score_breakdown.items() if v > 0])
-        print(f"  AI chooses to {action_type.upper()} {details[0].name} at ({details[2]},{details[3]}) (Total Score: {move['score']:.2f} -> [{score_str}])")
+        print(f"  AI chooses to {action_type.upper()} {details[0].name} at ({details[2]},{details[3]}) (Score: {move.get('score', 0):.2f} -> [{score_str}])")
         
-        if action_type == "place":
-            game.attempt_place_tile(self, *details)
-        elif action_type == "exchange":
-            game.attempt_exchange_tile(self, *details)
+        # Let the game handle the command creation and execution
+        # Note: We are now using the older single-action commands because the AI plans sequentially.
+        # This is fine. The CombinedActionCommand is for the new human flow.
+        game.attempt_place_tile(self, *details) if action_type == "place" else game.attempt_exchange_tile(self, *details)
 
-
-    def _plan_full_turn(self, game: 'Game'):
-        """The AI's brain: Plans the best two actions for the turn by simulating."""
-        self.actions_to_perform = []
-        sim_game = game.copy_for_simulation()
-        sim_player = next(p for p in sim_game.players if p.player_id == self.player_id)
-
-        for i in range(MAX_PLAYER_ACTIONS):
-            best_move = self._find_best_move_in_state(sim_game, sim_player)
-            if best_move:
-                self.actions_to_perform.append(best_move)
-                # Apply the move to the simulation for accurate planning of the second action
-                action_type, details = best_move['type'], best_move['details']
-                tile, orientation, r, c = details
-                if action_type == "place":
-                    sim_game.board.set_tile(r, c, PlacedTile(tile, orientation))
-                    if tile in sim_player.hand: sim_player.hand.remove(tile)
-                elif action_type == "exchange":
-                    old_tile = sim_game.board.get_tile(r,c)
-                    if old_tile and tile in sim_player.hand:
-                        sim_player.hand.remove(tile)
-                        sim_player.hand.append(old_tile.tile_type)
-                        sim_game.board.set_tile(r,c, PlacedTile(tile, orientation))
-            else:
-                break
-
-    def _find_best_move_in_state(self, game: 'Game', player: 'Player') -> Optional[Dict]:
-        """Analyzes a game state and finds the single best action to take. Never gives up."""
-        ideal_plan = self._calculate_ideal_route(game, player)
-        valid_moves = []
-
-        # 1. Generate all legal moves and score them.
-        for tile in player.hand:
-            # Placements
-            for r in range(game.board.rows):
-                for c in range(game.board.cols):
-                    for o in [0, 90, 180, 270]:
-                        if game.check_placement_validity(tile, o, r, c)[0]:
-                            score, breakdown = self._score_move(game, player, ideal_plan, "place", tile, o, r, c)
-                            valid_moves.append({'type': 'place', 'details': (tile, o, r, c), 'score': score, 'score_breakdown': breakdown})
-            # Exchanges
-            for r in range(game.board.rows):
-                for c in range(game.board.cols):
-                    if game.board.get_tile(r, c):
-                        for o in [0, 90, 180, 270]:
-                            if game.check_exchange_validity(player, tile, o, r, c)[0]:
-                                score, breakdown = self._score_move(game, player, ideal_plan, "exchange", tile, o, r, c)
-                                valid_moves.append({'type': 'exchange', 'details': (tile, o, r, c), 'score': score, 'score_breakdown': breakdown})
-
-        if not valid_moves:
-            return None
+    def handle_delayed_action(self, game: 'Game'):
+        """Executes the second planned action and then confirms the turn."""
+        if self.actions_to_perform:
+            print(f"--- AI Player {self.player_id} performs second action ---")
+            self._execute_next_action(game)
         
-        return max(valid_moves, key=lambda m: m['score'])
-
-    def _calculate_ideal_route(self, game: 'Game', player: 'Player') -> Optional[List[RouteStep]]:
-        """Calculates the AI's 'wet dream' path assuming infinite tiles."""
-        if not player.line_card or not player.route_card: return None
-        stops = player.get_required_stop_coords(game)
-        if stops is None: return None
-        t1, t2 = game.get_terminal_coords(player.line_card.line_number)
-        if not t1 or not t2: return None
-        
-        path1, cost1 = game.pathfinder.find_path(game, player, [t1] + stops + [t2], is_hypothetical=True)
-        path2, cost2 = game.pathfinder.find_path(game, player, [t2] + stops + [t1], is_hypothetical=True)
-        
-        if cost1 == float('inf') and cost2 == float('inf'): return None
-        return path1 if cost1 <= cost2 else path2
-
-    def _score_move(self, game: 'Game', player: 'Player', ideal_plan: Optional[List[RouteStep]], move_type: str, tile: TileType, orientation: int, r: int, c: int) -> Tuple[float, Dict[str, float]]:
-        """Scores a pre-validated move and returns the score breakdown."""
-        score = 1.0  # Base score for any legal move, ensuring AI never passes.
-        breakdown = {'base': score}
-
-        # Priority 1: Fulfilling the Ideal Plan
-        if ideal_plan:
-            for i, step in enumerate(ideal_plan):
-                if step.coord == (r, c):
-                    # Higher score for moves earlier in the plan
-                    path_score = 200.0 - (i * 5)
-                    score += path_score
-                    breakdown['ideal_path'] = path_score
-                    break # Stop after finding the first match
-        
-        # Priority 2: Creating a Required Stop
-        if player.route_card:
-            for d in Direction:
-                building_id = game.board.get_building_at(r + d.value[0], c + d.value[1])
-                # Check if this building is a required stop AND doesn't have a stop sign yet
-                if building_id and building_id in player.route_card.stops and building_id not in game.board.buildings_with_stops:
-                    conns = game.get_effective_connections(tile, orientation)
-                    is_parallel = (d in [Direction.N, Direction.S] and game._has_ew_straight(conns)) or \
-                                  (d in [Direction.E, Direction.W] and game._has_ns_straight(conns))
-                    if is_parallel:
-                        score += 150.0
-                        breakdown['stop_creation'] = 150.0
-        
-        # Priority 3: Working Backwards from Terminals (Plan B)
-        # If the move doesn't fit the ideal plan, see if it helps build from the end
-        if 'ideal_path' not in breakdown and player.line_card:
-            _, term2 = game.get_terminal_coords(player.line_card.line_number)
-            if term2:
-                dist = abs(r - term2[0]) + abs(c - term2[1])
-                # Lower score than ideal path, but better than random
-                backwards_score = 50.0 - dist
-                score += backwards_score
-                breakdown['backwards_plan'] = backwards_score
-
-        # Priority 4: General Connectivity
-        connectivity_score = 0
-        for d in Direction:
-            if game.board.get_tile(r + d.value[0], c + d.value[1]):
-                connectivity_score += 10.0
-        if connectivity_score > 0:
-            score += connectivity_score
-            breakdown['connectivity'] = connectivity_score
-                
-        if move_type == "exchange":
-            score += 5.0
-            breakdown['exchange_bonus'] = 5.0
-
-        return score, breakdown
+        # After the final delayed action, the AI's turn is definitively over.
+        print(f"--- AI Player {self.player_id} ends its turn. ---")
+        game.confirm_turn()
