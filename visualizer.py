@@ -94,17 +94,13 @@ def create_tile_surface(tile_type: TileType, size: int) -> pygame.Surface:
 # === Main Visualizer Class ===
 
 class Linie1Visualizer:
-    """
-    Manages the Pygame window, main loop, drawing, and input delegation
-    based on the current game state.
-    """
-    def __init__(self, players_config: List[str]):
+    def __init__(self, player_types: List[str], difficulty: str):
         """
         Initializes the visualizer and the game engine.
-        :param players_config: A list defining the players, e.g., ['human', 'easy_ai', 'hard_ai']
+        :param player_types: A list defining players, e.g., ['human', 'ai', 'ai']
+        :param difficulty: The game's difficulty setting, e.g., 'king' or 'normal'
         """
         self.sounds = SoundManager()
-
         pygame.init()
         pygame.font.init()
         self.screen = pygame.display.set_mode((C.SCREEN_WIDTH, C.SCREEN_HEIGHT))
@@ -126,8 +122,8 @@ class Linie1Visualizer:
 
         try:
             # --- THIS IS THE FIX ---
-            # The visualizer now takes the player_config and passes it to the Game.
-            self.game = Game(players_config=players_config)
+            # Pass the new configuration to the Game constructor.
+            self.game = Game(player_types=player_types, difficulty=difficulty)
         except Exception as e:
             print(f"FATAL: Game initialization failed: {e}")
             import traceback
@@ -199,20 +195,15 @@ class Linie1Visualizer:
         """ Main game loop. """
         running = True
         
-        # --- THIS IS THE FIX ---
-        # If the first player is an AI, we need to kick off the game flow.
         if isinstance(self.game.get_active_player(), AIPlayer):
              pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT))
-        # --- END OF FIX ---
         
         while running:
             dt = self.clock.tick(C.FPS) / 1000.0
             events = pygame.event.get()
 
-            # Update visualizer state based on active player *before* events
             self.update_current_state_for_player()
 
-            # Handle Events using current state
             for event in events:
                 if event.type == pygame.QUIT:
                     running = False
@@ -222,22 +213,17 @@ class Linie1Visualizer:
                 # Handle our custom game flow event
                 if event.type == C.START_NEXT_TURN_EVENT:
                     active_player = self.game.get_active_player()
-                    if isinstance(active_player, AIPlayer):
-                        # It's an AI's turn to start, call their logic
-                        active_player.handle_turn_logic(self.game)
-                    # If it's a human, we do nothing; their turn starts when they provide input.
-                    continue # Consume the event
+                    # The turn handler now needs access to the visualizer to force redraws
+                    active_player.handle_turn_logic(self.game, self, self.sounds)
+                    continue
                 # --- END OF FIX ---
 
-                # Let current state handle all other events (mouse, keyboard, etc.)
                 if self.current_state:
                      self.current_state.handle_event(event)
 
             if not running: break
 
-            # ... (Update and Drawing logic remains the same) ...
-            if self.current_state:
-                 self.current_state.update(dt)
+            # Main drawing loop - this still runs every frame for smooth animation and human input
             self.screen.fill(C.COLOR_UI_BG)
             if self.current_state:
                 self.current_state.draw(self.screen)
@@ -573,3 +559,15 @@ class Linie1Visualizer:
 
         # Optional: Draw a thicker border for more emphasis
         pygame.draw.rect(screen, (255, 165, 0), rect, 2)
+
+    def force_redraw(self, message: str = "Processing..."):
+        """Forces an immediate, one-off redraw of the entire screen."""
+        self.screen.fill(C.COLOR_UI_BG)
+        # We need to call the current state's draw method to draw the board, etc.
+        if self.current_state:
+            # We can temporarily override the state's message for the redraw
+            original_message = self.current_state.message
+            self.current_state.message = message
+            self.current_state.draw(self.screen)
+            self.current_state.message = original_message
+        pygame.display.flip()

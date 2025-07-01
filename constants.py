@@ -147,6 +147,11 @@ BUTTON_MARGIN_Y = 10
 COLOR_CONFIRM_BG = (100, 200, 100) # Light green maybe
 
 # AI takes 1 second per move instead of near-instant 2 moves shown on screen
-AI_MOVE_DELAY_MS = 1
+AI_MOVE_DELAY_MS = 500
 AI_ACTION_TIMER_EVENT = pygame.USEREVENT + 1
 START_NEXT_TURN_EVENT = pygame.USEREVENT + 2 # NEW: For triggering the next turn
+
+# --- AI Difficulty Constants ---
+# The higher the number, the more likely an KING AI is to draw a Tree tile.
+# A value of 10 means a Tree tile is 10 times more likely than a non-Tree tile.
+KING_AI_TREE_TILE_BIAS = 10

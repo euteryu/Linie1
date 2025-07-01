@@ -5,28 +5,21 @@ from visualizer import Linie1Visualizer
 if __name__ == '__main__':
     print("Starting Linie 1...")
     try:
-        # --- NEW CONFIGURABLE PLAYER SETUP ---
-        # 'human', 'easy_ai', 'hard_ai'
+        # --- NEW CONFIGURABLE SETUP ---
         
-        # Example 1: One easy AI vs one human
-        player_setup = ['easy_ai', 'human']
-
-        # Example 1: One human vs one easy AI
-        # player_setup = ['human', 'easy_ai']
+        # 1. Define the players and their AI type ('human', 'ai')
+        #    Note: We no longer specify 'easy_ai' or 'hard_ai' strategy here.
+        #          All AIs use the HardStrategy.
+        # player_types = ['ai', 'ai', 'human']
+        player_types = ['ai', 'ai', 'ai', 'ai']
         
-        # Example 2: One easy AI vs one hard AI
-        # player_setup = ['easy_ai', 'hard_ai']
+        # 2. Set the difficulty for the entire game ('king' or 'normal')
+        #    In 'king' mode, all AI players get the drawing advantage.
+        # game_difficulty = 'king' 
+        game_difficulty = 'normal'
 
-        # Example 3: One easy AI vs one easy AI
-        # player_setup = ['easy_ai', 'easy_ai']
-        
-        # Example 4: One hard AI vs one hard AI vs one hard AI vs one hard AI
-        # player_setup = ['hard_ai', 'hard_ai', 'hard_ai', 'hard_ai']
-
-        # Example 5: Two humans
-        # player_setup = ['human', 'human']
-
-        app = Linie1Visualizer(players_config=player_setup)
+        # The Visualizer will handle creating the correct players based on these settings.
+        app = Linie1Visualizer(player_types=player_types, difficulty=game_difficulty)
         app.run()
     except ImportError as e:
          print(f"\nError: A required library is missing.")

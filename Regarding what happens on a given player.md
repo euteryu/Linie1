@@ -1001,3 +1001,33 @@ This approach mimics human expert play: we don't consider placing a tile on ever
 i notice that there really are some cases when all playable tiles on board is filled up and there aren't enough appropriate at-hand tiles on players to make any more move, even with hard ai's combo plays. Here's a possible fun solution I came up with - introducing a trading / banking system where players may expend valuable resources (like steel, labour, money) to buy much-needed tiles, whose prices fluctuate depending on real time circumstances like available resources as turns progress. Or maybe even trading enabled between players? Alliances and factions and even piracy / sabotage to temporarily make certain tile unpassable for number of turns, or resource increases for meeting certain objectives (ideally train themed side quests)?
 
 After all, since this is a train tile themed game, we could set up some convincing lore narrative and thematic features that add fun elements to game beyond mere tile placement strategy as we've done now. Any other features you think might be cool to integrate into the game? And could you advise (without coding just yet) how these new features could nicely integrate, both code patterns / structure / user experience interface wise ?
+
+
+----
+
+You are absolutely right to reject the asynchronous model. It introduced more problems than it solved. My apologies for suggesting a regression. Sticking with the synchronous AI logic is the correct, robust path.
+
+Yes, there is absolutely a way to add a controlled delay to the synchronous AI without reintroducing the fragile event timer. The solution is simple, elegant, and standard in game development: use pygame.time.delay() combined with a screen update.
+The Problem with the Synchronous AI
+
+The reason you don't see the first move or hear its sound is that the AI's handle_turn_logic executes both moves and their associated sound calls within a single frame, faster than the human eye or ear can perceive. The draw() loop only gets to run after the entire turn is over.
+The Solution: "Draw, Delay, Repeat"
+
+We will modify the AI's turn handler to follow this clean, synchronous pattern:
+
+    Plan all moves for the turn.
+
+    Loop through the planned moves:
+    a. Execute the first move and play its sound.
+    b. Force a screen update and redraw right now.
+    c. Pause the game logic for AI_MOVE_DELAY_MS milliseconds.
+    d. Execute the second move and play its sound.
+
+    Confirm the turn.
+
+This guarantees that the result of the AI's first action is drawn to the screen and its sound is played before the second action occurs.
+
+---
+--
+
+also give me current dependency tree between python files for Linie 1. Suggest how better code p

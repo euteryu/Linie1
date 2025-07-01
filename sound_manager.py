@@ -14,9 +14,12 @@ class SoundManager:
         # Define sound paths relative to the assets directory
         self.sound_paths = {
             'click': os.path.join('assets', 'sounds', 'ui', 'click.wav'),
+            'click_hand': os.path.join('assets', 'sounds', 'ui', 'click_at_hand.wav'),
             'place': os.path.join('assets', 'sounds', 'tiles', 'place_tile.wav'),
             'error': os.path.join('assets', 'sounds', 'ui', 'error.wav'),
             'commit': os.path.join('assets', 'sounds', 'ui', 'commit_turn.wav'),
+            'dice_roll': os.path.join('assets', 'sounds', 'driving', 'dice_roll.mp3'),
+            'train_move': os.path.join('assets', 'sounds', 'driving', 'train_move.mp3'),
         }
         self.music_paths = {
             'main_theme': os.path.join('assets', 'sounds', 'music', 'background_theme.wav')

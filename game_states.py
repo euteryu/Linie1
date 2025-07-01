@@ -139,10 +139,16 @@ class LayingTrackState(GameState):
             self._handle_key_down(event, active_player)
 
     def _handle_mouse_down(self, event, active_player):
-        # This method's logic is correct and does not need to change.
         mouse_pos = event.pos
+
+        # --- Board Click Logic ---
         if (C.BOARD_X_OFFSET <= mouse_pos[0] < C.BOARD_X_OFFSET + C.BOARD_DRAW_WIDTH and
             C.BOARD_Y_OFFSET <= mouse_pos[1] < C.BOARD_Y_OFFSET + C.BOARD_DRAW_HEIGHT):
+            
+            # Play the generic board click sound
+            self.visualizer.sounds.play('click')
+            
+            # ... (rest of the board click logic is correct) ...
             grid_r, grid_c = (mouse_pos[1] - C.BOARD_Y_OFFSET) // C.TILE_SIZE + C.PLAYABLE_ROWS[0], \
                              (mouse_pos[0] - C.BOARD_X_OFFSET) // C.TILE_SIZE + C.PLAYABLE_COLS[0]
             self.move_in_progress = None
@@ -154,11 +160,17 @@ class LayingTrackState(GameState):
             if target_tile and (target_tile.is_terminal or not target_tile.tile_type.is_swappable): self.message = "Tile is permanent."; return
             self.move_in_progress = {'coord': (grid_r, grid_c)}
             self.message = f"Selected {self.move_in_progress['coord']}. Click a hand tile."
-            self.visualizer.sounds.play('click') # Play the click sound
             return
+
+        # --- Hand Click Logic ---
         if self.move_in_progress and self.move_in_progress.get('coord'):
             for index, rect in self.current_hand_rects.items():
                 if rect.collidepoint(mouse_pos) and event.button == 1:
+                    # --- THIS IS THE FIX ---
+                    # Play the specific hand click sound
+                    self.visualizer.sounds.play('click_hand')
+                    # --- END OF FIX ---
+                    
                     if any(m['hand_index'] == index for m in self.staged_moves): self.message = "Tile already staged."; return
                     if self.move_in_progress.get('hand_index') == index: self.move_in_progress.pop('hand_index', None); self.move_in_progress.pop('tile_type', None); self.message = f"Deselected hand tile."
                     else: self.move_in_progress['hand_index'] = index; self.move_in_progress['tile_type'] = active_player.hand[index]; self.move_in_progress['orientation'] = 0; self.message = f"Selected hand tile. [R] Rotate, [S] Stage."
@@ -272,15 +284,20 @@ class DrivingState(GameState):
         if self.visualizer.debug_mode and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             for face, rect in self.visualizer.debug_die_rects.items():
                 if rect.collidepoint(event.pos):
+                    self.visualizer.sounds.play('dice_roll')
                     roll_result = face; break
         elif not self.visualizer.debug_mode and event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+            self.visualizer.sounds.play('dice_roll')
             roll_result = self.game.roll_special_die()
         
         if roll_result is not None:
             self.last_roll = roll_result
             self.message = f"Rolled {roll_result}..."
             if not self.game.attempt_driving_move(active_player, roll_result):
+                self.visualizer.sounds.play('error')
                 self.message = "Driving move failed to execute."
+            else:
+                self.visualizer.sounds.play('train_move')
 
     def draw(self, screen):
         self.visualizer.draw_board(screen)

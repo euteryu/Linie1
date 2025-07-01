@@ -20,29 +20,30 @@ from .ai_strategy import EasyStrategy, HardStrategy # Import the strategies
 from constants import (
     TILE_DEFINITIONS, TILE_COUNTS_BASE, TILE_COUNTS_5_PLUS_ADD, HAND_TILE_LIMIT,
     MAX_PLAYER_ACTIONS, DIE_FACES, STOP_SYMBOL, TERMINAL_COORDS, STARTING_HAND_TILES,
-    ROUTE_CARD_VARIANTS, TERMINAL_DATA, START_NEXT_TURN_EVENT
+    ROUTE_CARD_VARIANTS, TERMINAL_DATA, START_NEXT_TURN_EVENT, KING_AI_TREE_TILE_BIAS 
 )
 
 class Game:
-    def __init__(self, players_config: List[str]):
+    def __init__(self, player_types: List[str], difficulty: str = 'normal'):
         """
-        Initializes the game with a flexible player configuration.
-        Example: players_config = ['human', 'easy_ai', 'hard_ai']
+        Initializes the game with a flexible player and difficulty configuration.
         """
-        if not 1 <= len(players_config) <= 6:
+        if not 1 <= len(player_types) <= 6:
             raise ValueError("Total players must be 1-6.")
 
-        self.num_players = len(players_config)
+        self.difficulty = difficulty.lower()
+        print(f"--- Game starting in '{self.difficulty}' mode. ---")
+
+        self.num_players = len(player_types)
         self.players: List[Player] = []
 
         # Create players based on the config list
-        for i, p_type in enumerate(players_config):
+        for i, p_type in enumerate(player_types):
             if p_type.lower() == 'human':
-                self.players.append(HumanPlayer(i))
-            elif p_type.lower() == 'easy_ai':
-                self.players.append(AIPlayer(i, EasyStrategy()))
-            elif p_type.lower() == 'hard_ai':
-                self.players.append(AIPlayer(i, HardStrategy()))
+                self.players.append(HumanPlayer(i, self.difficulty))
+            elif p_type.lower() == 'ai':
+                # All AIs now use HardStrategy. Their difficulty comes from the game mode.
+                self.players.append(AIPlayer(i, HardStrategy(), self.difficulty))
             else:
                 raise ValueError(f"Unknown player type in config: {p_type}")
 
@@ -432,9 +433,38 @@ class Game:
 
 
     def draw_tile(self, player: Player) -> bool:
-        if not self.tile_draw_pile: return False
-        if len(player.hand) >= HAND_TILE_LIMIT: return False
-        player.hand.append(self.tile_draw_pile.pop())
+        """
+        Draws a tile from the draw pile. If the player is an 'KING' mode AI,
+        it has a higher chance of drawing a valuable Tree tile.
+        """
+        if not self.tile_draw_pile:
+            print("Draw pile is empty!")
+            return False
+        if len(player.hand) >= self.HAND_TILE_LIMIT:
+            return False
+
+        # Check for KING Mode AI "cheat"
+        if isinstance(player, AIPlayer) and player.difficulty_mode == 'king':
+            tree_tiles = [t for t in self.tile_draw_pile if t.name.startswith("Tree")]
+            other_tiles = [t for t in self.tile_draw_pile if not t.name.startswith("Tree")]
+
+            # Only apply the bias if there are both tree and other tiles available
+            if tree_tiles and other_tiles:
+                # Create a weighted list for drawing
+                # Each tree tile gets a higher weight
+                weights = ([KING_AI_TREE_TILE_BIAS] * len(tree_tiles)) + ([1] * len(other_tiles))
+                
+                # Choose a tile based on the weights
+                chosen_tile = random.choices(tree_tiles + other_tiles, weights=weights, k=1)[0]
+                
+                print(f"  (KING AI Bonus: Drew '{chosen_tile.name}' with weighted chance)")
+                self.tile_draw_pile.remove(chosen_tile)
+                player.hand.append(chosen_tile)
+                return True
+
+        # --- Normal Draw Logic (for Humans and Normal AIs) ---
+        drawn_tile = self.tile_draw_pile.pop()
+        player.hand.append(drawn_tile)
         return True
 
     def attempt_place_tile(self, player: Player, tile_type: TileType, orientation: int, r: int, c: int) -> bool:
