@@ -1133,3 +1133,34 @@ The Architectural Solution
     AI Forfeit Hook: The AIPlayer will call this new eliminate_player method when its strategy returns no possible actions.
 
     Human Forfeit Hook: A human player can't "prove" they have no moves. Therefore, we will implement the forfeit rule as follows: if a human player tries to end their turn by pressing Enter without staging any moves, the game will perform an exhaustive check. If any legal move was possible, they will be told to make a move. If no moves were possible, they will be eliminated.
+
+----
+----
+---
+
+Part 2: Fixing the Heatmap
+
+The reason you don't see the heatmap is a timing issue. The AI's turn logic (handle_turn_logic) runs to completion within a single frame. It calculates the targets, plans its moves, and finishes before the screen ever gets a chance to redraw with the heatmap data. The heatmap data is calculated and then immediately becomes irrelevant as the turn ends.
+
+You have zeroed in on the two final, critical issues with the AI: the heatmap's failure to display and the persistent performance bottleneck. Your observations are sharp and your reasoning is sound.
+
+Let's break down both problems and provide the definitive solutions.
+1. The Heatmap Problem: A Flaw in the Call Order
+
+You are absolutely correct. The heatmap isn't showing because of the order of operations.
+
+The Current (Flawed) Flow:
+
+    AIPlayer.handle_turn_logic is called.
+
+    It checks visualizer.show_ai_heatmap. Let's say it's True.
+
+    It calls visualizer.force_redraw("AI is targeting squares..."). At this point, visualizer.heatmap_data is still empty from the last turn!
+
+    It then calls self.strategy.plan_turn(...).
+
+    Inside plan_turn, the heatmap_data is finally calculated and set on the visualizer.
+
+    But by then, the redraw has already happened. The data is set too late for the draw call that was meant to show it.
+
+The Solution: We need to separate the "target identification" step from the "planning" step. The AI will first determine its targets, show them to the user, and then proceed with the heavy combinatorial search.

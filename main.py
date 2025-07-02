@@ -10,6 +10,7 @@ if __name__ == '__main__':
         # 1. Define the players and their AI type ('human', 'ai')
         #    Note: We no longer specify 'easy_ai' or 'hard_ai' strategy here.
         #          All AIs use the HardStrategy.
+        # player_types = ['human', 'ai']
         # player_types = ['ai', 'ai', 'human']
         # player_types = ['ai', 'ai', 'ai']
         # player_types = ['ai', 'ai', 'ai', 'ai']

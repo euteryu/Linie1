@@ -54,6 +54,8 @@ class Game:
             else:
                 raise ValueError(f"Unknown player type in config: {p_type}")
             
+        self.visualizer: Optional['Linie1Visualizer'] = None
+            
         self.tile_types = {name: TileType(name=name, **details) for name, details in TILE_DEFINITIONS.items()}
         self.board = Board()
         self.board._initialize_terminals(self.tile_types)

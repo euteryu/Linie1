@@ -121,9 +121,9 @@ class Linie1Visualizer:
             self.tk_root = None
 
         try:
-            # --- THIS IS THE FIX ---
-            # Pass the new configuration to the Game constructor.
             self.game = Game(player_types=player_types, difficulty=difficulty)
+            # Give the game a reference back to the visualizer for forced redraws.
+            self.game.visualizer = self
         except Exception as e:
             print(f"FATAL: Game initialization failed: {e}")
             import traceback
@@ -518,6 +518,21 @@ class Linie1Visualizer:
         pygame.draw.rect(screen, C.COLOR_UI_BUTTON_BG, self.redo_button_rect)
         pygame.draw.rect(screen, C.COLOR_BLACK, self.redo_button_rect, 1)
         self.draw_text(screen, "Redo(Y)", self.redo_button_rect.x + 10, self.redo_button_rect.y + 7, redo_color, size=btn_font_size)
+
+
+        heatmap_btn_bg = C.COLOR_HIGHLIGHT if self.show_ai_heatmap else C.COLOR_UI_BUTTON_BG
+        pygame.draw.rect(screen, heatmap_btn_bg, self.heatmap_button_rect)
+        pygame.draw.rect(screen, C.COLOR_BLACK, self.heatmap_button_rect, 1)
+        
+        heatmap_btn_text = "Heatmap: ON" if self.show_ai_heatmap else "Heatmap: OFF"
+        try:
+             btn_font = pygame.font.SysFont(None, 18)
+        except:
+             btn_font = pygame.font.Font(None, 18) # Fallback
+        btn_surf = btn_font.render(heatmap_btn_text, True, C.COLOR_UI_BUTTON_TEXT)
+        btn_rect = btn_surf.get_rect(center=self.heatmap_button_rect.center)
+        screen.blit(btn_surf, btn_rect)
+
 
         debug_btn_bg = C.COLOR_STOP if self.debug_mode else C.COLOR_UI_BUTTON_BG
         pygame.draw.rect(screen, debug_btn_bg, self.debug_toggle_button_rect)

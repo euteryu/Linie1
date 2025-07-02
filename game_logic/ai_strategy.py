@@ -133,114 +133,84 @@ class EasyStrategy(AIStrategy):
 # --- HARD AI: The new combinatorial planner ---
 class HardStrategy(EasyStrategy):
     """
-    An advanced AI that first identifies high-value squares, then attempts
-    to find the best pair of moves within that limited subset.
-    Falls back to EasyStrategy if no good combinations are found.
+    An advanced AI that prunes a large set of possible moves down to the most
+    promising, then runs a combinatorial search on that small subset.
     """
+    # --- NEW CONSTANT to control the search space size ---
+    # Number of possible single moves = 5 squares * 5 tiles at-hand * 4 orientations = 100
+    # Number of pairs of moves to check = 100C2 = 4950 pairs of moves
+    MAX_TARGETS_FOR_COMBO_SEARCH = 5
+
     def plan_turn(self, game: Game, player: AIPlayer) -> List[Dict]:
         print(f"  (HardStrategy starting... Looking for combo plays)")
         
         ideal_plan = self._calculate_ideal_route(game, player)
         target_squares = self._get_high_value_target_squares(game, player, ideal_plan)
+
+        # --- PRUNING LOGIC ---
+        # If we have too many targets, prune them down to the most promising ones.
+        if len(target_squares) > self.MAX_TARGETS_FOR_COMBO_SEARCH:
+            print(f"  (Pruning {len(target_squares)} targets down to {self.MAX_TARGETS_FOR_COMBO_SEARCH}...)")
+            target_squares = self._prune_targets(game, player, target_squares, ideal_plan)
         
-        if not target_squares:
-            print("  (HardStrategy: No target squares identified. Falling back to Easy.)")
+        # --- Store the final targets for the heatmap view ---
+        # The visualizer can now access this to draw the heatmap.
+        if hasattr(game, 'visualizer') and game.visualizer is not None:
+            game.visualizer.heatmap_data = target_squares
+
+        if len(target_squares) < 2:
+            print("  (HardStrategy: Not enough targets for a combo after pruning. Falling back.)")
             return super().plan_turn(game, player)
 
-        # Get all unique tile types in hand and their available orientations
-        # --- THIS IS THE FIX: The dictionary was incorrectly named in the check ---
-        hand_options_by_tile = {}
+        # ... The rest of the combinatorial search logic from here is the same ...
+        # It will now operate on a much smaller, more relevant set of squares.
+        # ... (no changes to the rest of plan_turn) ...
+        # (The following is the existing correct logic)
+        hand_tile_options = {}
         for tile in player.hand:
-            # Check against the dictionary we are building, not the tile object
-            if tile.name not in hand_options_by_tile:
-                hand_options_by_tile[tile.name] = {
-                    'tile_type': tile,
-                    'orientations': [0, 90, 180, 270]
-                }
-        # --- END OF FIX ---
+            if tile.name not in hand_tile_options:
+                hand_tile_options[tile.name] = {'tile_type': tile, 'orientations': [0, 90, 180, 270]}
         
-        # Generate all possible individual moves based on targets and available tiles/orientations
         possible_moves_for_targets = []
         for r, c in target_squares:
-            # --- THIS IS THE FIX: Iterate over the correctly named dictionary ---
-            for tile_name, options in hand_options_by_tile.items():
-            # --- END OF FIX ---
+            for tile_name, options in hand_tile_options.items():
                 tile = options['tile_type']
                 for o in options['orientations']:
-                    # Check placement validity
-                    is_valid_place, _ = game.check_placement_validity(tile, o, r, c)
-                    if is_valid_place:
-                        possible_moves_for_targets.append({
-                            'type': 'place', 'coord': (r, c), 'tile_type': tile,
-                            'orientation': o, 'is_valid': True
-                        })
-                    # Check exchange validity
-                    if game.board.get_tile(r,c) and game.check_exchange_validity(player, tile, o, r, c):
-                         possible_moves_for_targets.append({
-                            'type': 'exchange', 'coord': (r,c), 'tile_type': tile,
-                            'orientation': o, 'is_valid': True
-                        })
+                    if game.check_placement_validity(tile, o, r, c)[0]:
+                        possible_moves_for_targets.append({'type': 'place', 'coord': (r, c), 'tile_type': tile, 'orientation': o})
+                    if game.board.get_tile(r,c) and game.check_exchange_validity(player, tile, o, r, c)[0]:
+                         possible_moves_for_targets.append({'type': 'exchange', 'coord': (r,c), 'tile_type': tile, 'orientation': o})
         
         if len(possible_moves_for_targets) < 2:
-            print("  (HardStrategy: Not enough valid single moves to form a pair. Falling back to Easy.)")
+            print("  (HardStrategy: Not enough valid single moves for a pair. Falling back.)")
             return super().plan_turn(game, player)
 
         best_combo_score = -1.0
         best_combo_actions = None
 
-        # Iterate through all unique pairs of possible moves.
         for i in range(len(possible_moves_for_targets)):
             for j in range(i + 1, len(possible_moves_for_targets)):
-                move1 = possible_moves_for_targets[i]
-                move2 = possible_moves_for_targets[j]
-
+                move1, move2 = possible_moves_for_targets[i], possible_moves_for_targets[j]
                 if move1['coord'] == move2['coord']: continue
-
-                # Check hand availability for the pair
-                required_tiles = Counter()
-                required_tiles[move1['tile_type']] += 1
-                required_tiles[move2['tile_type']] += 1
+                required_tiles = Counter([move1['tile_type'], move2['tile_type']])
+                if any(count > Counter(player.hand)[tile] for tile, count in required_tiles.items()): continue
                 
-                player_hand_counts = Counter(player.hand)
-                
-                hand_available = True
-                for tile, count_needed in required_tiles.items():
-                    if player_hand_counts.get(tile, 0) < count_needed:
-                        hand_available = False
-                        break
-                if not hand_available: continue
-
-                # Interdependent Validation
-                is_valid1 = False
-                if move1['type'] == 'place':
-                    is_valid1, _ = game.check_placement_validity(move1['tile_type'], move1['orientation'], *move1['coord'], hypothetical_moves=[move2])
-                else: # exchange
-                    is_valid1, _ = game.check_exchange_validity(player, move1['tile_type'], move1['orientation'], *move1['coord'], hypothetical_moves=[move2])
-                
+                is_valid1, _ = game.check_placement_validity(move1['tile_type'], move1['orientation'], *move1['coord'], [move2]) if move1['type'] == 'place' else game.check_exchange_validity(player, move1['tile_type'], move1['orientation'], *move1['coord'], [move2])
                 if not is_valid1: continue
-                
-                is_valid2 = False
-                if move2['type'] == 'place':
-                    is_valid2, _ = game.check_placement_validity(move2['tile_type'], move2['orientation'], *move2['coord'], hypothetical_moves=[move1])
-                else: # exchange
-                    is_valid2, _ = game.check_exchange_validity(player, move2['tile_type'], move2['orientation'], *move2['coord'], hypothetical_moves=[move1])
+                is_valid2, _ = game.check_placement_validity(move2['tile_type'], move2['orientation'], *move2['coord'], [move1]) if move2['type'] == 'place' else game.check_exchange_validity(player, move2['tile_type'], move2['orientation'], *move2['coord'], [move1])
                 
                 if is_valid1 and is_valid2:
-                    # Valid combo found! Score it.
-                    sim_game_for_scoring = game.copy_for_simulation()
-                    sim_player_for_scoring = next(p for p in sim_game_for_scoring.players if p.player_id == player.player_id)
-                    
-                    self._apply_move_to_sim(sim_game_for_scoring, sim_player_for_scoring, move1)
-                    self._apply_move_to_sim(sim_game_for_scoring, sim_player_for_scoring, move2)
-                    
-                    current_combo_score = self._score_board_state(sim_game_for_scoring, sim_player_for_scoring)
-                    
-                    if current_combo_score > best_combo_score:
-                        best_combo_score = current_combo_score
-                        action1 = {'type': move1['type'], 'details': (move1['tile_type'], move1['orientation'], *move1['coord']), 'score': current_combo_score, 'score_breakdown': {'combo': current_combo_score}}
+                    sim_game = game.copy_for_simulation()
+                    sim_player = next(p for p in sim_game.players if p.player_id == player.player_id)
+                    self._apply_move_to_sim(sim_game, sim_player, move1)
+                    self._apply_move_to_sim(sim_game, sim_player, move2)
+                    score = self._score_board_state(sim_game, sim_player)
+                    if score > best_combo_score:
+                        best_combo_score = score
+                        action1 = {'type': move1['type'], 'details': (move1['tile_type'], move1['orientation'], *move1['coord']), 'score': score, 'score_breakdown': {'combo': score}}
                         action2 = {'type': move2['type'], 'details': (move2['tile_type'], move2['orientation'], *move2['coord']), 'score': 0, 'score_breakdown': {}}
                         best_combo_actions = [action1, action2]
-
+        
         if best_combo_actions:
             print("  (HardStrategy: Found a valid combo play!)")
             return best_combo_actions
@@ -248,60 +218,87 @@ class HardStrategy(EasyStrategy):
         print("  (HardStrategy: No valid combo found. Falling back to Easy.)")
         return super().plan_turn(game, player)
 
+    # --- NEW METHOD for pruning targets ---
+    def _prune_targets(self, game: Game, player: Player, targets: Set[Tuple[int, int]], ideal_plan: Optional[List[RouteStep]]) -> Set[Tuple[int, int]]:
+        """Scores and sorts a large set of targets, returning only the best ones."""
+        # Find the player's *next* required stop to aim for.
+        next_goal = None
+        if ideal_plan:
+            for step in ideal_plan:
+                # Find the first goal node that isn't already on the board with a stop sign
+                if step.is_goal_node:
+                    tile = game.board.get_tile(*step.coord)
+                    if not (tile and tile.has_stop_sign):
+                        next_goal = step.coord
+                        break
+        
+        # If no specific goal, just use the center of the board as a generic target
+        if not next_goal:
+            next_goal = (game.board.rows // 2, game.board.cols // 2)
+
+        # Score each target based on Manhattan distance to the next goal
+        scored_targets = []
+        for r, c in targets:
+            distance = abs(r - next_goal[0]) + abs(c - next_goal[1])
+            scored_targets.append((distance, (r, c)))
+        
+        # Sort by score (distance), ascending
+        scored_targets.sort()
+        
+        # Return the coordinates of the top N targets
+        return {coord for _, coord in scored_targets[:self.MAX_TARGETS_FOR_COMBO_SEARCH]}
+
     def _get_high_value_target_squares(self, game: Game, player: Player, ideal_plan: Optional[List[RouteStep]]) -> Set[Tuple[int, int]]:
         """
-        Identifies a small set of the most important squares to consider for moves.
-        This is crucial for making Hard AI efficient.
+        Identifies a small, highly relevant set of squares for the AI to consider,
+        preventing combinatorial explosion and performance issues.
         """
         targets: Set[Tuple[int, int]] = set()
         
-        # 1. Add squares from the ideal path that are currently empty on the REAL board.
+        # --- Priority 1: Squares on the ideal path ---
         if ideal_plan:
             for step in ideal_plan:
                 r, c = step.coord
                 if not game.board.get_tile(r, c) and game.board.is_playable_coordinate(r, c):
-                    targets.add((r,c))
+                    targets.add((r, c))
         
-        # 2. Add squares adjacent to required, un-stopped buildings.
+        # --- Priority 2: Squares to create necessary stop signs ---
         if player.route_card:
             for building_id in player.route_card.stops:
-                # Check if this stop hasn't been achieved yet.
                 if building_id not in game.board.buildings_with_stops:
-                    # --- THIS IS THE FIX ---
-                    # Get the building's actual coordinate, not its non-existent stop location.
                     building_coord = game.board.building_coords.get(building_id)
-                    # --- END OF FIX ---
                     if building_coord:
-                        # Add all empty, playable squares adjacent to this building.
                         for d in Direction:
                             nr, nc = building_coord[0] + d.value[0], building_coord[1] + d.value[1]
                             if game.board.is_playable_coordinate(nr, nc) and not game.board.get_tile(nr, nc):
                                 targets.add((nr, nc))
         
-        # 3. Add squares adjacent to the AI's terminals.
-        if player.line_card:
-            for term_coord in game.get_terminal_coords(player.line_card.line_number):
-                if term_coord:
-                    for d in Direction:
-                        nr, nc = term_coord[0] + d.value[0], term_coord[1] + d.value[1]
+        # --- Priority 3 (Fallback): Extend existing track segments ---
+        # This is a much better fallback than checking every adjacent square.
+        # It only runs if the first two priority checks found nothing.
+        if not targets:
+            print("  (Fallback: Looking for open track ends to extend...)")
+            for r_idx in range(game.board.rows):
+                for c_idx in range(game.board.cols):
+                    tile = game.board.get_tile(r_idx, c_idx)
+                    if not tile: continue
+                    
+                    # Check the connections of this tile
+                    conns = game.get_effective_connections(tile.tile_type, tile.orientation)
+                    all_exits = {exit for exits in conns.values() for exit in exits}
+                    
+                    for exit_dir_str in all_exits:
+                        exit_dir = Direction.from_str(exit_dir_str)
+                        nr, nc = r_idx + exit_dir.value[0], c_idx + exit_dir.value[1]
+                        
+                        # If a track points to an empty, playable square, it's a high-value target.
                         if game.board.is_playable_coordinate(nr, nc) and not game.board.get_tile(nr, nc):
                             targets.add((nr, nc))
-
-        # 4. As a last resort, if still no targets, check adjacent to ANY existing tile.
-        # This prevents the AI from getting stuck when its ideal path is blocked far away.
-        if not targets:
-            for r in range(game.board.rows):
-                for c in range(game.board.cols):
-                    if game.board.get_tile(r, c):
-                        for d in Direction:
-                            nr, nc = r + d.value[0], c + d.value[1]
-                            if game.board.is_playable_coordinate(nr, nc) and not game.board.get_tile(nr, nc):
-                                targets.add((nr, nc))
-        
+                            
         print(f"  (HardStrategy identified {len(targets)} high-value squares)")
         return targets
     
-    
+
     def _score_board_state(self, game: Game, player: Player) -> float:
         score = 0.0
         ideal_plan = self._calculate_ideal_route(game, player)
