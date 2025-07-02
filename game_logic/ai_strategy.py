@@ -251,7 +251,7 @@ class HardStrategy(EasyStrategy):
     def _get_high_value_target_squares(self, game: Game, player: Player, ideal_plan: Optional[List[RouteStep]]) -> Set[Tuple[int, int]]:
         """
         Identifies a small set of the most important squares to consider for moves.
-        This is crucial for making Hard AI efficient and preventing combinatorial explosion.
+        This is crucial for making Hard AI efficient.
         """
         targets: Set[Tuple[int, int]] = set()
         
@@ -265,38 +265,42 @@ class HardStrategy(EasyStrategy):
         # 2. Add squares adjacent to required, un-stopped buildings.
         if player.route_card:
             for building_id in player.route_card.stops:
+                # Check if this stop hasn't been achieved yet.
                 if building_id not in game.board.buildings_with_stops:
-                    # --- This was a bug in previous version, it should check building_coords ---
+                    # --- THIS IS THE FIX ---
+                    # Get the building's actual coordinate, not its non-existent stop location.
                     building_coord = game.board.building_coords.get(building_id)
+                    # --- END OF FIX ---
                     if building_coord:
+                        # Add all empty, playable squares adjacent to this building.
                         for d in Direction:
                             nr, nc = building_coord[0] + d.value[0], building_coord[1] + d.value[1]
                             if game.board.is_playable_coordinate(nr, nc) and not game.board.get_tile(nr, nc):
                                 targets.add((nr, nc))
         
-        # 3. Add squares adjacent to terminals as a fallback.
+        # 3. Add squares adjacent to the AI's terminals.
         if player.line_card:
             for term_coord in game.get_terminal_coords(player.line_card.line_number):
                 if term_coord:
                     for d in Direction:
                         nr, nc = term_coord[0] + d.value[0], term_coord[1] + d.value[1]
-                        # --- THIS IS THE FIX ---
-                        # Corrected from game.game.board to game.board
                         if game.board.is_playable_coordinate(nr, nc) and not game.board.get_tile(nr, nc):
                             targets.add((nr, nc))
-                        # --- END OF FIX ---
 
-        # 4. If no strategic squares are found, add a few central fallback squares.
+        # 4. As a last resort, if still no targets, check adjacent to ANY existing tile.
+        # This prevents the AI from getting stuck when its ideal path is blocked far away.
         if not targets:
-            center_r, center_c = game.board.rows // 2, game.board.cols // 2
-            for dr in [-1, 0, 1]:
-                for dc in [-1, 0, 1]:
-                    nr, nc = center_r + dr, center_c + dc
-                    if game.board.is_playable_coordinate(nr, nc) and not game.board.get_tile(nr, nc):
-                        targets.add((nr, nc))
+            for r in range(game.board.rows):
+                for c in range(game.board.cols):
+                    if game.board.get_tile(r, c):
+                        for d in Direction:
+                            nr, nc = r + d.value[0], c + d.value[1]
+                            if game.board.is_playable_coordinate(nr, nc) and not game.board.get_tile(nr, nc):
+                                targets.add((nr, nc))
         
         print(f"  (HardStrategy identified {len(targets)} high-value squares)")
         return targets
+    
     
     def _score_board_state(self, game: Game, player: Player) -> float:
         score = 0.0

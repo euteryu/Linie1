@@ -164,6 +164,36 @@ class Linie1Visualizer:
         self.sounds.load_sounds()
         self.sounds.play_music('main_theme')
 
+        self.show_ai_heatmap = False
+        self.heatmap_data: Set[Tuple[int, int]] = set() # To store squares to highlight
+        # --- NEW Heatmap Toggle Button ---
+        btn_w, btn_h, btn_s = C.BUTTON_WIDTH, C.BUTTON_HEIGHT, C.BUTTON_SPACING
+        # Place it below the other buttons
+        heatmap_btn_y = self.redo_button_rect.y - btn_h - btn_s 
+        heatmap_btn_x = self.save_button_rect.x
+        self.heatmap_button_rect = pygame.Rect(heatmap_btn_x, heatmap_btn_y, btn_w * 2 + btn_s, btn_h)
+
+    def draw_ai_heatmap(self, screen):
+        """Draws a visual highlight over the squares the AI is considering."""
+        if not self.show_ai_heatmap or not self.heatmap_data:
+            return
+
+        highlight_color = (0, 255, 255, 90) # Cyan, semi-transparent
+        border_color = (0, 200, 200)
+
+        for r, c in self.heatmap_data:
+            if not self.game.board.is_valid_coordinate(r, c): continue
+            
+            screen_x = C.BOARD_X_OFFSET + (c - C.PLAYABLE_COLS[0]) * self.TILE_SIZE
+            screen_y = C.BOARD_Y_OFFSET + (r - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE
+            rect = pygame.Rect(screen_x, screen_y, self.TILE_SIZE, self.TILE_SIZE)
+            
+            temp_surf = pygame.Surface(rect.size, pygame.SRCALPHA)
+            temp_surf.fill(highlight_color)
+            screen.blit(temp_surf, rect.topleft)
+            pygame.draw.rect(screen, border_color, rect, 2)
+
+
     def _create_debug_tile_surfaces(self) -> Dict[str, pygame.Surface]:
         return {ttype.name: create_tile_surface(ttype, C.DEBUG_TILE_SIZE) for ttype in self.debug_tile_types}
 
@@ -227,6 +257,7 @@ class Linie1Visualizer:
             self.screen.fill(C.COLOR_UI_BG)
             if self.current_state:
                 self.current_state.draw(self.screen)
+                self.draw_ai_heatmap(self.screen)
             else:
                  self.draw_text(self.screen, "Error: Invalid State", 10, 10, C.COLOR_STOP)
             pygame.display.flip()

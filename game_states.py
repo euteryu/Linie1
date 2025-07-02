@@ -53,6 +53,9 @@ class GameState:
         elif self.visualizer.debug_toggle_button_rect.collidepoint(mouse_pos):
             self.toggle_debug_action()
             handled = True
+        elif self.visualizer.heatmap_button_rect.collidepoint(mouse_pos):
+            self.toggle_heatmap_action()
+            handled = True
         return handled
 
     def save_game_action(self):
@@ -99,6 +102,25 @@ class GameState:
          mode_str = "ON" if self.visualizer.debug_mode else "OFF"
          self.set_message(f"Debug Mode {mode_str}")
          if hasattr(self, 'staged_moves'): self.staged_moves = []
+
+    def toggle_heatmap_action(self):
+        self.visualizer.show_ai_heatmap = not self.visualizer.show_ai_heatmap
+        if self.visualizer.show_ai_heatmap:
+            # When turning on, immediately calculate and store the heatmap data
+            # for the current active player if they are an AI.
+            active_player = self.game.get_active_player()
+            if isinstance(active_player, AIPlayer):
+                # We need a way to get the targets without running the whole plan.
+                # Let's assume the strategy object is accessible.
+                ideal_plan = active_player.strategy._calculate_ideal_route(self.game, active_player)
+                self.visualizer.heatmap_data = active_player.strategy._get_high_value_target_squares(self.game, active_player, ideal_plan)
+                self.set_message(f"AI Heatmap ON ({len(self.visualizer.heatmap_data)} targets)")
+            else:
+                self.set_message("Heatmap only for AI players.")
+                self.visualizer.heatmap_data = set()
+        else:
+            self.set_message("AI Heatmap OFF.")
+            self.visualizer.heatmap_data = set() # Clear data when turning off
 
     def set_message(self, msg: str):
         if hasattr(self, 'message'): self.message = msg
