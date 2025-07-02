@@ -177,7 +177,7 @@ class AIPlayer(Player):
                 # If the plan has less than 2 moves, the AI cannot take a full turn and is eliminated.
                 print(f"--- AI Player {self.player_id} could only find {len(planned_actions)}/{game.MAX_PLAYER_ACTIONS} moves. Forfeiting turn. ---")
                 if sounds: 
-                    sounds.play('error')
+                    sounds.play('eliminated')
                 game.eliminate_player(self)
             else:
                 # The plan is valid, execute the moves with delays.
@@ -192,7 +192,7 @@ class AIPlayer(Player):
                 print(f"--- AI Player {self.player_id} ends its turn. ---")
                 # Don't play commit sound if eliminated.
                 if self.player_state != PlayerState.ELIMINATED and sounds:
-                    sounds.play('eliminated')
+                    sounds.play('commit')
                 game.confirm_turn()
 
     def _execute_action(self, game: 'Game', move: Dict, sounds: Optional['SoundManager']):

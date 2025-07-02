@@ -1010,57 +1010,16 @@ class Game:
     def eliminate_player(self, player: Player):
         """Eliminates a player from the game, returning their tiles to the deck."""
         if player.player_state == PlayerState.ELIMINATED:
-            return # Already eliminated
+            return
 
         print(f"--- Player {player.player_id} has no more legal moves and is ELIMINATED! ---")
         player.player_state = PlayerState.ELIMINATED
         
-        # Return their hand tiles to the draw pile
         if player.hand:
             print(f"  Returning {len(player.hand)} tiles to the draw pile.")
             self.tile_draw_pile.extend(player.hand)
             player.hand = []
             random.shuffle(self.tile_draw_pile)
-
-        # Check if this elimination ends the game
-        self._check_elimination_win_condition()
-
-    def _check_elimination_win_condition(self):
-        """
-        Checks for a win condition after a player is eliminated.
-        A "last player standing" win is only granted if that player is
-        already in the DRIVING phase.
-        """
-        # Find all players who are not yet finished or eliminated.
-        active_players = [p for p in self.players if p.player_state not in [PlayerState.ELIMINATED, PlayerState.FINISHED]]
-        
-        # Scenario 1: Only one active player remains.
-        if len(active_players) == 1 and self.num_players > 1:
-            last_player = active_players[0]
-            
-            # --- THE NEW, REFINED RULE ---
-            if last_player.player_state == PlayerState.DRIVING:
-                # If the last player has already built their route, they win.
-                print(f"--- Last Player Standing! Player {last_player.player_id} was already driving and wins by default! ---")
-                self.game_phase = GamePhase.GAME_OVER
-                self.winner = last_player
-                last_player.player_state = PlayerState.FINISHED
-            else:
-                # If the last player is also stuck laying track, it's a draw.
-                print(f"--- Last Player Standing (Player {last_player.player_id}) is also stuck laying track. The game is a DRAW! ---")
-                self.game_phase = GamePhase.GAME_OVER
-                self.winner = None # No winner
-                # We can also mark the last player as eliminated for consistency.
-                last_player.player_state = PlayerState.ELIMINATED
-            # --- END OF REFINED RULE ---
-
-        # Scenario 2: No active players remain.
-        elif len(active_players) == 0:
-            # This can happen if the last two players get eliminated simultaneously
-            # (e.g., in a 2-player game where both are stuck).
-            print("--- All players have been eliminated! The game is a DRAW. ---")
-            self.game_phase = GamePhase.GAME_OVER
-            self.winner = None # No winner
 
     # --- NEW: Exhaustive check for human players ---
     def can_player_make_any_move(self, player: Player) -> bool:
@@ -1087,39 +1046,63 @@ class Game:
 
     def confirm_turn(self) -> bool:
         """
-        Finalizes the current player's turn, draws tiles, advances to the next player
-        (skipping eliminated ones), and triggers the start of their turn.
+        Finalizes a turn. Also checks for game-ending conditions related to
+        player elimination.
         """
         active_p = self.get_active_player()
         if self.game_phase == GamePhase.GAME_OVER: return False
 
-        # --- Forfeit check for Human Players ---
         if isinstance(active_p, HumanPlayer) and active_p.player_state == PlayerState.LAYING_TRACK:
-            # If a human tries to end turn with 0 actions, check if they *could* have moved.
             if self.actions_taken_this_turn == 0:
                 if self.can_player_make_any_move(active_p):
-                    # They had moves but chose to pass; this is not allowed.
-                    # The UI state will need to show a message based on this False return.
-                    print(f"--- Player {active_p.player_id} attempted to pass with valid moves available. Turn not confirmed. ---")
+                    print(f"--- Player {active_p.player_id} attempted to pass with valid moves. Turn not confirmed. ---")
                     return False
                 else:
-                    # They had no moves and tried to pass. This triggers elimination.
                     self.eliminate_player(active_p)
-                    # The game may have ended, so we check again.
-                    if self.game_phase == GamePhase.GAME_OVER: return True
-
+        
         # Draw tiles for players who are still laying track
         if active_p.player_state == PlayerState.LAYING_TRACK:
             for _ in range(min(self.HAND_TILE_LIMIT - len(active_p.hand), self.MAX_PLAYER_ACTIONS)):
                 self.draw_tile(active_p)
+
+        # --- THIS IS THE NEW, CORRECT LOGIC ---
+        # After the current player's turn is fully resolved (including potential elimination),
+        # we check the state of the game *before* advancing to the next player.
         
-        # --- Advance to the next non-eliminated player ---
-        # This loop will safely skip any number of eliminated players.
+        active_players = [p for p in self.players if p.player_state not in [PlayerState.ELIMINATED, PlayerState.FINISHED]]
+        
+        # Scenario 1: Only one player is left in the game.
+        if len(active_players) == 1:
+            last_player = active_players[0]
+            # If this last player is already driving, they win immediately.
+            if last_player.player_state == PlayerState.DRIVING:
+                print(f"--- Last Player Standing! Player {last_player.player_id} was already driving and wins by default! ---")
+                self.game_phase = GamePhase.GAME_OVER
+                self.winner = last_player
+                last_player.player_state = PlayerState.FINISHED
+                return True # End the game
+            # If the last player is the one who was just eliminated, it's a draw.
+            elif last_player.player_state == PlayerState.ELIMINATED:
+                 print(f"--- All players have been eliminated! The game is a DRAW. ---")
+                 self.game_phase = GamePhase.GAME_OVER
+                 self.winner = None
+                 return True # End the game
+            # Otherwise, the game continues with just this one player.
+        
+        # Scenario 2: No players are left.
+        elif len(active_players) == 0:
+            print(f"--- All players have been eliminated! The game is a DRAW. ---")
+            self.game_phase = GamePhase.GAME_OVER
+            self.winner = None
+            return True # End the game
+        # --- END OF NEW LOGIC ---
+
+        # If the game is not over, advance to the next non-eliminated player.
         num_checked = 0
         while num_checked < self.num_players:
             self.active_player_index = (self.active_player_index + 1) % self.num_players
             if self.get_active_player().player_state != PlayerState.ELIMINATED:
-                break # Found the next active player
+                break
             num_checked += 1
         
         if self.active_player_index == 0: self.current_turn += 1
