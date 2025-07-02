@@ -16,11 +16,11 @@ if __name__ == '__main__':
              mod_manager.activate_mod("lucky_draws")
         # --- END OF FIX ---
 
-        player_types = ['human', 'ai']
+        # player_types = ['human', 'ai']
         # player_types = ['human', 'ai', 'ai']
         # player_types = ['ai', 'ai', 'human']
         # player_types = ['ai', 'ai', 'ai']
-        # player_types = ['ai', 'ai', 'ai', 'ai']
+        player_types = ['ai', 'ai', 'ai', 'ai']
         # player_types = ['ai', 'ai', 'ai', 'ai', 'ai']
         # player_types = ['ai', 'ai', 'ai', 'ai', 'ai', 'ai']
 

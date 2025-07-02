@@ -19,6 +19,9 @@ from .commands import Command, PlaceTileCommand, ExchangeTileCommand, MoveComman
 from .pathfinding import AStarPathfinder, BFSPathfinder
 from .ai_strategy import EasyStrategy, HardStrategy # Import the strategies
 
+from .rule_engine import RuleEngine
+from .turn_manager import TurnManager
+
 import constants as C
 
 from constants import (
@@ -39,10 +42,7 @@ class Game:
 
         self.num_players = len(player_types)
         
-        # --- THIS IS THE FIX ---
-        # Initialize self.players as an empty list BEFORE trying to append to it.
         self.players: List[Player] = [] 
-        # --- END OF FIX ---
 
         self.difficulty = difficulty.lower()
         print(f"--- Game starting in '{self.difficulty}' mode. ---")
@@ -57,6 +57,9 @@ class Game:
             else:
                 raise ValueError(f"Unknown player type in config: {p_type}")
             
+        self.rule_engine = RuleEngine()
+        self.turn_manager = TurnManager()
+
         self.mod_manager = mod_manager
 
         self.visualizer: Optional['Linie1Visualizer'] = None
@@ -81,35 +84,30 @@ class Game:
         self.setup_game()
 
     def setup_game(self):
-        """Initializes piles, deals starting hands and cards for a new game."""
-        if self.game_phase != GamePhase.SETUP:
-            print("Warning: setup_game called on an already started game. Resetting.")
-        
-        print("--- Starting Game Setup ---")
+        """
+        Initializes piles, deals cards, and posts an event to kick off the
+        first turn if the starting player is an AI.
+        """
+        self.mod_manager.on_game_setup(self)
+
         self._create_tile_and_line_piles()
         self._deal_starting_hands()
         self._deal_player_cards()
         
-        self.mod_manager.on_game_setup(self) # Call mod hook here
-
         self.game_phase = GamePhase.LAYING_TRACK
         self.active_player_index = 0
         self.current_turn = 1
         self.actions_taken_this_turn = 0
         self.command_history.clear()
-        print("--- Setup Complete ---")
-
-        # --- THIS IS THE FIX ---
-        # After setup is complete, check if the first player is an AI.
-        # If so, we must manually trigger their turn to start the game, as there
-        # will be no human input to get the event loop rolling.
+        
         first_player = self.get_active_player()
+        # --- THIS IS THE FIX ---
+        # We simply post the generic START_NEXT_TURN_EVENT.
+        # The visualizer's main loop is responsible for handling this event
+        # and calling the turn logic with the correct arguments.
         if isinstance(first_player, AIPlayer):
-            print(f"--- Game initiated by AI Player {first_player.player_id}. Kicking off turn... ---")
-            # This is the proactive call that was missing.
-            first_player.handle_turn_logic(self)
+             pygame.event.post(pygame.event.Event(START_NEXT_TURN_EVENT))
         # --- END OF FIX ---
-
 
     def _calculate_ai_ideal_route(self, player: AIPlayer) -> Optional[List[RouteStep]]:
         """Calculates the AI's 'wet dream' path assuming infinite tiles."""
@@ -323,108 +321,11 @@ class Game:
         # If not found in staged moves, check the real board
         return self.board.get_tile(r, c)
 
-    # --- Modify the signature and logic of the validation functions ---
     def check_placement_validity(self, tile_type: TileType, orientation: int, r: int, c: int, hypothetical_moves: Optional[List[Dict]] = None) -> Tuple[bool, str]:
-        """
-        A definitive, correct, and final validation function that correctly
-        handles all neighbor types: existing tiles, empty playable squares,
-        buildings, and walls.
-        """
-        # 1. Basic check on the target square itself.
-        if not self.board.is_playable_coordinate(r, c) or self.board.get_tile(r, c) or self.board.get_building_at(r, c):
-            return False, "Target square is not empty and playable."
-
-        new_connections = self.get_effective_connections(tile_type, orientation)
-
-        # 2. Loop through all four directions (N, E, S, W).
-        for direction in Direction:
-            # A. Does our new tile have a track pointing in this `direction`?
-            has_outgoing_track = any(direction.name in exits for exits in new_connections.values())
-            
-            # B. Get information about the neighbor.
-            nr, nc = r + direction.value[0], c + direction.value[1]
-            neighbor_tile = self._get_hypothetical_tile(nr, nc, hypothetical_moves)
-            
-            if neighbor_tile:
-                # --- CASE 1: The neighbor is an existing tile. ---
-                neighbor_connections = self.get_effective_connections(neighbor_tile.tile_type, neighbor_tile.orientation)
-                required_neighbor_exit = Direction.opposite(direction).name
-                neighbor_has_incoming_track = any(required_neighbor_exit in exits for exits in neighbor_connections.values())
-                
-                # The connection is valid ONLY if both have a track or neither has a track.
-                if has_outgoing_track != neighbor_has_incoming_track:
-                    return False, f"Connection mismatch with existing tile at ({nr},{nc})."
-            
-            else:
-                # --- CASE 2: The neighbor is an empty space. ---
-                # If our new tile has a track pointing out, that empty space cannot be a wall or a building.
-                if has_outgoing_track:
-                    if not self.board.is_playable_coordinate(nr, nc):
-                        return False, f"Cannot have a track pointing into a wall at ({nr},{nc})."
-                    if self.board.get_building_at(nr, nc):
-                        return False, f"Cannot have a track pointing into a building at ({nr},{nc})."
-        
-        # If we looped through all 4 neighbors and found no illegal conditions, the placement is valid.
-        return True, "Placement is valid."
-
-
+        return self.rule_engine.check_placement_validity(self, tile_type, orientation, r, c, hypothetical_moves)
+    
     def check_exchange_validity(self, player: Player, new_tile_type: TileType, new_orientation: int, r: int, c: int, hypothetical_moves: Optional[List[Dict]] = None) -> Tuple[bool, str]:
-        """
-        A definitive, robust validation for exchanging a tile, correctly
-        implementing all preservation and new-connection rules.
-        """
-        # --- Step 1 & 2: Basic Eligibility and Resource Checks ---
-        old_tile = self.board.get_tile(r, c)
-        if not old_tile: return False, "No tile to exchange."
-        if not old_tile.tile_type.is_swappable: return False, "Tile is not swappable."
-        if old_tile.has_stop_sign: return False, "Cannot exchange a Stop Sign tile."
-        if old_tile.is_terminal: return False, "Cannot exchange a Terminal tile."
-        if new_tile_type not in player.hand: return False, "Player does not have tile in hand."
-        if old_tile.tile_type == new_tile_type: return False, "Cannot replace a tile with the same type."
-
-        old_conns = self.get_effective_connections(old_tile.tile_type, old_tile.orientation)
-        new_conns = self.get_effective_connections(new_tile_type, new_orientation)
-
-        # Helper to get all unique connections as a set of frozensets
-        def get_connection_set(conn_map: Dict[str, List[str]]) -> set:
-            return {frozenset([entry, exit]) for entry, exits in conn_map.items() for exit in exits}
-
-        old_conn_set = get_connection_set(old_conns)
-        new_conn_set = get_connection_set(new_conns)
-
-        # --- Step 3: Connection Preservation Check ---
-        if not old_conn_set.issubset(new_conn_set):
-            return False, f"Connection Preservation Failed. New tile does not have all connections of the old tile."
-
-        # --- Step 4: New Connection Validity Check ---
-        added_connections = new_conn_set - old_conn_set
-        
-        for conn_pair in added_connections:
-            # For each new connection, we must validate that it's being placed legally.
-            # We can check this by treating each end of the connection as an "outgoing" track.
-            dir1_str, dir2_str = list(conn_pair)
-            
-            for exit_dir_str in [dir1_str, dir2_str]:
-                exit_dir_enum = Direction.from_str(exit_dir_str)
-                nr, nc = r + exit_dir_enum.value[0], c + exit_dir_enum.value[1]
-                
-                # neighbor_tile = self.board.get_tile(nr, nc)
-                neighbor_tile = self._get_hypothetical_tile(nr, nc, hypothetical_moves)
-                
-                if neighbor_tile:
-                    # If the neighbor is a tile, it MUST connect back.
-                    neighbor_conns = self.get_effective_connections(neighbor_tile.tile_type, neighbor_tile.orientation)
-                    required_neighbor_exit = Direction.opposite(exit_dir_enum).name
-                    if not any(required_neighbor_exit in exits for exits in neighbor_conns.values()):
-                        return False, f"New connection towards ({nr},{nc}) is invalid; neighbor does not connect back."
-                else:
-                    # If the neighbor is empty, it cannot be a wall or building.
-                    if not self.board.is_playable_coordinate(nr, nc):
-                        return False, f"New connection points into a wall at ({nr},{nc})."
-                    if self.board.get_building_at(nr, nc):
-                        return False, f"New connection points into a building at ({nr},{nc})."
-
-        return True, "Exchange is valid."
+        return self.rule_engine.check_exchange_validity(self, player, new_tile_type, new_orientation, r, c, hypothetical_moves)
 
 
 
@@ -500,16 +401,9 @@ class Game:
         return True
 
     def attempt_place_tile(self, player: Player, tile_type: TileType, orientation: int, r: int, c: int) -> bool:
-        """ Creates and executes a PlaceTileCommand AFTER validation. """
         if self.actions_taken_this_turn >= self.MAX_PLAYER_ACTIONS: return False
-        
-        # --- ADDED DEBUG PRINT ---
-        is_valid, reason = self.check_placement_validity(tile_type, orientation, r, c)
-        print(f"--- [GAME] Checking place validity... Result: {is_valid} (Reason: {reason}) ---")
-        
-        if not is_valid:
-            return False
-
+        is_valid, _ = self.check_placement_validity(tile_type, orientation, r, c)
+        if not is_valid: return False
         command = PlaceTileCommand(self, player, tile_type, orientation, r, c)
         if self.command_history.execute_command(command):
             self.actions_taken_this_turn += 1
@@ -517,16 +411,9 @@ class Game:
         return False
 
     def attempt_exchange_tile(self, player: Player, new_tile_type: TileType, new_orientation: int, r: int, c: int) -> bool:
-        """ Creates and executes an ExchangeTileCommand AFTER validation. """
         if self.actions_taken_this_turn >= self.MAX_PLAYER_ACTIONS: return False
-        
-        # --- ADDED DEBUG PRINT ---
-        is_valid, reason = self.check_exchange_validity(player, new_tile_type, new_orientation, r, c)
-        print(f"--- [GAME] Checking exchange validity... Result: {is_valid} (Reason: {reason}) ---")
-
-        if not is_valid:
-            return False
-
+        is_valid, _ = self.check_exchange_validity(player, new_tile_type, new_orientation, r, c)
+        if not is_valid: return False
         command = ExchangeTileCommand(self, player, new_tile_type, new_orientation, r, c)
         if self.command_history.execute_command(command):
             self.actions_taken_this_turn += 1
@@ -833,22 +720,7 @@ class Game:
 
 
     def check_win_condition(self, player: Player) -> bool:
-        if player.player_state != PlayerState.DRIVING: return False
-        if not player.streetcar_position or not player.line_card: return False
-        
-        # Win condition: player has passed all required nodes
-        full_sequence = player.get_full_driving_sequence(self)
-        if not full_sequence: return False
-        
-        if player.required_node_index >= len(full_sequence):
-             # And is at the final destination
-            if player.streetcar_position == full_sequence[-1]:
-                print(f"WIN CONDITION MET for Player {player.player_id}!")
-                self.game_phase = GamePhase.GAME_OVER
-                self.winner = player
-                player.player_state = PlayerState.FINISHED
-                return True
-        return False
+        return self.rule_engine.check_win_condition(self, player)
 
 
     def _find_sequential_goal_path(self, player: Player, full_node_sequence: List[Tuple[int, int]]) -> Tuple[Optional[List[RouteStep]], int]:
@@ -1068,93 +940,7 @@ class Game:
 
 
     def confirm_turn(self) -> bool:
-        """
-        Finalizes a turn. Also checks for game-ending conditions related to
-        player elimination.
-        """
-        active_p = self.get_active_player()
-        if self.game_phase == GamePhase.GAME_OVER: 
-            return False
-
-        # --- NEW HOOK ---
-        self.mod_manager.on_player_turn_start(self, active_p) # Before turn begins logic
-        # --- END NEW ---
-
-        if isinstance(active_p, HumanPlayer) and active_p.player_state == PlayerState.LAYING_TRACK:
-            if self.actions_taken_this_turn == 0:
-                if self.can_player_make_any_move(active_p):
-                    print(f"--- Player {active_p.player_id} attempted to pass with valid moves. Turn not confirmed. ---")
-                    return False
-                else:
-                    self.eliminate_player(active_p)
-        
-        # Draw tiles for players who are still laying track
-        if active_p.player_state == PlayerState.LAYING_TRACK:
-            for _ in range(min(self.HAND_TILE_LIMIT - len(active_p.hand), self.MAX_PLAYER_ACTIONS)):
-                self.draw_tile(active_p)
-
-        # --- THIS IS THE NEW, CORRECT LOGIC ---
-        # After the current player's turn is fully resolved (including potential elimination),
-        # we check the state of the game *before* advancing to the next player.
-        
-        active_players = [p for p in self.players if p.player_state not in [PlayerState.ELIMINATED, PlayerState.FINISHED]]
-        
-        # Scenario 1: Only one player is left in the game.
-        if len(active_players) == 1:
-            last_player = active_players[0]
-            # If this last player is already driving, they win immediately.
-            if last_player.player_state == PlayerState.DRIVING:
-                print(f"--- Last Player Standing! Player {last_player.player_id} was already driving and wins by default! ---")
-                self.game_phase = GamePhase.GAME_OVER
-                self.winner = last_player
-                last_player.player_state = PlayerState.FINISHED
-                return True # End the game
-            # If the last player is the one who was just eliminated, it's a draw.
-            elif last_player.player_state == PlayerState.ELIMINATED:
-                 print(f"--- All players have been eliminated! The game is a DRAW. ---")
-                 self.game_phase = GamePhase.GAME_OVER
-                 self.winner = None
-                 return True # End the game
-            # Otherwise, the game continues with just this one player.
-        
-        # Scenario 2: No players are left.
-        elif len(active_players) == 0:
-            print(f"--- All players have been eliminated! The game is a DRAW. ---")
-            self.game_phase = GamePhase.GAME_OVER
-            self.winner = None
-            return True # End the game
-        # --- END OF NEW LOGIC ---
-
-        # If the game is not over, advance to the next non-eliminated player.
-        num_checked = 0
-        while num_checked < self.num_players:
-            self.active_player_index = (self.active_player_index + 1) % self.num_players
-            if self.get_active_player().player_state != PlayerState.ELIMINATED:
-                break
-            num_checked += 1
-        
-        if self.active_player_index == 0: self.current_turn += 1
-        self.actions_taken_this_turn = 0
-        self.command_history.clear_redo_history()
-        
-        next_p = self.get_active_player()
-        print(f"\n--- Starting Turn {self.current_turn} for Player {next_p.player_id} ({next_p.player_state.name}) ---")
-
-        if next_p.player_state == PlayerState.LAYING_TRACK:
-            is_complete, start, path = self.check_player_route_completion(next_p)
-            if is_complete and start and path:
-                self.handle_route_completion(next_p, start, path)
-
-        # --- NEW HOOKS ---
-        # Call on_player_turn_end for the player who just finished
-        self.mod_manager.on_player_turn_end(self, active_p)
-        # Call on_player_turn_start for the next player
-        self.mod_manager.on_player_turn_start(self, next_p)
-        # --- END NEW ---
-        
-        pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT))
-        
-        return True
+        return self.turn_manager.confirm_turn(self)
 
 
     def save_game(self, filename: str) -> bool:
@@ -1205,18 +991,25 @@ class Game:
     def copy_for_simulation(self) -> 'Game':
         """
         Creates a deep copy of the essential game state for AI planning.
-        This is crucial for the AI to simulate its first move and then plan its second.
+        This is crucial for the AI to simulate its moves without affecting the
+        real game board.
         """
         # Create a new Game instance without running its full __init__ setup
         sim_game = object.__new__(Game)
         
-        # Copy essential attributes
+        # --- THIS IS THE FIX ---
+        # Copy references to the stateless manager objects.
+        sim_game.rule_engine = self.rule_engine
+        sim_game.turn_manager = self.turn_manager
+        # --- END OF FIX ---
+        
+        # Copy other essential attributes
         sim_game.num_players = self.num_players
         sim_game.tile_types = self.tile_types
-        sim_game.pathfinder = self.pathfinder
+        sim_game.pathfinder = self.pathfinder # Also stateless, so a reference is fine
         sim_game.MAX_PLAYER_ACTIONS = self.MAX_PLAYER_ACTIONS
         
-        # Deep copy the mutable, important state
+        # Deep copy the mutable, important state that the AI will change
         sim_game.board = copy.deepcopy(self.board)
         sim_game.players = copy.deepcopy(self.players)
         
