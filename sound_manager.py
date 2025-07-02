@@ -20,6 +20,7 @@ class SoundManager:
             'commit': os.path.join('assets', 'sounds', 'ui', 'commit_turn.wav'),
             'dice_roll': os.path.join('assets', 'sounds', 'driving', 'dice_roll.mp3'),
             'train_move': os.path.join('assets', 'sounds', 'driving', 'train_move.mp3'),
+            'eliminated': os.path.join('assets', 'sounds', 'condition', 'eliminated.mp3'),
         }
         self.music_paths = {
             'main_theme': os.path.join('assets', 'sounds', 'music', 'background_theme.wav')

@@ -168,31 +168,32 @@ class AIPlayer(Player):
         elif self.player_state == PlayerState.LAYING_TRACK:
             hand_str = ", ".join([t.name for t in self.hand])
             print(f"\n--- AI Player {self.player_id} ({self.strategy.__class__.__name__}) is thinking... (Hand: [{hand_str}]) ---")
-            
-            # The strategy plans the entire turn's worth of moves.
-            planned_actions = self.strategy.plan_turn(game, self)
 
-            if planned_actions:
-                # Execute all planned actions sequentially with delays and redraws.
+            # The strategy plans the best moves it can find.
+            planned_actions = self.strategy.plan_turn(game, self)
+            
+            # THE NEW RULE: Check if the plan meets the required number of actions.
+            if len(planned_actions) < game.MAX_PLAYER_ACTIONS:
+                # If the plan has less than 2 moves, the AI cannot take a full turn and is eliminated.
+                print(f"--- AI Player {self.player_id} could only find {len(planned_actions)}/{game.MAX_PLAYER_ACTIONS} moves. Forfeiting turn. ---")
+                if sounds: 
+                    sounds.play('error')
+                game.eliminate_player(self)
+            else:
+                # The plan is valid, execute the moves with delays.
                 for i, move in enumerate(planned_actions):
                     self._execute_action(game, move, sounds)
-                    
-                    # If there's another move to make, force a redraw and delay.
                     if i < len(planned_actions) - 1 and visualizer:
-                        visualizer.force_redraw(f"AI Player {self.player_id} is thinking...")
+                        visualizer.force_redraw(f"AI Player {self.player_id} is making its next move...")
                         pygame.time.delay(C.AI_MOVE_DELAY_MS)
-            else:
-                print(f"--- AI Player {self.player_id} could not find any move. Forfeiting turn. ---")
-                if sounds: sounds.play('error')
-                game.eliminate_player(self)
             
-            # # After AI planning done, we clear heatmap (if was on and displayed)
-            # if visualizer:
-            #     visualizer.heatmap_data = set()
-
-            print(f"--- AI Player {self.player_id} ends its turn. ---")
-            if sounds: sounds.play('commit')
-            game.confirm_turn() # This confirms the turn after all AI actions are done.
+            # After all actions (or elimination), confirm the turn to advance the game state.
+            if game.game_phase != GamePhase.GAME_OVER:
+                print(f"--- AI Player {self.player_id} ends its turn. ---")
+                # Don't play commit sound if eliminated.
+                if self.player_state != PlayerState.ELIMINATED and sounds:
+                    sounds.play('eliminated')
+                game.confirm_turn()
 
     def _execute_action(self, game: 'Game', move: Dict, sounds: Optional['SoundManager']):
         """Executes a single planned action and plays the corresponding sound."""

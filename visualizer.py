@@ -232,6 +232,8 @@ class Linie1Visualizer:
             dt = self.clock.tick(C.FPS) / 1000.0
             events = pygame.event.get()
 
+            
+
             self.update_current_state_for_player()
 
             for event in events:
