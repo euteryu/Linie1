@@ -1,0 +1,8 @@
+{
+    "id": "lucky_draws",
+    "name": "Lucky Draws",
+    "description": "Gives AI players a chance to draw specific bonus tiles.",
+    "class_name": "LuckyDrawsMod",
+    "bonus_draw_probability": 0.3,
+    "bonus_tile_type": "Tree_Crossroad"
+}

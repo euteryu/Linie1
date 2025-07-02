@@ -9,6 +9,8 @@ from typing import List, Dict, Tuple, Optional, Any
 from collections import deque
 import copy
 
+from mod_manager import ModManager
+
 from sound_manager import SoundManager # Import the new class
 
 # --- Game Logic Imports ---
@@ -94,7 +96,7 @@ def create_tile_surface(tile_type: TileType, size: int) -> pygame.Surface:
 # === Main Visualizer Class ===
 
 class Linie1Visualizer:
-    def __init__(self, player_types: List[str], difficulty: str):
+    def __init__(self, player_types: List[str], difficulty: str, mod_manager: ModManager):
         """
         Initializes the visualizer and the game engine.
         :param player_types: A list defining players, e.g., ['human', 'ai', 'ai']
@@ -121,7 +123,9 @@ class Linie1Visualizer:
             self.tk_root = None
 
         try:
-            self.game = Game(player_types=player_types, difficulty=difficulty)
+            self.mod_manager = mod_manager
+            self.game = Game(player_types=player_types, difficulty=difficulty, mod_manager=mod_manager)
+
             # Give the game a reference back to the visualizer for forced redraws.
             self.game.visualizer = self
         except Exception as e:
@@ -447,6 +451,11 @@ class Linie1Visualizer:
             player_line_card, player_route_card = player.line_card, player.route_card
         except (IndexError, AttributeError):
             player_id, player_state_name, player_line_card, player_route_card = "?", "Unknown", None, None
+
+        # --- NEW HOOK ---
+        # Allow mods to draw their custom UI elements on the panel
+        self.mod_manager.draw_mod_ui_elements(screen, self, self.current_state.__class__.__name__)
+        # --- END NEW ---
 
         # --- Draw Top Info Panel ---
         turn_text = f"Turn {self.game.current_turn} - Player {player_id} ({player_state_name})"

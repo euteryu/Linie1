@@ -4,6 +4,8 @@ import random, json, traceback, copy
 from queue import PriorityQueue
 import pygame
 
+from mod_manager import ModManager
+
 if TYPE_CHECKING:
     from .pathfinding import Pathfinder
 
@@ -25,8 +27,9 @@ from constants import (
     ROUTE_CARD_VARIANTS, TERMINAL_DATA, START_NEXT_TURN_EVENT, KING_AI_TREE_TILE_BIAS 
 )
 
+
 class Game:
-    def __init__(self, player_types: List[str], difficulty: str = 'normal'):
+    def __init__(self, player_types: List[str], difficulty: str, mod_manager: ModManager):
         """
         Initializes the game with player types and a game-wide difficulty mode.
         'easy' difficulty grants AI tile drawing bonuses. 'normal' uses standard rules.
@@ -54,6 +57,8 @@ class Game:
             else:
                 raise ValueError(f"Unknown player type in config: {p_type}")
             
+        self.mod_manager = mod_manager
+
         self.visualizer: Optional['Linie1Visualizer'] = None
             
         self.tile_types = {name: TileType(name=name, **details) for name, details in TILE_DEFINITIONS.items()}
@@ -85,6 +90,8 @@ class Game:
         self._deal_starting_hands()
         self._deal_player_cards()
         
+        self.mod_manager.on_game_setup(self) # Call mod hook here
+
         self.game_phase = GamePhase.LAYING_TRACK
         self.active_player_index = 0
         self.current_turn = 1
@@ -451,6 +458,22 @@ class Game:
             return False
         if len(player.hand) >= self.HAND_TILE_LIMIT:
             return False
+
+        # --- NEW HOOK ---
+        # Allow mods to intervene in the tile drawing process
+        drawn_tile_names_before_draw = [t.name for t in self.tile_draw_pile]
+        handled_by_mod, mod_chosen_tile_name = self.mod_manager.on_tile_drawn(self, player, None, drawn_tile_names_before_draw)
+        
+        if handled_by_mod and mod_chosen_tile_name:
+            # A mod explicitly chose a tile
+            chosen_tile = next((t for t in self.tile_draw_pile if t.name == mod_chosen_tile_name), None)
+            if chosen_tile:
+                self.tile_draw_pile.remove(chosen_tile)
+                player.hand.append(chosen_tile)
+                return True
+            else:
+                print(f"Warning: Mod requested tile '{mod_chosen_tile_name}' but it's not in the pile.")
+        # --- END NEW ---
 
         # Check for KING Mode AI "cheat"
         if isinstance(player, AIPlayer) and player.difficulty_mode == 'king':
@@ -1050,7 +1073,12 @@ class Game:
         player elimination.
         """
         active_p = self.get_active_player()
-        if self.game_phase == GamePhase.GAME_OVER: return False
+        if self.game_phase == GamePhase.GAME_OVER: 
+            return False
+
+        # --- NEW HOOK ---
+        self.mod_manager.on_player_turn_start(self, active_p) # Before turn begins logic
+        # --- END NEW ---
 
         if isinstance(active_p, HumanPlayer) and active_p.player_state == PlayerState.LAYING_TRACK:
             if self.actions_taken_this_turn == 0:
@@ -1116,6 +1144,13 @@ class Game:
             is_complete, start, path = self.check_player_route_completion(next_p)
             if is_complete and start and path:
                 self.handle_route_completion(next_p, start, path)
+
+        # --- NEW HOOKS ---
+        # Call on_player_turn_end for the player who just finished
+        self.mod_manager.on_player_turn_end(self, active_p)
+        # Call on_player_turn_start for the next player
+        self.mod_manager.on_player_turn_start(self, next_p)
+        # --- END NEW ---
         
         pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT))
         
