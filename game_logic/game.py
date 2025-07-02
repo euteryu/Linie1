@@ -17,6 +17,8 @@ from .commands import Command, PlaceTileCommand, ExchangeTileCommand, MoveComman
 from .pathfinding import AStarPathfinder, BFSPathfinder
 from .ai_strategy import EasyStrategy, HardStrategy # Import the strategies
 
+import constants as C
+
 from constants import (
     TILE_DEFINITIONS, TILE_COUNTS_BASE, TILE_COUNTS_5_PLUS_ADD, HAND_TILE_LIMIT,
     MAX_PLAYER_ACTIONS, DIE_FACES, STOP_SYMBOL, TERMINAL_COORDS, STARTING_HAND_TILES,
@@ -26,27 +28,32 @@ from constants import (
 class Game:
     def __init__(self, player_types: List[str], difficulty: str = 'normal'):
         """
-        Initializes the game with a flexible player and difficulty configuration.
+        Initializes the game with player types and a game-wide difficulty mode.
+        'easy' difficulty grants AI tile drawing bonuses. 'normal' uses standard rules.
         """
         if not 1 <= len(player_types) <= 6:
             raise ValueError("Total players must be 1-6.")
 
+        self.num_players = len(player_types)
+        
+        # --- THIS IS THE FIX ---
+        # Initialize self.players as an empty list BEFORE trying to append to it.
+        self.players: List[Player] = [] 
+        # --- END OF FIX ---
+
         self.difficulty = difficulty.lower()
         print(f"--- Game starting in '{self.difficulty}' mode. ---")
 
-        self.num_players = len(player_types)
-        self.players: List[Player] = []
-
-        # Create players based on the config list
         for i, p_type in enumerate(player_types):
             if p_type.lower() == 'human':
-                self.players.append(HumanPlayer(i, self.difficulty))
+                self.players.append(HumanPlayer(i, self.difficulty)) # Pass difficulty to human too
             elif p_type.lower() == 'ai':
-                # All AIs now use HardStrategy. Their difficulty comes from the game mode.
-                self.players.append(AIPlayer(i, HardStrategy(), self.difficulty))
+                strategy = HardStrategy()
+                # Pass the game's difficulty mode to the AIPlayer
+                self.players.append(AIPlayer(i, strategy, self.difficulty)) 
             else:
                 raise ValueError(f"Unknown player type in config: {p_type}")
-
+            
         self.tile_types = {name: TileType(name=name, **details) for name, details in TILE_DEFINITIONS.items()}
         self.board = Board()
         self.board._initialize_terminals(self.tile_types)
@@ -997,23 +1004,122 @@ class Game:
              return True
         return False
 
+
+    def eliminate_player(self, player: Player):
+        """Eliminates a player from the game, returning their tiles to the deck."""
+        if player.player_state == PlayerState.ELIMINATED:
+            return # Already eliminated
+
+        print(f"--- Player {player.player_id} has no more legal moves and is ELIMINATED! ---")
+        player.player_state = PlayerState.ELIMINATED
+        
+        # Return their hand tiles to the draw pile
+        if player.hand:
+            print(f"  Returning {len(player.hand)} tiles to the draw pile.")
+            self.tile_draw_pile.extend(player.hand)
+            player.hand = []
+            random.shuffle(self.tile_draw_pile)
+
+        # Check if this elimination ends the game
+        self._check_elimination_win_condition()
+
+    def _check_elimination_win_condition(self):
+        """
+        Checks for a win condition after a player is eliminated.
+        A "last player standing" win is only granted if that player is
+        already in the DRIVING phase.
+        """
+        # Find all players who are not yet finished or eliminated.
+        active_players = [p for p in self.players if p.player_state not in [PlayerState.ELIMINATED, PlayerState.FINISHED]]
+        
+        # Scenario 1: Only one active player remains.
+        if len(active_players) == 1 and self.num_players > 1:
+            last_player = active_players[0]
+            
+            # --- THE NEW, REFINED RULE ---
+            if last_player.player_state == PlayerState.DRIVING:
+                # If the last player has already built their route, they win.
+                print(f"--- Last Player Standing! Player {last_player.player_id} was already driving and wins by default! ---")
+                self.game_phase = GamePhase.GAME_OVER
+                self.winner = last_player
+                last_player.player_state = PlayerState.FINISHED
+            else:
+                # If the last player is also stuck laying track, it's a draw.
+                print(f"--- Last Player Standing (Player {last_player.player_id}) is also stuck laying track. The game is a DRAW! ---")
+                self.game_phase = GamePhase.GAME_OVER
+                self.winner = None # No winner
+                # We can also mark the last player as eliminated for consistency.
+                last_player.player_state = PlayerState.ELIMINATED
+            # --- END OF REFINED RULE ---
+
+        # Scenario 2: No active players remain.
+        elif len(active_players) == 0:
+            # This can happen if the last two players get eliminated simultaneously
+            # (e.g., in a 2-player game where both are stuck).
+            print("--- All players have been eliminated! The game is a DRAW. ---")
+            self.game_phase = GamePhase.GAME_OVER
+            self.winner = None # No winner
+
+    # --- NEW: Exhaustive check for human players ---
+    def can_player_make_any_move(self, player: Player) -> bool:
+        """
+        Performs an exhaustive check to see if a player has any possible
+        legal move (place or exchange) with their current hand.
+        """
+        print(f"--- Performing exhaustive move check for Player {player.player_id}... ---")
+        for tile in set(player.hand): # Check unique tiles to be efficient
+            for r in range(self.board.rows):
+                for c in range(self.board.cols):
+                    for o in [0, 90, 180, 270]:
+                        # Check for a valid placement
+                        if self.check_placement_validity(tile, o, r, c)[0]:
+                            print(f"  (Found possible move: Place {tile.name} at ({r},{c}))")
+                            return True
+                        # Check for a valid exchange
+                        if self.check_exchange_validity(player, tile, o, r, c)[0]:
+                            print(f"  (Found possible move: Exchange for {tile.name} at ({r},{c}))")
+                            return True
+        print("  (No possible moves found for this player.)")
+        return False
+
+
     def confirm_turn(self) -> bool:
         """
-        Finalizes the current player's turn, draws tiles, advances to the next player,
-        and posts an event to signal the start of the next turn.
+        Finalizes the current player's turn, draws tiles, advances to the next player
+        (skipping eliminated ones), and triggers the start of their turn.
         """
         active_p = self.get_active_player()
         if self.game_phase == GamePhase.GAME_OVER: return False
 
-        if isinstance(active_p, HumanPlayer):
-            if active_p.player_state == PlayerState.LAYING_TRACK and self.actions_taken_this_turn < self.MAX_PLAYER_ACTIONS:
-                return False
+        # --- Forfeit check for Human Players ---
+        if isinstance(active_p, HumanPlayer) and active_p.player_state == PlayerState.LAYING_TRACK:
+            # If a human tries to end turn with 0 actions, check if they *could* have moved.
+            if self.actions_taken_this_turn == 0:
+                if self.can_player_make_any_move(active_p):
+                    # They had moves but chose to pass; this is not allowed.
+                    # The UI state will need to show a message based on this False return.
+                    print(f"--- Player {active_p.player_id} attempted to pass with valid moves available. Turn not confirmed. ---")
+                    return False
+                else:
+                    # They had no moves and tried to pass. This triggers elimination.
+                    self.eliminate_player(active_p)
+                    # The game may have ended, so we check again.
+                    if self.game_phase == GamePhase.GAME_OVER: return True
 
+        # Draw tiles for players who are still laying track
         if active_p.player_state == PlayerState.LAYING_TRACK:
             for _ in range(min(self.HAND_TILE_LIMIT - len(active_p.hand), self.MAX_PLAYER_ACTIONS)):
                 self.draw_tile(active_p)
         
-        self.active_player_index = (self.active_player_index + 1) % self.num_players
+        # --- Advance to the next non-eliminated player ---
+        # This loop will safely skip any number of eliminated players.
+        num_checked = 0
+        while num_checked < self.num_players:
+            self.active_player_index = (self.active_player_index + 1) % self.num_players
+            if self.get_active_player().player_state != PlayerState.ELIMINATED:
+                break # Found the next active player
+            num_checked += 1
+        
         if self.active_player_index == 0: self.current_turn += 1
         self.actions_taken_this_turn = 0
         self.command_history.clear_redo_history()
@@ -1026,11 +1132,7 @@ class Game:
             if is_complete and start and path:
                 self.handle_route_completion(next_p, start, path)
         
-        # --- THIS IS THE FIX ---
-        # Instead of calling the logic directly, post an event.
-        # This yields control back to the main loop, allowing a screen update.
-        pygame.event.post(pygame.event.Event(START_NEXT_TURN_EVENT))
-        # --- END OF FIX ---
+        pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT))
         
         return True
 

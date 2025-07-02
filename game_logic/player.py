@@ -25,7 +25,7 @@ class RouteStep(NamedTuple):
 class Player(ABC):
     def __init__(self, player_id: int, difficulty_mode: str):
         self.player_id = player_id
-        self.difficulty_mode = difficulty_mode
+        self.difficulty_mode = difficulty_mode # This is correctly stored
         self.hand: List[TileType] = []
         self.line_card: Optional[LineCard] = None
         self.route_card: Optional[RouteCard] = None
@@ -134,39 +134,29 @@ class Player(ABC):
 
 
 class HumanPlayer(Player):
-    """Represents a human-controlled player."""
-    def handle_turn_logic(self, game: 'Game', visualizer: Optional['Linie1Visualizer'] = None, sounds: Optional['SoundManager'] = None):
-        """
-        Human turn is reactive and driven by UI events, so this method is a no-op.
-        The parameters are merely included to match the abstract base class signature,
-        preventing the TypeError.
-        """
-        pass
+    def __init__(self, player_id: int, difficulty_mode: str):
+        super().__init__(player_id, difficulty_mode)
 
 
 
 class AIPlayer(Player):
-    """Represents an AI-controlled player that uses a pluggable strategy."""
     def __init__(self, player_id: int, strategy: AIStrategy, difficulty_mode: str):
-        # Pass difficulty up to the base class
-        super().__init__(player_id, difficulty_mode)
-        self.strategy = strategy
+        super().__init__(player_id, difficulty_mode) # Pass difficulty to base class
+        self.strategy = strategy # This strategy object is correctly instantiated as HardStrategy
 
-    def handle_turn_logic(self, game: 'Game', visualizer: 'Linie1Visualizer' = None, sounds: 'SoundManager' = None):
+    def handle_turn_logic(self, game: 'Game', visualizer: Optional['Linie1Visualizer'] = None, sounds: Optional['SoundManager'] = None):
         """
         Orchestrates the AI's entire turn synchronously with delays and rendering.
+        This logic remains the same as the previous fix.
         """
-        if game.game_phase == GamePhase.GAME_OVER:
-            return
+        if game.game_phase == GamePhase.GAME_OVER: return
 
         if self.player_state == PlayerState.DRIVING:
             print(f"\n--- AI Player {self.player_id}'s Turn (Driving) ---")
             roll_result = game.roll_special_die()
             print(f"  AI Player {self.player_id} rolls a '{roll_result}'.")
-            if sounds: 
-                sounds.play('dice_roll')
+            if sounds: sounds.play('dice_roll')
             
-            # --- Delay and Redraw for Driving ---
             if visualizer:
                 visualizer.force_redraw("Rolling die...")
                 pygame.time.delay(C.AI_MOVE_DELAY_MS)
@@ -178,26 +168,26 @@ class AIPlayer(Player):
             hand_str = ", ".join([t.name for t in self.hand])
             print(f"\n--- AI Player {self.player_id} ({self.strategy.__class__.__name__}) is thinking... (Hand: [{hand_str}]) ---")
             
+            # The strategy plans the entire turn's worth of moves.
             planned_actions = self.strategy.plan_turn(game, self)
             
             if planned_actions:
-                # Loop through the planned actions with a delay
+                # Execute all planned actions sequentially with delays and redraws.
                 for i, move in enumerate(planned_actions):
                     self._execute_action(game, move, sounds)
                     
-                    # If there's another move to make, force a redraw and delay
+                    # If there's another move to make, force a redraw and delay.
                     if i < len(planned_actions) - 1 and visualizer:
                         visualizer.force_redraw(f"AI Player {self.player_id} is thinking...")
                         pygame.time.delay(C.AI_MOVE_DELAY_MS)
             else:
-                print(f"--- AI Player {self.player_id} could not find any move. Passing turn. ---")
+                print(f"--- AI Player {self.player_id} could not find any move. Forfeiting turn. ---")
                 if sounds: sounds.play('error')
+                game.eliminate_player(self)
             
-            # After all actions are done, confirm the turn.
             print(f"--- AI Player {self.player_id} ends its turn. ---")
-            # if sounds: 
-            #     sounds.play('commit')
-            game.confirm_turn()
+            if sounds: sounds.play('commit')
+            game.confirm_turn() # This confirms the turn after all AI actions are done.
 
     def _execute_action(self, game: 'Game', move: Dict, sounds: Optional['SoundManager']):
         """Executes a single planned action and plays the corresponding sound."""
@@ -214,11 +204,7 @@ class AIPlayer(Player):
             success = game.attempt_exchange_tile(self, *details)
 
         if success and sounds:
-            sounds.play('place')
+            if action_type == 'place': sounds.play('place') # Sound for placing
+            elif action_type == 'exchange': sounds.play('place') # Can reuse sound for exchange
         elif not success and sounds:
             sounds.play('error')
-
-    def to_dict(self) -> Dict:
-        data = super().to_dict()
-        data['strategy'] = 'hard' if isinstance(self.strategy, HardStrategy) else 'easy'
-        return data

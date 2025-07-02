@@ -218,35 +218,46 @@ class LayingTrackState(GameState):
                 else: is_valid, reason = self.game.check_exchange_validity(player, move_to_validate['tile_type'], orientation, coord_r, coord_c, hypothetical_moves=other_moves)
             move_to_validate['is_valid'] = is_valid
 
-    # --- THIS IS THE FINAL, SIMPLIFIED FIX ---
     def _commit_staged_moves(self, player):
-        """Attempts to commit all staged moves and then confirms the turn if complete."""
+        """
+        Attempts to commit all staged moves. If no moves are staged,
+        it attempts to confirm the turn, which will trigger the forfeit check.
+        """
         if self.move_in_progress:
             self.message = "A move is being built. [S] to stage or [ESC] to clear."; return
-        if not self.staged_moves:
-            # This handles the case where the user presses Enter again after a successful commit.
-            # Since _reset_staging is called, this will now be true, and we simply do nothing.
-            return
         
-        self._validate_all_staged_moves()
-
-        if all(move.get('is_valid', False) for move in self.staged_moves):
-            command = CombinedActionCommand(self.game, player, self.staged_moves)
-            
-            if self.game.command_history.execute_command(command):
-                self.visualizer.sounds.play('commit') # Play the commit sound
-
-                if self.game.actions_taken_this_turn >= self.game.MAX_PLAYER_ACTIONS:
-                    self.game.confirm_turn()
-                
-                # After a successful commit, always reset the staging area.
+        # --- THIS IS THE FIX ---
+        # Case 1: Player has staged moves and wants to commit them.
+        if self.staged_moves:
+            self._validate_all_staged_moves()
+            if all(move.get('is_valid', False) for move in self.staged_moves):
+                command = CombinedActionCommand(self.game, player, self.staged_moves)
+                if self.game.command_history.execute_command(command):
+                    self.visualizer.sounds.play('commit')
+                    # Check if the turn is now complete
+                    if self.game.actions_taken_this_turn >= C.MAX_PLAYER_ACTIONS:
+                        if not self.game.confirm_turn():
+                             # This should not happen if logic is correct
+                             self.message = "Error confirming turn."
+                    self._reset_staging()
+                else:
+                    self.message = "Commit failed: Action limit would be exceeded."
+            else:
+                self.message = "Cannot commit: one or more moves are invalid (red)."
+                self.visualizer.sounds.play('error')
+        
+        # Case 2: Player has staged no moves and presses Enter to pass/forfeit.
+        else:
+            print("--- [UI] Player attempting to pass turn with 0 actions. ---")
+            # Call confirm_turn, which now contains the forfeit logic.
+            if self.game.confirm_turn():
+                # Success means they were correctly eliminated or game ended.
                 self._reset_staging()
             else:
-                self.message = "Commit failed: Action limit would be exceeded."
-                self.visualizer.sounds.play('error') # Play the error sound
-        else:
-            self.message = "Cannot commit: one or more moves are invalid (red)."
-            self.visualizer.sounds.play('error') # Play the error sound
+                # Failure means they had moves and must play.
+                self.message = "You have possible moves; you must play."
+                self.visualizer.sounds.play('error')
+        # --- END OF FIX ---
 
     def draw(self, screen):
         # This method's logic is correct and does not need to change.

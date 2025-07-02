@@ -1061,3 +1061,75 @@ AI chooses to PLACE Curve at (2,6) (Score: 21.00 -> [base: 1.0, connectivity: 20
 --- [COMMAND] PlaceTileCommand Execute SUCCESS ---
 Command 'PlaceTileCommand' executed. History size: 20, Index: 19
 --- AI Player 1 ends its turn. ---
+
+
+---
+---
+---
+
+--- Starting Turn 5 for Player 4 (LAYING_TRACK) ---
+
+--- AI Player 4 (HardStrategy) is thinking... (Hand: [Tree_StraightDiagonal2, DoubleCurveY, StraightLeftCurve, Curve, Straight]) ---
+  (HardStrategy starting... Looking for combo plays)
+  (HardStrategy identified 1 high-value squares)
+  (HardStrategy: No valid combo found. Falling back to Easy.)
+  AI chooses to PLACE StraightLeftCurve at (6,6) (Score: 31.00 -> [base: 1.0, connectivity: 30.0])
+--- [GAME] Checking place validity... Result: True (Reason: Placement is valid.) ---
+--- [COMMAND] Executing PlaceTileCommand: P4 places StraightLeftCurve at (6,6) ---
+  [COMMAND-STATE] Removing 'StraightLeftCurve' from Player 4's hand.
+  [COMMAND-STATE] Setting tile on board at (6,6) to: Placed(StraightLeftCurve, 0deg)
+--- [COMMAND] PlaceTileCommand Execute SUCCESS ---
+Command 'PlaceTileCommand' executed. History size: 49, Index: 48
+  AI chooses to EXCHANGE DoubleCurveY at (6,7) (Score: 36.00 -> [base: 1.0, connectivity: 30.0, exchange_bonus: 5.0])
+--- [GAME] Checking exchange validity... Result: True (Reason: Exchange is valid.) ---
+--- [COMMAND] Executing ExchangeTileCommand: P4 at (6,7) with DoubleCurveY ---
+  [COMMAND-STATE] Storing old tile for undo: Placed(Curve, 90deg)
+  [COMMAND-STATE] Removing 'DoubleCurveY' from Player 4's hand.
+  [COMMAND-STATE] Adding 'Curve' to Player 4's hand.
+  [COMMAND-STATE] Setting tile on board at (6,7) to: Placed(DoubleCurveY, 90deg)
+--- [COMMAND] ExchangeTileCommand Execute SUCCESS ---
+Command 'ExchangeTileCommand' executed. History size: 50, Index: 49
+--- AI Player 4 ends its turn. ---
+
+--- Starting Turn 6 for Player 0 (LAYING_TRACK) ---
+
+--- AI Player 0 (HardStrategy) is thinking... (Hand: [Straight, Straight, Curve, Curve, Tree_JunctionTop]) ---
+  (HardStrategy starting... Looking for combo plays)
+  (HardStrategy identified 0 high-value squares)
+  (HardStrategy: No target squares identified. Falling back to Easy.)
+  AI chooses to EXCHANGE Tree_JunctionTop at (1,11) (Score: 46.00 -> [base: 1.0, connectivity: 40.0, exchange_bonus: 5.0])
+--- [GAME] Checking exchange validity... Result: True (Reason: Exchange is valid.) ---
+--- [COMMAND] Executing ExchangeTileCommand: P0 at (1,11) with Tree_JunctionTop ---
+  [COMMAND-STATE] Storing old tile for undo: Placed(DoubleCurveY, 90deg)
+  [COMMAND-STATE] Removing 'Tree_JunctionTop' from Player 0's hand.
+  [COMMAND-STATE] Adding 'DoubleCurveY' to Player 0's hand.
+  [COMMAND-STATE] Setting tile on board at (1,11) to: Placed(Tree_JunctionTop, 90deg)
+--- [COMMAND] ExchangeTileCommand Execute SUCCESS ---
+Command 'ExchangeTileCommand' executed. History size: 51, Index: 50
+  AI chooses to EXCHANGE DoubleCurveY at (3,1) (Score: 26.00 -> [base: 1.0, connectivity: 20.0, exchange_bonus: 5.0])
+--- [GAME] Checking exchange validity... Result: True (Reason: Exchange is valid.) ---
+--- [COMMAND] Executing ExchangeTileCommand: P0 at (3,1) with DoubleCurveY ---
+  [COMMAND-STATE] Storing old tile for undo: Placed(Curve, 180deg)
+  [COMMAND-STATE] Removing 'DoubleCurveY' from Player 0's hand.
+  [COMMAND-STATE] Adding 'Curve' to Player 0's hand.
+  [COMMAND-STATE] Setting tile on board at (3,1) to: Placed(DoubleCurveY, 180deg)
+--- [COMMAND] ExchangeTileCommand Execute SUCCESS ---
+Command 'ExchangeTileCommand' executed. History size: 52, Index: 51
+--- AI Player 0 ends its turn. ---
+
+this log implies by turn 6, this player couldn't find any high value squares. but the high value algo must be too restricitve in what counts as high value tile. It's defaulting too easily too Easy Strategy. Well, why is is restrictive (what counts as high value in its priority?) and can we make it explore more combination of tiles?
+
+---
+
+Your analysis is correct. The AI's log shows it identified it had no moves and correctly passed. We will now change that "pass" into an "elimination." We also need to provide a similar mechanism for human players.
+The Architectural Solution
+
+    New Player State: We will add an ELIMINATED state to PlayerState to formally track players who have forfeited.
+
+    Elimination Logic in Game: We'll create a central eliminate_player(player) method in the Game class. This method will handle setting the player's state, returning their tiles to the deck, and checking for a "last player standing" win condition.
+
+    Turn Skipping: The game.confirm_turn() method will be updated to automatically skip over any ELIMINATED players.
+
+    AI Forfeit Hook: The AIPlayer will call this new eliminate_player method when its strategy returns no possible actions.
+
+    Human Forfeit Hook: A human player can't "prove" they have no moves. Therefore, we will implement the forfeit rule as follows: if a human player tries to end their turn by pressing Enter without staging any moves, the game will perform an exhaustive check. If any legal move was possible, they will be told to make a move. If no moves were possible, they will be eliminated.

@@ -1,10 +1,10 @@
-# game_logic/enums.py
 from enum import Enum, auto
 
 class PlayerState(Enum):
     LAYING_TRACK = auto()
     DRIVING = auto()
     FINISHED = auto()
+    ELIMINATED = auto() # NEW: For players who have forfeited
 
 class GamePhase(Enum):
     SETUP = auto()
