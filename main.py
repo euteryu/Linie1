@@ -11,7 +11,8 @@ if __name__ == '__main__':
         #    Note: We no longer specify 'easy_ai' or 'hard_ai' strategy here.
         #          All AIs use the HardStrategy.
         # player_types = ['ai', 'ai', 'human']
-        player_types = ['ai', 'ai', 'ai', 'ai']
+        # player_types = ['ai', 'ai', 'ai', 'ai']
+        player_types = ['ai', 'ai']
         
         # 2. Set the difficulty for the entire game ('king' or 'normal')
         #    In 'king' mode, all AI players get the drawing advantage.

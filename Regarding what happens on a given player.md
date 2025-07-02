@@ -1031,3 +1031,33 @@ This guarantees that the result of the AI's first action is drawn to the screen 
 --
 
 also give me current dependency tree between python files for Linie 1. Suggest how better code p
+
+--
+
+you said The current "Hard" AI's primary advantage is its ability to see and validate interdependent two-move plays that the Easy AI cannot. It's a "possibility-finder" first and foremost. Once it finds such a possibility, it executes it immediately.
+
+If it fails to find any valid two-move combo, it then falls back to the EasyStrategy's plan_turn, which does use _score_move to find the best single move it can make for its first action, and then the best single move for its second action.
+
+well turns out, this whole time ai players have been merely falling back to easyAI strat cuz log shows that at mere Turn 3 for player 1 (which was an Ai below) it identified "0 high-value squares for combined move planning". Like at turn 3, there should be plenty of empty squares, let alone stop tiles to be created, for _get_high_value_target_squares to return surely at least more than a couple high-value squares in early game. But it found none? how come!
+
+--- Starting Turn 3 for Player 1 (LAYING_TRACK) ---
+
+--- AI Player 1 (HardStrategy) is thinking... (Hand: [Straight, Straight, Tree_Roundabout, Tree_JunctionRight, Curve]) ---
+(HardStrategy starting... Looking for combo plays)
+(HardStrategy identified 0 high-value squares for combined move planning)
+(HardStrategy: Not enough resources for combo. Falling back to Easy.)
+AI chooses to PLACE Tree_JunctionRight at (3,5) (Score: 41.00 -> [base: 1.0, connectivity: 40.0])
+--- [GAME] Checking place validity... Result: True (Reason: Placement is valid.) ---
+--- [COMMAND] Executing PlaceTileCommand: P1 places Tree_JunctionRight at (3,5) ---
+[COMMAND-STATE] Removing 'Tree_JunctionRight' from Player 1's hand.
+[COMMAND-STATE] Setting tile on board at (3,5) to: Placed(Tree_JunctionRight, 0deg)
+--- [COMMAND] PlaceTileCommand Execute SUCCESS ---
+Command 'PlaceTileCommand' executed. History size: 19, Index: 18
+AI chooses to PLACE Curve at (2,6) (Score: 21.00 -> [base: 1.0, connectivity: 20.0])
+--- [GAME] Checking place validity... Result: True (Reason: Placement is valid.) ---
+--- [COMMAND] Executing PlaceTileCommand: P1 places Curve at (2,6) ---
+[COMMAND-STATE] Removing 'Curve' from Player 1's hand.
+[COMMAND-STATE] Setting tile on board at (2,6) to: Placed(Curve, 0deg)
+--- [COMMAND] PlaceTileCommand Execute SUCCESS ---
+Command 'PlaceTileCommand' executed. History size: 20, Index: 19
+--- AI Player 1 ends its turn. ---

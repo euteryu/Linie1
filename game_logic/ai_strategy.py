@@ -135,89 +135,106 @@ class EasyStrategy(AIStrategy):
 # --- HARD AI: A smarter, multi-pass combinatorial planner ---
 class HardStrategy(EasyStrategy):
     """
-    An advanced AI that first looks for high-value combination plays.
-    If no such play is found, it falls back to the reliable EasyStrategy.
+    An advanced AI that considers pairs of moves together, including exchanges,
+    to solve complex board situations. Falls back to EasyStrategy if no combo is found.
     """
     def plan_turn(self, game: Game, player: AIPlayer) -> List[Dict]:
         print(f"  (HardStrategy starting... Looking for combo plays)")
         
-        # --- PLAN A: Find a high-value two-move combination ---
-        # 1. Identify a small set of high-value target squares
         ideal_plan = self._calculate_ideal_route(game, player)
         target_squares = self._get_high_value_target_squares(game, player, ideal_plan)
         
-        # 2. Get all possible pairs of tiles from hand
-        hand_indices = list(range(len(player.hand)))
-        if len(hand_indices) < 2:
-            print("  (HardStrategy: Not enough tiles for combo. Falling back to Easy.)")
+        if len(player.hand) < 2 or not target_squares:
+            print("  (HardStrategy: Not enough resources for combo. Falling back to Easy.)")
             return super().plan_turn(game, player)
 
-        hand_pairs = list(permutations(hand_indices, 2))
-        random.shuffle(hand_pairs) # Prevents deterministic boring plays
+        hand_pairs = list(permutations(range(len(player.hand)), 2))
+        random.shuffle(hand_pairs)
 
-        # 3. Iterate through promising pairs and check for valid combos
+        # Iterate through all combinations of two distinct target squares
+        target_pairs = list(permutations(target_squares, 2))
+        random.shuffle(target_pairs)
+
+        # Limit the search space to prevent hangs on complex boards
+        # We'll check a max of ~5000 combinations, which is very fast.
+        MAX_CHECKS = 5000000000000  # purposely large atm, ensure fallback to easy not due to computation limit xD
+        checks_done = 0
+
         for idx1, idx2 in hand_pairs:
             tile1, tile2 = player.hand[idx1], player.hand[idx2]
-            
-            # Iterate through pairs of target squares
-            for r1, c1 in target_squares:
-                for r2, c2 in target_squares:
-                    if (r1, c1) == (r2, c2): continue
+            for (r1, c1), (r2, c2) in target_pairs:
+                if checks_done > MAX_CHECKS:
+                    print("  (HardStrategy: Reached check limit. Falling back to Easy.)")
+                    return super().plan_turn(game, player)
 
-                    # Check all orientations for this specific pair
-                    for o1 in [0, 90, 180, 270]:
-                        for o2 in [0, 90, 180, 270]:
-                            move1 = {'coord': (r1, c1), 'tile_type': tile1, 'orientation': o1}
-                            move2 = {'coord': (r2, c2), 'tile_type': tile2, 'orientation': o2}
+                for o1 in [0, 90, 180, 270]:
+                    for o2 in [0, 90, 180, 270]:
+                        checks_done += 1
+                        
+                        # --- THIS IS THE NEW, EXPANDED LOGIC ---
+                        # Determine the action type for each move based on the target square
+                        action1_type = 'exchange' if game.board.get_tile(r1, c1) else 'place'
+                        action2_type = 'exchange' if game.board.get_tile(r2, c2) else 'place'
+                        
+                        # Create hypothetical moves for validation
+                        move1_hypo = {'coord': (r1, c1), 'tile_type': tile1, 'orientation': o1}
+                        move2_hypo = {'coord': (r2, c2), 'tile_type': tile2, 'orientation': o2}
 
-                            # Check validity of this specific pair
-                            is_valid1, _ = game.check_placement_validity(tile1, o1, r1, c1, hypothetical_moves=[move2])
-                            if not is_valid1: continue
-                            is_valid2, _ = game.check_placement_validity(tile2, o2, r2, c2, hypothetical_moves=[move1])
+                        # Validate the first move in the context of the second
+                        if action1_type == 'place':
+                            is_valid1, _ = game.check_placement_validity(tile1, o1, r1, c1, hypothetical_moves=[move2_hypo])
+                        else: # exchange
+                            is_valid1, _ = game.check_exchange_validity(player, tile1, o1, r1, c1, hypothetical_moves=[move2_hypo])
+                        
+                        if not is_valid1: continue
 
-                            if is_valid1 and is_valid2:
-                                # FOUND A VALID COMBO! This is our move.
-                                print(f"  (HardStrategy: Found a valid combo play!)")
-                                action1 = {'type': 'place', 'details': (tile1, o1, r1, c1)}
-                                action2 = {'type': 'place', 'details': (tile2, o2, r2, c2)}
-                                return [action1, action2]
+                        # Validate the second move in the context of the first
+                        if action2_type == 'place':
+                            is_valid2, _ = game.check_placement_validity(tile2, o2, r2, c2, hypothetical_moves=[move1_hypo])
+                        else: # exchange
+                            is_valid2, _ = game.check_exchange_validity(player, tile2, o2, r2, c2, hypothetical_moves=[move1_hypo])
+
+                        # If both are mutually valid, we have found our combo!
+                        if is_valid2:
+                            print(f"  (HardStrategy: Found a valid combo play! {action1_type.upper()} at ({r1},{c1}) and {action2_type.upper()} at ({r2},{c2}))")
+                            action1 = {'type': action1_type, 'details': (tile1, o1, r1, c1)}
+                            action2 = {'type': action2_type, 'details': (tile2, o2, r2, c2)}
+                            return [action1, action2]
         
-        # --- PLAN B: If no combo was found, fall back to the standard sequential plan ---
         print("  (HardStrategy: No combo found. Falling back to Easy.)")
         return super().plan_turn(game, player)
 
     def _get_high_value_target_squares(self, game: Game, player: Player, ideal_plan: Optional[List[RouteStep]]) -> Set[Tuple[int, int]]:
-        """Identifies a small set of the most important squares to consider for moves."""
         targets: Set[Tuple[int, int]] = set()
         
-        # 1. Add squares from the ideal path that are currently empty
+        # Priority 1: Empty squares on the ideal path
         if ideal_plan:
             for step in ideal_plan:
                 r, c = step.coord
                 if not game.board.get_tile(r, c) and game.board.is_playable_coordinate(r, c):
-                    targets.add((r,c))
+                    targets.add((r, c))
         
-        # 2. Add squares adjacent to required, un-stopped buildings
+        # Priority 2: Squares adjacent to required, un-stopped buildings
         if player.route_card:
             for building_id in player.route_card.stops:
                 if building_id not in game.board.buildings_with_stops:
                     building_coord = game.board.building_coords.get(building_id)
                     if building_coord:
-                        # Get neighbors of the building
                         for d in Direction:
                             nr, nc = building_coord[0] + d.value[0], building_coord[1] + d.value[1]
                             if game.board.is_playable_coordinate(nr, nc) and not game.board.get_tile(nr, nc):
                                 targets.add((nr, nc))
         
-        # As a fallback, if no targets are found, add some squares near the player's terminals
-        if not targets and player.line_card:
-            for term_coord in game.get_terminal_coords(player.line_card.line_number):
-                if term_coord:
-                    # Look at neighbors of the terminal entry point
-                    for d in Direction:
-                        nr, nc = term_coord[0] + d.value[0], term_coord[1] + d.value[1]
-                        if game.board.is_playable_coordinate(nr, nc) and not game.board.get_tile(nr, nc):
-                            targets.add((nr, nc))
+        # --- NEW: Also target existing swappable tiles for exchanges ---
+        # This is crucial for the exchange logic to work.
+        for r in range(game.board.rows):
+            for c in range(game.board.cols):
+                tile = game.board.get_tile(r, c)
+                # Add if it's a swappable tile that's not a stop or terminal
+                if tile and tile.tile_type.is_swappable and not tile.has_stop_sign and not tile.is_terminal:
+                    # Optional: Only add if it's near our ideal path to keep the set small
+                    if ideal_plan and any(abs(r - step.coord[0]) + abs(c - step.coord[1]) < 4 for step in ideal_plan):
+                        targets.add((r,c))
 
-        print(f"  (HardStrategy identified {len(targets)} high-value squares)")
+        print(f"  (HardStrategy identified {len(targets)} high-value squares for combined move planning)")
         return targets
