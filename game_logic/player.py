@@ -169,23 +169,8 @@ class AIPlayer(Player):
             hand_str = ", ".join([t.name for t in self.hand])
             print(f"\n--- AI Player {self.player_id} ({self.strategy.__class__.__name__}) is thinking... (Hand: [{hand_str}]) ---")
             
-            # If the heatmap is on, update the data and force a redraw NOW,
-            # before the AI starts its slow combinatorial search.
-            if visualizer and visualizer.show_ai_heatmap:
-                # The strategy's `plan_turn` will set the heatmap data.
-                # We need a way to show it before the full plan is returned.
-                # The `plan_turn` method will now handle setting this data.
-                visualizer.force_redraw(f"AI Player {self.player_id} is targeting squares...")
-                pygame.time.delay(1500) # Give human time to see the heatmap
-
-
             # The strategy plans the entire turn's worth of moves.
             planned_actions = self.strategy.plan_turn(game, self)
-
-            # Clear heatmap data after planning is complete
-            if visualizer:
-                visualizer.heatmap_data = set()
-            
 
             if planned_actions:
                 # Execute all planned actions sequentially with delays and redraws.
@@ -201,6 +186,10 @@ class AIPlayer(Player):
                 if sounds: sounds.play('error')
                 game.eliminate_player(self)
             
+            # # After AI planning done, we clear heatmap (if was on and displayed)
+            # if visualizer:
+            #     visualizer.heatmap_data = set()
+
             print(f"--- AI Player {self.player_id} ends its turn. ---")
             if sounds: sounds.play('commit')
             game.confirm_turn() # This confirms the turn after all AI actions are done.

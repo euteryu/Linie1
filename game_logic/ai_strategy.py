@@ -6,6 +6,8 @@ from itertools import permutations
 import random
 from collections import Counter
 
+import pygame
+
 if TYPE_CHECKING:
     from .game import Game
     from .player import Player, AIPlayer, RouteStep
@@ -13,11 +15,20 @@ if TYPE_CHECKING:
 
 from .enums import Direction
 from .tile import PlacedTile
-from constants import KING_AI_TREE_TILE_BIAS
+from constants import KING_AI_TREE_TILE_BIAS, MAX_TARGETS_FOR_COMBO_SEARCH
+
 
 class AIStrategy(ABC):
-    # ... (AIStrategy base class is correct) ...
-    pass
+    """Abstract base class for all AI difficulty levels (brains)."""
+    @abstractmethod
+    def plan_turn(self, game: Game, player: AIPlayer) -> List[Dict]:
+        """
+        Analyzes the game state and returns a list of planned actions.
+        An action is a dictionary, e.g., {'type': 'place', 'details': (...), ...}
+        """
+        pass
+
+
 
 # --- EASY AI: A reliable sequential, greedy planner ---
 class EasyStrategy(AIStrategy):
@@ -136,69 +147,68 @@ class HardStrategy(EasyStrategy):
     An advanced AI that prunes a large set of possible moves down to the most
     promising, then runs a combinatorial search on that small subset.
     """
-    # --- NEW CONSTANT to control the search space size ---
-    # Number of possible single moves = 5 squares * 5 tiles at-hand * 4 orientations = 100
-    # Number of pairs of moves to check = 100C2 = 4950 pairs of moves
-    MAX_TARGETS_FOR_COMBO_SEARCH = 5
-
     def plan_turn(self, game: Game, player: AIPlayer) -> List[Dict]:
         print(f"  (HardStrategy starting... Looking for combo plays)")
         
         ideal_plan = self._calculate_ideal_route(game, player)
         target_squares = self._get_high_value_target_squares(game, player, ideal_plan)
-
-        # --- PRUNING LOGIC ---
-        # If we have too many targets, prune them down to the most promising ones.
-        if len(target_squares) > self.MAX_TARGETS_FOR_COMBO_SEARCH:
-            print(f"  (Pruning {len(target_squares)} targets down to {self.MAX_TARGETS_FOR_COMBO_SEARCH}...)")
+        
+        if len(target_squares) > MAX_TARGETS_FOR_COMBO_SEARCH:
             target_squares = self._prune_targets(game, player, target_squares, ideal_plan)
         
-        # --- Store the final targets for the heatmap view ---
-        # The visualizer can now access this to draw the heatmap.
-        if hasattr(game, 'visualizer') and game.visualizer is not None:
+        # --- Heatmap Display Logic ---
+        # If the visualizer is attached to the game object and the heatmap is on...
+        if hasattr(game, 'visualizer') and game.visualizer and game.visualizer.show_ai_heatmap:
+            # Update the visualizer's data with the squares we're about to process.
             game.visualizer.heatmap_data = target_squares
-
-        if len(target_squares) < 2:
-            print("  (HardStrategy: Not enough targets for a combo after pruning. Falling back.)")
-            return super().plan_turn(game, player)
-
-        # ... The rest of the combinatorial search logic from here is the same ...
-        # It will now operate on a much smaller, more relevant set of squares.
-        # ... (no changes to the rest of plan_turn) ...
-        # (The following is the existing correct logic)
-        hand_tile_options = {}
-        for tile in player.hand:
-            if tile.name not in hand_tile_options:
-                hand_tile_options[tile.name] = {'tile_type': tile, 'orientations': [0, 90, 180, 270]}
+            # Force the screen to redraw with the heatmap highlights.
+            game.visualizer.force_redraw(f"AI targeting {len(target_squares)} squares...")
+            # Pause the game logic briefly so the human can see the heatmap.
+            pygame.time.delay(1500) # 1.5 second delay
         
+        # --- This section was missing, causing the NameError ---
+        # Generate all possible individual moves based on targets and available tiles/orientations
         possible_moves_for_targets = []
+        unique_hand_tiles = list(set(player.hand))
+
         for r, c in target_squares:
-            for tile_name, options in hand_tile_options.items():
-                tile = options['tile_type']
-                for o in options['orientations']:
+            for tile in unique_hand_tiles:
+                for o in [0, 90, 180, 270]:
+                    # Check placement validity
                     if game.check_placement_validity(tile, o, r, c)[0]:
                         possible_moves_for_targets.append({'type': 'place', 'coord': (r, c), 'tile_type': tile, 'orientation': o})
+                    # Check exchange validity
                     if game.board.get_tile(r,c) and game.check_exchange_validity(player, tile, o, r, c)[0]:
                          possible_moves_for_targets.append({'type': 'exchange', 'coord': (r,c), 'tile_type': tile, 'orientation': o})
-        
+        # --- End of missing section ---
+
         if len(possible_moves_for_targets) < 2:
-            print("  (HardStrategy: Not enough valid single moves for a pair. Falling back.)")
+            print("  (HardStrategy: Not enough valid single moves to form a pair. Falling back to Easy.)")
             return super().plan_turn(game, player)
 
         best_combo_score = -1.0
         best_combo_actions = None
 
+        # The rest of the combinatorial search logic is correct.
+        # It iterates through the now-defined `possible_moves_for_targets`.
         for i in range(len(possible_moves_for_targets)):
             for j in range(i + 1, len(possible_moves_for_targets)):
-                move1, move2 = possible_moves_for_targets[i], possible_moves_for_targets[j]
+                move1 = possible_moves_for_targets[i]
+                move2 = possible_moves_for_targets[j]
+
                 if move1['coord'] == move2['coord']: continue
+
                 required_tiles = Counter([move1['tile_type'], move2['tile_type']])
-                if any(count > Counter(player.hand)[tile] for tile, count in required_tiles.items()): continue
-                
-                is_valid1, _ = game.check_placement_validity(move1['tile_type'], move1['orientation'], *move1['coord'], [move2]) if move1['type'] == 'place' else game.check_exchange_validity(player, move1['tile_type'], move1['orientation'], *move1['coord'], [move2])
+                if any(count > Counter(player.hand)[tile] for tile, count in required_tiles.items()):
+                    continue
+
+                is_valid1, _ = (game.check_placement_validity(move1['tile_type'], move1['orientation'], *move1['coord'], [move2]) if move1['type'] == 'place'
+                                else game.check_exchange_validity(player, move1['tile_type'], move1['orientation'], *move1['coord'], [move2]))
                 if not is_valid1: continue
-                is_valid2, _ = game.check_placement_validity(move2['tile_type'], move2['orientation'], *move2['coord'], [move1]) if move2['type'] == 'place' else game.check_exchange_validity(player, move2['tile_type'], move2['orientation'], *move2['coord'], [move1])
-                
+
+                is_valid2, _ = (game.check_placement_validity(move2['tile_type'], move2['orientation'], *move2['coord'], [move1]) if move2['type'] == 'place'
+                                else game.check_exchange_validity(player, move2['tile_type'], move2['orientation'], *move2['coord'], [move1]))
+
                 if is_valid1 and is_valid2:
                     sim_game = game.copy_for_simulation()
                     sim_player = next(p for p in sim_game.players if p.player_id == player.player_id)
@@ -210,7 +220,7 @@ class HardStrategy(EasyStrategy):
                         action1 = {'type': move1['type'], 'details': (move1['tile_type'], move1['orientation'], *move1['coord']), 'score': score, 'score_breakdown': {'combo': score}}
                         action2 = {'type': move2['type'], 'details': (move2['tile_type'], move2['orientation'], *move2['coord']), 'score': 0, 'score_breakdown': {}}
                         best_combo_actions = [action1, action2]
-        
+
         if best_combo_actions:
             print("  (HardStrategy: Found a valid combo play!)")
             return best_combo_actions
@@ -246,7 +256,7 @@ class HardStrategy(EasyStrategy):
         scored_targets.sort()
         
         # Return the coordinates of the top N targets
-        return {coord for _, coord in scored_targets[:self.MAX_TARGETS_FOR_COMBO_SEARCH]}
+        return {coord for _, coord in scored_targets[:MAX_TARGETS_FOR_COMBO_SEARCH]}
 
     def _get_high_value_target_squares(self, game: Game, player: Player, ideal_plan: Optional[List[RouteStep]]) -> Set[Tuple[int, int]]:
         """

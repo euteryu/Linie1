@@ -155,3 +155,8 @@ START_NEXT_TURN_EVENT = pygame.USEREVENT + 2 # NEW: For triggering the next turn
 # The higher the number, the more likely an KING AI is to draw a Tree tile.
 # A value of 10 means a Tree tile is 10 times more likely than a non-Tree tile.
 KING_AI_TREE_TILE_BIAS = 10
+
+# Control search space in ai_strategy.py
+# Number of possible single moves = 5 squares * 5 tiles at-hand * 4 orientations = 100
+# Number of pairs of moves to check = 100C2 = 4950 pairs of moves
+MAX_TARGETS_FOR_COMBO_SEARCH  = 5
