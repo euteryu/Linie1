@@ -37,7 +37,7 @@ class GameState:
             return False
 
         mouse_pos = event.pos
-        
+
         # --- NEW: Check for clicks on mod-defined buttons first ---
         active_player = self.game.get_active_player()
         if hasattr(self.visualizer, 'mod_buttons'):
@@ -202,14 +202,21 @@ class LayingTrackState(GameState):
         if self.move_in_progress and self.move_in_progress.get('coord'):
             for index, rect in self.current_hand_rects.items():
                 if rect.collidepoint(mouse_pos) and event.button == 1:
-                    # --- THIS IS THE FIX ---
-                    # Play the specific hand click sound
+                    tile_to_use = active_player.hand[index]
+                    # Call the new hook first. If a mod handles the click, we stop.
+                    if self.game.mod_manager.on_hand_tile_clicked(self.game, active_player, tile_to_use):
+                        return
                     self.visualizer.sounds.play('click_hand')
-                    # --- END OF FIX ---
                     
-                    if any(m['hand_index'] == index for m in self.staged_moves): self.message = "Tile already staged."; return
-                    if self.move_in_progress.get('hand_index') == index: self.move_in_progress.pop('hand_index', None); self.move_in_progress.pop('tile_type', None); self.message = f"Deselected hand tile."
-                    else: self.move_in_progress['hand_index'] = index; self.move_in_progress['tile_type'] = active_player.hand[index]; self.move_in_progress['orientation'] = 0; self.message = f"Selected hand tile. [R] Rotate, [S] Stage."
+                    if any(m['hand_index'] == index for m in self.staged_moves): 
+                        self.message = "Tile already staged."; return
+                    if self.move_in_progress.get('hand_index') == index: 
+                        self.move_in_progress.pop('hand_index', None); self.move_in_progress.pop('tile_type', None); self.message = f"Deselected hand tile."
+                    else: 
+                        self.move_in_progress['hand_index'] = index
+                        self.move_in_progress['tile_type'] = active_player.hand[index]
+                        self.move_in_progress['orientation'] = 0
+                        self.message = f"Selected hand tile. [R] Rotate, [S] Stage."
                     self._validate_all_staged_moves(); return
 
     def _handle_key_down(self, event, active_player):

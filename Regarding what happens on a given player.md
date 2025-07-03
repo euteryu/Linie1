@@ -1164,3 +1164,16 @@ The Current (Flawed) Flow:
     But by then, the redraw has already happened. The data is set too late for the draw call that was meant to show it.
 
 The Solution: We need to separate the "target identification" step from the "planning" step. The AI will first determine its targets, show them to the user, and then proceed with the heavy combinatorial search.
+
+----
+
+---
+
+
+corrections to be made:
+
+1. I've already corrected this so you don't - import pygame needed in trading_system.py file
+
+2. the buy tile $50 ui button and related text is partially covering over at-hand tiles and player line descsriptions. can we move it to a different location? in fact, in future it'd be nice to have like a pop up menu called trading, which pops up a mini window with various trading features incl the buy tile $50 button, as well as the standard 'x' cross at top-right to close the mini window tab and return to playing game. how to implement and extend these complex UI features?
+
+3. what does buy tile $50 exactly do right now? How about we add to the at-hand tile another tile slot (and assign from remaining tile piles a randomly drawn tile when user clicks that button? this would mean the affected player has ability to have lots of at-hand tile capacity than normally enforced, so inform what changes would be necessary to accomodate this mod feature scaleably.

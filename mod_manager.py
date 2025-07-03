@@ -1,4 +1,5 @@
 # mod_manager.py
+import sys
 import os
 import importlib.util
 import json
@@ -32,36 +33,58 @@ class ModManager:
         self._initialized = True
 
     def discover_mods(self):
-        # ... (This method is correct and does not need changes) ...
         self.available_mods.clear()
-        if not os.path.exists(self.mods_directory):
-            print(f"Mods directory '{self.mods_directory}' not found.")
+        
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        mods_dir_absolute = os.path.join(project_root, self.mods_directory)
+
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+
+        if not os.path.exists(mods_dir_absolute):
+            print(f"Mods directory '{mods_dir_absolute}' not found.")
             return
-        for mod_name in os.listdir(self.mods_directory):
-            mod_path = os.path.join(self.mods_directory, mod_name)
-            if os.path.isdir(mod_path):
-                config_path = os.path.join(mod_path, "mod_config.json")
-                module_path = os.path.join(mod_path, f"{mod_name.replace('-', '_')}_mod.py")
-                if not os.path.exists(config_path) or not os.path.exists(module_path):
-                    continue
+
+        for mod_name in os.listdir(mods_dir_absolute):
+            mod_path = os.path.join(mods_dir_absolute, mod_name)
+            if os.path.isdir(mod_path) and os.path.exists(os.path.join(mod_path, "__init__.py")):
                 try:
-                    with open(config_path, 'r') as f: 
-                        config = json.load(f)
+                    config_path = os.path.join(mod_path, "mod_config.json")
+                    if not os.path.exists(config_path):
+                        print(f"Skipping mod '{mod_name}': missing mod_config.json.")
+                        continue
+                    
+                    with open(config_path, 'r') as f: config = json.load(f)
+                    
                     mod_id = config.get("id")
                     mod_class_name = config.get("class_name")
-                    if not mod_id or not mod_class_name: 
+                    main_module_name = config.get("main_module", f"{mod_name.replace('-', '_')}_mod")
+                    
+                    if not mod_id or not mod_class_name:
+                        print(f"Skipping mod '{mod_name}': config missing 'id' or 'class_name'.")
                         continue
-                    spec = importlib.util.spec_from_file_location(mod_id, module_path)
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)
+
+                    # --- THIS IS THE NEW, ROBUST IMPORT LOGIC ---
+                    # 1. Construct the full package path, e.g., 'mods.magic_system.magic_system_mod'
+                    full_module_path = f"mods.{mod_name}.{main_module_name}"
+                    
+                    # 2. Use importlib.import_module, which handles packages correctly.
+                    module = importlib.import_module(full_module_path)
+                    # --- END OF NEW LOGIC ---
+
                     mod_class = getattr(module, mod_class_name)
-                    if not issubclass(mod_class, IMod): 
+                    if not issubclass(mod_class, IMod):
+                        print(f"Mod class '{mod_class_name}' in '{mod_name}' does not inherit from IMod.")
                         continue
+                    
                     mod_instance = mod_class(mod_id, config.get("name", mod_name), config.get("description", ""), config)
                     self.available_mods[mod_id] = mod_instance
                     print(f"Discovered mod: {mod_instance.name} ({mod_id})")
+
                 except Exception as e:
                     print(f"Error loading mod '{mod_name}': {e}")
+                    import traceback
+                    traceback.print_exc()
 
 
     def activate_mod(self, mod_id: str):
@@ -103,6 +126,16 @@ class ModManager:
             if handled:
                 return True, mod_chosen_tile_name
         return False, None
+
+    def on_hand_tile_clicked(self, game: 'Game', player: 'Player', tile_type: 'TileType') -> bool:
+        """
+        Dispatches the hand tile click event to active mods.
+        Returns True if any mod handled the event.
+        """
+        for mod in self.get_active_mods():
+            if mod.on_hand_tile_clicked(game, player, tile_type):
+                return True # A mod took over, stop processing
+        return False
 
     def get_active_ui_buttons(self, current_game_state_name: str) -> List[Dict[str, Any]]:
         buttons = []

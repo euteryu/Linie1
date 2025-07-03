@@ -65,4 +65,13 @@ class IMod(ABC):
         """
         pass
 
+    def on_hand_tile_clicked(self, game: 'Game', player: 'Player', tile_type: 'TileType') -> bool:
+        """
+        Called when a player clicks a tile in their hand.
+        A mod can return True to signify it has handled this click,
+        preventing the default game state logic from running.
+        For example, a "Super Star Tile" mod would use this to trigger a special state.
+        """
+        return False # Default behavior: mod does not handle the click
+
     # Add other hooks as needed (e.g., on_tile_placed, on_money_changed, on_route_validated)

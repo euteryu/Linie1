@@ -1,0 +1,10 @@
+{
+    "id": "magic_system",
+    "name": "Arcane Engineering",
+    "description": "Adds Mana and magical tile manipulation.",
+    "class_name": "MagicSystemMod",
+    "spell_cost_super_tile": 10,
+    "starting_mana": 50,
+    "max_mana": 100,
+    "mana_regen_per_turn": 10
+}

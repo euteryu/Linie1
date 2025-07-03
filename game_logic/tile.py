@@ -5,11 +5,16 @@ import copy
 # If constants are needed, import them: from constants import ...
 
 class TileType:
-    # ... (Implementation as before) ...
     def __init__(self, name: str, connections: List[List[str]], is_swappable: bool):
         self.name = name
         self.connections_base = self._process_connections(connections)
         self.is_swappable = is_swappable
+
+    def copy(self) -> 'TileType':
+        """Creates a deep copy of this TileType object."""
+        # We can use Python's built-in copy module for a true deep copy.
+        return copy.deepcopy(self)
+
     def _process_connections(self, raw_connections: List[List[str]]) -> Dict[str, List[str]]:
         """Processes raw connection pairs into a two-way connection map."""
         conn_map: Dict[str, List[str]] = {'N': [], 'E': [], 'S': [], 'W': []}
