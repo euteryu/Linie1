@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from game_logic.game import Game
     from game_logic.player import Player
     from visualizer import Linie1Visualizer # For UI hooks
+    import pygame
 
 class IMod(ABC):
     """
@@ -21,22 +22,18 @@ class IMod(ABC):
         self.is_active = False # Set by ModManager based on user selection
 
     # --- Game Lifecycle Hooks ---
-    @abstractmethod
     def on_game_setup(self, game: Game):
         """Called once when a new game starts or a saved game is loaded."""
         pass
 
-    @abstractmethod
     def on_player_turn_start(self, game: Game, player: Player):
         """Called at the very beginning of a player's turn."""
         pass
 
-    @abstractmethod
     def on_player_turn_end(self, game: Game, player: Player):
         """Called after a player's turn is confirmed."""
         pass
 
-    @abstractmethod
     def on_tile_drawn(self, game: Game, player: Player, drawn_tile_name: str, tile_draw_pile: List[str]) -> Tuple[bool, Optional[str]]:
         """
         Called when a player is about to draw a tile.
@@ -61,7 +58,7 @@ class IMod(ABC):
         """
         return False
     
-    def on_draw_ui_panel(self, screen: Any, visualizer: Linie1Visualizer, current_game_state_name: str):
+    def on_draw_ui_panel(self, screen: 'pygame.Surface', visualizer: 'Linie1Visualizer', current_game_state_name: str):
         """
         Allows mods to draw custom elements directly onto the UI panel.
         Called during visualizer.draw_ui.

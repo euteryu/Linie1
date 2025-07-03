@@ -512,8 +512,16 @@ class Linie1Visualizer:
         
         self.draw_text(screen, final_instr, C.UI_TEXT_X, instr_y, size=18)
 
+
         # --- Draw Buttons ---
-        # (This section is unchanged and correct)
+        # --- NEW: Draw and store rects for mod-defined buttons ---
+        self.mod_buttons = self.mod_manager.get_active_ui_buttons(self.current_state.__class__.__name__)
+        for button_def in self.mod_buttons:
+            pygame.draw.rect(screen, C.COLOR_UI_BUTTON_BG, button_def['rect'])
+            pygame.draw.rect(screen, C.COLOR_BLACK, button_def['rect'], 1)
+            self.draw_text(screen, button_def['text'], button_def['rect'].x + 5, button_def['rect'].y + 7, size=18)
+        # --- END NEW ---
+
         btn_text_color, btn_font_size = C.COLOR_UI_BUTTON_TEXT, 18
         for rect, text in [(self.save_button_rect, "Save Game"), (self.load_button_rect, "Load Game")]:
             pygame.draw.rect(screen, C.COLOR_UI_BUTTON_BG, rect)
@@ -553,6 +561,9 @@ class Linie1Visualizer:
         except: btn_font = pygame.font.Font(None, 20)
         btn_surf = btn_font.render(debug_btn_text, True, btn_text_color)
         screen.blit(btn_surf, btn_surf.get_rect(center=self.debug_toggle_button_rect.center))
+
+        self.mod_manager.draw_mod_ui_elements(screen, self, self.current_state.__class__.__name__)
+
 
     def draw_debug_die_panel(self, screen, selected_face):
         self.debug_die_rects.clear()

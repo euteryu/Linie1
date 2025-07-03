@@ -37,6 +37,20 @@ class GameState:
             return False
 
         mouse_pos = event.pos
+        
+        # --- NEW: Check for clicks on mod-defined buttons first ---
+        active_player = self.game.get_active_player()
+        if hasattr(self.visualizer, 'mod_buttons'):
+            for button_def in self.visualizer.mod_buttons:
+                if button_def['rect'].collidepoint(mouse_pos):
+                    # Dispatch the click to the ModManager
+                    was_handled = self.game.mod_manager.handle_mod_ui_button_click(
+                        self.game, active_player, button_def['callback_name']
+                    )
+                    if was_handled:
+                        return True # Mod handled it, stop processing
+        # --- END NEW ---
+
         handled = False
         if self.visualizer.save_button_rect.collidepoint(mouse_pos):
             self.save_game_action()

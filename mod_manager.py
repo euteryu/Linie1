@@ -24,11 +24,12 @@ class ModManager:
     def __init__(self):
         if self._initialized:
             return
+
         self.mods_directory = "mods"
         self.available_mods: Dict[str, IMod] = {}
         self.active_mod_ids: List[str] = []
-        self._initialized = True
         self.discover_mods()
+        self._initialized = True
 
     def discover_mods(self):
         # ... (This method is correct and does not need changes) ...
@@ -44,15 +45,18 @@ class ModManager:
                 if not os.path.exists(config_path) or not os.path.exists(module_path):
                     continue
                 try:
-                    with open(config_path, 'r') as f: config = json.load(f)
+                    with open(config_path, 'r') as f: 
+                        config = json.load(f)
                     mod_id = config.get("id")
                     mod_class_name = config.get("class_name")
-                    if not mod_id or not mod_class_name: continue
+                    if not mod_id or not mod_class_name: 
+                        continue
                     spec = importlib.util.spec_from_file_location(mod_id, module_path)
                     module = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(module)
                     mod_class = getattr(module, mod_class_name)
-                    if not issubclass(mod_class, IMod): continue
+                    if not issubclass(mod_class, IMod): 
+                        continue
                     mod_instance = mod_class(mod_id, config.get("name", mod_name), config.get("description", ""), config)
                     self.available_mods[mod_id] = mod_instance
                     print(f"Discovered mod: {mod_instance.name} ({mod_id})")

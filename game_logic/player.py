@@ -30,6 +30,11 @@ class Player(ABC):
         self.line_card: Optional[LineCard] = None
         self.route_card: Optional[RouteCard] = None
         self.player_state: PlayerState = PlayerState.LAYING_TRACK
+
+        # This dictionary will hold all data added by mods.
+        # The key is the mod's unique ID, ensuring no name collisions.
+        self.components: Dict[str, Any] = {}
+
         self.streetcar_path_index: int = 0
         self.required_node_index: int = 0
         self.start_terminal_coord: Optional[Tuple[int, int]] = None
@@ -75,6 +80,11 @@ class Player(ABC):
             
         data['difficulty_mode'] = self.difficulty_mode
 
+        # --- NEW: Serialize the components dictionary ---
+        # This automatically saves all data from all active mods.
+        data['components'] = self.components
+        # --- END NEW ---
+
         return data
 
     @staticmethod
@@ -110,6 +120,11 @@ class Player(ABC):
                 is_goal_node=s["is_goal"],
                 arrival_direction=Direction[s["arrival_dir"]] if s["arrival_dir"] else None
             ) for s in route_data]
+        
+        # --- NEW: Deserialize the components dictionary ---
+        # This automatically loads all mod data from the save file.
+        player.components = data.get('components', {})
+        # --- END NEW ---
         
         return player
 

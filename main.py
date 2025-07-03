@@ -12,9 +12,12 @@ if __name__ == '__main__':
         mod_manager.discover_mods()
 
         # 2. Activate desired mods.
-        if "lucky_draws" in mod_manager.available_mods:
-             mod_manager.activate_mod("lucky_draws")
-        # --- END OF FIX ---
+        # TODO: HOW TO ENSURE MOD INTER-DEPENENCY CLASH PREVENTION ?
+        #       HOW TO LOAD WITHOUT MAIN.PY KNOWING NAME OF MODS SPECIFICALLY, IF USER MAKES / INSTALLS THEIR OWN MODS ?  API ?
+        # if "lucky_draws" in mod_manager.available_mods:
+        #      mod_manager.activate_mod("lucky_draws")
+        if "trading_system" in mod_manager.available_mods:
+             mod_manager.activate_mod("trading_system")
 
         # player_types = ['human', 'ai']
         # player_types = ['human', 'ai', 'ai']

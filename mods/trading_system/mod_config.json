@@ -1,0 +1,7 @@
+{
+    "id": "trading_system",
+    "name": "Economy & Trading",
+    "description": "Adds money and a tile trading system.",
+    "class_name": "TradingSystemMod",
+    "starting_money": 100
+}
