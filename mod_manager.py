@@ -13,24 +13,33 @@ if TYPE_CHECKING:
     from game_logic.player import Player
     from visualizer import Linie1Visualizer
 
+
 class ModManager:
     _instance: Optional['ModManager'] = None
 
     def __new__(cls):
+        # This part ensures only one instance of the class is ever created.
         if cls._instance is None:
+            print("--- Creating new ModManager instance ---")
             cls._instance = super(ModManager, cls).__new__(cls)
-            cls._instance._initialized = False
+            # Add a flag to indicate that this is the first time.
+            cls._instance._is_new = True
         return cls._instance
 
     def __init__(self):
-        if self._initialized:
-            return
-
-        self.mods_directory = "mods"
-        self.available_mods: Dict[str, IMod] = {}
-        self.active_mod_ids: List[str] = []
-        self.discover_mods()
-        self._initialized = True
+        # This __init__ method is called every time `ModManager()` is used,
+        # but we use a flag to ensure the expensive setup logic runs only once.
+        if hasattr(self, '_is_new') and self._is_new:
+            print("--- Initializing ModManager (should only happen once) ---")
+            self.mods_directory = "mods"
+            self.available_mods: Dict[str, IMod] = {}
+            self.active_mod_ids: List[str] = []
+            
+            # Discover mods as part of the one-time initialization.
+            self.discover_mods()
+            
+            # Unset the flag so this block never runs again on this instance.
+            self._is_new = False
 
     def discover_mods(self):
         self.available_mods.clear()

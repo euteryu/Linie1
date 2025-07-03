@@ -273,6 +273,23 @@ class Linie1Visualizer:
         sys.exit()
 
     def update_current_state_for_player(self):
+        """
+        Sets self.current_state based on the active player's state,
+        but does NOT override special temporary states created by mods.
+        """
+        # --- THIS IS THE FIX ---
+        # 1. Define the "normal" states that this method is allowed to manage.
+        base_game_states = (LayingTrackState, DrivingState, GameOverState)
+
+        # 2. Check if the current state is one of these base states.
+        is_in_base_state = isinstance(self.current_state, base_game_states)
+
+        # 3. If the current state is NOT a base game state, we assume it's a
+        #    special mod state (like ChooseAnyTileState) and we must not touch it.
+        #    Let the mod's state handle its own lifecycle.
+        if not is_in_base_state:
+            return
+        # --- END OF FIX ---
         try:
             active_player = self.game.get_active_player()
             player_state = active_player.player_state

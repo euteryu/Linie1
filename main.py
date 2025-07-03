@@ -14,15 +14,12 @@ if __name__ == '__main__':
         # 2. Activate desired mods.
         # TODO: HOW TO ENSURE MOD INTER-DEPENENCY CLASH PREVENTION ?
         #       HOW TO LOAD WITHOUT MAIN.PY KNOWING NAME OF MODS SPECIFICALLY, IF USER MAKES / INSTALLS THEIR OWN MODS ?  API ?
-        # if "lucky_draws" in mod_manager.available_mods:
-        #      mod_manager.activate_mod("lucky_draws")
-        # if "trading_system" in mod_manager.available_mods:
-        #      mod_manager.activate_mod("trading_system")
-        if "magic_system" in mod_manager.available_mods:
-             mod_manager.activate_mod("magic_system")
+        # mod_manager.activate_mod("lucky_draws")
+        # mod_manager.activate_mod("trading_system")
+        mod_manager.activate_mod("magic_system")
 
-        player_types = ['human', 'ai']
-        # player_types = ['human', 'ai', 'ai']
+        # player_types = ['human', 'ai']
+        player_types = ['human', 'ai', 'ai']
         # player_types = ['ai', 'ai', 'human']
         # player_types = ['ai', 'ai', 'ai']
         # player_types = ['ai', 'ai', 'ai', 'ai']
