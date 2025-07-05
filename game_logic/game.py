@@ -885,26 +885,18 @@ class Game:
         return False4
 
     def undo_last_action(self) -> bool:
-        if self.actions_taken_this_turn <= 0: return False
-        if self.command_history.undo():
-             self.actions_taken_this_turn -= 1
-             if self.get_active_player().player_state == PlayerState.DRIVING:
-                 self.actions_taken_this_turn = 0
-             return True
-        return False
+        """
+        Undoes the last command from the history. The command itself is
+        responsible for reverting all game state, including action counters.
+        """
+        return self.command_history.undo()
 
     def redo_last_action(self) -> bool:
-        if self.get_active_player().player_state == PlayerState.LAYING_TRACK and self.actions_taken_this_turn >= MAX_PLAYER_ACTIONS:
-            return False
-        cmd = self.command_history.get_command_to_redo()
-        if not cmd: return False
-        if self.command_history.redo():
-             if isinstance(cmd, (PlaceTileCommand, ExchangeTileCommand)):
-                 self.actions_taken_this_turn += 1
-             elif isinstance(cmd, MoveCommand):
-                 self.actions_taken_this_turn = MAX_PLAYER_ACTIONS
-             return True
-        return False
+        """
+        Redoes the last undone command. The command itself is responsible for
+        re-applying all game state changes, including action counters.
+        """
+        return self.command_history.redo()
 
 
     def eliminate_player(self, player: Player):
