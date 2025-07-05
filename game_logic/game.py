@@ -873,11 +873,16 @@ class Game:
 
         command = MoveCommand(self, player, target_path_idx)
         if self.command_history.execute_command(command):
-             self.actions_taken_this_turn = MAX_PLAYER_ACTIONS
-             if self.game_phase != GamePhase.GAME_OVER:
-                  self.confirm_turn()
-             return True
-        return False
+            # The MoveCommand has run and has already called the win check.
+            self.actions_taken_this_turn = self.MAX_PLAYER_ACTIONS
+            
+            # If the game phase is NOT over, confirm the turn to advance to the next player.
+            # If it IS over, do nothing and wait for the state change request to be handled.
+            if self.game_phase != GamePhase.GAME_OVER:
+                self.turn_manager.confirm_turn(self)
+            
+            return True
+        return False4
 
     def undo_last_action(self) -> bool:
         if self.actions_taken_this_turn <= 0: return False

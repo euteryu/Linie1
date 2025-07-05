@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .tile import TileType
 
 from .enums import Direction, GamePhase, PlayerState
+from game_states import GameOverState # This import is now safe
 
 class RuleEngine:
     """
@@ -88,47 +89,47 @@ class RuleEngine:
         return True, "Exchange is valid."
 
     def check_win_condition(self, game: 'Game', player: 'Player') -> bool:
-        """Checks if a player has met the driving-based win condition."""
+        """
+        Checks if a player has met the driving-based win condition.
+        If they have, it updates the game model and requests the UI state change.
+        """
         if player.player_state != PlayerState.DRIVING: return False
         if not player.streetcar_position or not player.line_card: return False
         
         full_sequence = player.get_full_driving_sequence(game)
         if not full_sequence: return False
         
-        if player.required_node_index >= len(full_sequence):
-            if player.streetcar_position == full_sequence[-1]:
-                print(f"WIN CONDITION MET for Player {player.player_id}!")
-                game.game_phase = GamePhase.GAME_OVER
-                game.winner = player
-                player.player_state = PlayerState.FINISHED
-                return True
+        # Check if player has passed all required nodes AND is at the final destination
+        if player.required_node_index >= len(full_sequence) and player.streetcar_position == full_sequence[-1]:
+            print(f"WIN CONDITION MET for Player {player.player_id}!")
+            # Update the game model (the "truth")
+            game.game_phase = GamePhase.GAME_OVER
+            game.winner = player
+            player.player_state = PlayerState.FINISHED
+            
+            # --- THIS IS THE FIX ---
+            # Explicitly request the UI to change to the GameOverState.
+            # We check if the visualizer exists to support non-GUI tests in the future.
+            if game.visualizer:
+                game.visualizer.request_state_change(GameOverState)
+            # --- END OF FIX ---
+            
+            return True
         return False
 
     def check_elimination_win_condition(self, game: 'Game'):
         """
-        Checks for a win condition after a player is eliminated.
-        A "last player standing" win is only granted if that player is
-        already in the DRIVING phase.
+        This method is now simpler. It only checks for a win if one player is left
+        and they are already driving. The draw condition is handled by the TurnManager.
         """
         active_players = [p for p in game.players if p.player_state not in [PlayerState.ELIMINATED, PlayerState.FINISHED]]
-        
         if len(active_players) == 1 and game.num_players > 1:
             last_player = active_players[0]
             if last_player.player_state == PlayerState.DRIVING:
                 print(f"--- Last Player Standing! Player {last_player.player_id} was driving and wins by default! ---")
                 game.game_phase = GamePhase.GAME_OVER
                 game.winner = last_player
-                last_player.player_state = PlayerState.FINISHED
-            else:
-                print(f"--- Last Player Standing (Player {last_player.player_id}) is also stuck. The game is a DRAW! ---")
-                game.game_phase = GamePhase.GAME_OVER
-                game.winner = None
-                last_player.player_state = PlayerState.ELIMINATED
-
-        elif len(active_players) == 0:
-            print(f"--- All players have been eliminated! The game is a DRAW. ---")
-            game.game_phase = GamePhase.GAME_OVER
-            game.winner = None
+                if game.visualizer: game.visualizer.request_state_change(GameOverState)
 
     def can_player_make_any_move(self, game: 'Game', player: 'Player') -> bool:
         """

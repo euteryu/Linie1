@@ -314,7 +314,11 @@ class MoveCommand(Command):
         self._was_game_over = self.game.game_phase == GamePhase.GAME_OVER
 
         self.game.move_streetcar(self.player, self.target_path_index)
-        win = self.game.check_win_condition(self.player)
+        
+        # --- THIS IS THE FIX ---
+        # The command's execution triggers the win condition check via the rule engine.
+        win = self.game.rule_engine.check_win_condition(self.game, self.player)
+        # --- END OF FIX ---
 
         print(f"--> Move Execute SUCCESS. Landed at {self.player.streetcar_position}. Win: {win}")
         return True

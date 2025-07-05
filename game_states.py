@@ -1,30 +1,25 @@
-# game_states.py
-from typing import Optional, Dict, Any, List
+from __future__ import annotations
+from typing import Optional, Dict, Any, List, TYPE_CHECKING # Import TYPE_CHECKING
 import pygame
 import tkinter as tk
 from tkinter import filedialog
 import copy
 
-# --- Relative Imports from Game Logic ---
-from game_logic.game import Game
+if TYPE_CHECKING:
+    from game_logic.game import Game
+    from game_logic.tile import TileType
+
 from game_logic.player import Player, HumanPlayer, AIPlayer
-from game_logic.tile import TileType, PlacedTile
 from game_logic.enums import GamePhase, PlayerState, Direction
-from game_logic.commands import CombinedActionCommand # Make sure to create this new command
-
-# --- Constants ---
+from game_logic.commands import CombinedActionCommand
 import constants as C
-
-# --- Base Game State ---
 
 class GameState:
     """Abstract base class for different game phases/states."""
     def __init__(self, visualizer):
         self.visualizer = visualizer
-        self.game: Game = visualizer.game
-        # A flag to indicate if this is a temporary state that should
-        # not be overridden by the main state update logic.
-        # Base game states will leave this as False. Mod states will set it to True.
+        # We can still access self.game because it's passed in via the visualizer
+        self.game: 'Game' = visualizer.game
         self.is_transient_state: bool = False
 
     def handle_event(self, event):
