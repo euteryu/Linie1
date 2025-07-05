@@ -75,6 +75,13 @@ class CommandHistory:
             self._history = self._history[:self._current_index + 1]
             # Index remains pointing to the last valid command executed/undone to
 
+    def get_current_index(self) -> int:
+        """
+        Public getter for the current index, allowing other systems to
+        read (but not write) the history's state.
+        """
+        return self._current_index
+
     # Optional: Get description of last command for UI feedback
     def get_last_action_description(self) -> Optional[str]:
          if self._current_index >= 0:

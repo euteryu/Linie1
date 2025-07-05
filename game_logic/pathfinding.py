@@ -29,10 +29,14 @@ def _get_valid_successors(game: 'Game', current_state: PathState, goal_node_sequ
     is_stop = current_pos in game.board.building_stop_locations.values()
     was_the_required_goal = (current_pos == previous_target_node)
     
-    if is_stop and was_the_required_goal and arrival_dir and game._is_valid_stop_entry(current_pos, arrival_dir):
+    # This block now correctly calls the rule engine
+    if is_stop and was_the_required_goal and arrival_dir and game.rule_engine.is_valid_stop_entry(game, current_pos, arrival_dir):
         forced_exit_dir = arrival_dir
     
-    conns = game.get_effective_connections(tile.tile_type, tile.orientation)
+    # --- START OF FIX ---
+    # Call get_effective_connections on the rule_engine, not the game object.
+    conns = game.rule_engine.get_effective_connections(tile.tile_type, tile.orientation)
+    # --- END OF FIX ---
     
     possible_exits: List[Direction] = []
     if forced_exit_dir:
@@ -51,14 +55,20 @@ def _get_valid_successors(game: 'Game', current_state: PathState, goal_node_sequ
         n_tile = game.board.get_tile(n_pos[0], n_pos[1])
         if not n_tile: continue
         
-        n_conns = game.get_effective_connections(n_tile.tile_type, n_tile.orientation)
+        # --- START OF FIX ---
+        n_conns = game.rule_engine.get_effective_connections(n_tile.tile_type, n_tile.orientation)
+        # --- END OF FIX ---
+        
         req_entry = Direction.opposite(exit_dir).name
         if req_entry not in {ex for n_exits in n_conns.values() for ex in n_exits}: continue
 
         next_seq_idx = seq_idx
         if seq_idx < len(goal_node_sequence) and n_pos == goal_node_sequence[seq_idx]:
-            if not (n_pos in game.board.building_stop_locations.values()) or game._is_valid_stop_entry(n_pos, exit_dir):
+            # --- START OF FIX 3 ---
+            # This check also needs to use the rule engine
+            if not (n_pos in game.board.building_stop_locations.values()) or game.rule_engine.is_valid_stop_entry(game, n_pos, exit_dir):
                 next_seq_idx += 1
+            # --- END OF FIX 3 ---
         
         yield PathState(pos=n_pos, arrival_dir=exit_dir, seq_idx=next_seq_idx)
 

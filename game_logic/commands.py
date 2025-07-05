@@ -173,14 +173,36 @@ class MoveCommand(Command):
         self._original_node_index = self.player.required_node_index
         self._was_game_over = self.game.game_phase == GamePhase.GAME_OVER
 
-        self.game.move_streetcar(self.player, self.target_path_index)
+        # --- START OF FIX ---
+        # The logic from the old game.move_streetcar() is now here.
+        if not self.player.validated_route or not (0 <= self.target_path_index < len(self.player.validated_route)):
+            return False # Invalid move index
+        
+        self.player.streetcar_path_index = self.target_path_index
+        
+        # Check if the new step is a goal node to update progress
+        new_step = self.player.validated_route[self.target_path_index]
+        if new_step.is_goal_node:
+            # Find the corresponding index in the full driving sequence to update progress
+            full_sequence = self.player.get_full_driving_sequence(self.game)
+            if full_sequence and new_step.coord in full_sequence:
+                goal_index_in_sequence = full_sequence.index(new_step.coord)
+                # The required_node_index should be one MORE than the index of the goal just reached.
+                if self.player.required_node_index <= goal_index_in_sequence:
+                    self.player.required_node_index = goal_index_in_sequence + 1
+                    print(f"  -> Reached required node {new_step.coord}. Advancing sequence index to {self.player.required_node_index}.")
+        # --- END OF FIX ---
         
         win = self.game.rule_engine.check_win_condition(self.game, self.player)
-
-        # Driving is a full turn's action.
         self.game.actions_taken_this_turn = self.game.MAX_PLAYER_ACTIONS
         
         print(f"--> Move Execute SUCCESS. Landed at {self.player.streetcar_position}. Win: {win}")
+        
+        # If the move resulted in a win, the state is already GAME_OVER.
+        # Otherwise, the turn must be confirmed.
+        if self.game.game_phase != GamePhase.GAME_OVER:
+            self.game.confirm_turn()
+            
         return True
 
     def undo(self) -> bool:
@@ -210,10 +232,12 @@ class CombinedActionCommand(Command):
     def __init__(self, game: 'Game', player: 'Player', staged_moves: List[Dict]):
         super().__init__(game)
         self.player = player
+        # Deep copy to ensure the command has its own independent data
         self.moves_to_perform = copy.deepcopy(staged_moves)
         self._undo_data = []
 
     def execute(self) -> bool:
+        """Executes all staged moves and updates game state."""
         print(f"--- [COMMAND] Executing CombinedAction for P{self.player.player_id} ---")
         
         if self.game.actions_taken_this_turn + len(self.moves_to_perform) > self.game.MAX_PLAYER_ACTIONS:
@@ -234,43 +258,62 @@ class CombinedActionCommand(Command):
                     placed_tile = PlacedTile(tile_type, move['orientation'])
                     self.game.board.set_tile(r, c, placed_tile)
 
+                    # Store the state of buildings with stops before the check
                     building_before = self.game.board.buildings_with_stops.copy()
-                    self.game._check_and_place_stop_sign(placed_tile, r, c)
+                    
+                    # Call the public method on the rule_engine, not the game object
+                    self.game.rule_engine.check_and_place_stop_sign(self.game, placed_tile, r, c)
+                    
+                    # Determine if a new stop was created
                     newly_stopped = self.game.board.buildings_with_stops - building_before
                     if newly_stopped:
                         undo_entry['stop_placed'] = True
                         undo_entry['building_id'] = newly_stopped.pop()
+                    
                     self._undo_data.append(undo_entry)
                 
                 elif move['action_type'] == 'exchange':
                     old_placed_tile = self.game.board.get_tile(r, c)
-                    if not old_placed_tile: raise ValueError(f"Exchange failed: No tile at {coord}.")
-                    self._undo_data.append({'type': 'exchange', 'coord': coord, 'new_tile_type_name': tile_type.name, 'old_placed_tile_data': old_placed_tile.to_dict()})
+                    if not old_placed_tile: 
+                        raise ValueError(f"Exchange failed: No tile at {coord}.")
+                    
+                    self._undo_data.append({
+                        'type': 'exchange', 
+                        'coord': coord, 
+                        'new_tile_type_name': tile_type.name, 
+                        'old_placed_tile_data': old_placed_tile.to_dict()
+                    })
+                    
                     self.player.hand.remove(tile_type)
                     self.player.hand.append(old_placed_tile.tile_type)
                     new_placed_tile = PlacedTile(tile_type, move['orientation'])
                     self.game.board.set_tile(r, c, new_placed_tile)
 
+            # Update the action counter only after all moves succeed
             self.game.actions_taken_this_turn += len(self.moves_to_perform)
             print(f"--- [COMMAND] CombinedAction Execute SUCCESS. Actions taken this turn: {self.game.actions_taken_this_turn} ---")
             return True
 
         except (ValueError, KeyError, IndexError) as e:
-            print(f"--- [COMMAND-ERROR] CombinedAction failed: {e}. Rolling back... ---")
-            self.undo() # Roll back any partial execution
+            print(f"--- [COMMAND-ERROR] CombinedAction failed during execution: {e}. Rolling back... ---")
+            self.undo() # Automatically roll back any partial execution
             return False
 
     def undo(self) -> bool:
+        """Reverses all sub-actions performed by this command."""
         print(f"--- [COMMAND] Undoing CombinedAction for P{self.player.player_id} ---")
         
+        # Decrement the action counter first
         self.game.actions_taken_this_turn -= len(self._undo_data)
         
+        # Reverse the actions in the opposite order of execution
         for undo_action in reversed(self._undo_data):
             coord = undo_action['coord']
             r, c = coord
             
             if undo_action['type'] == 'place':
                 tile_to_return = self.game.tile_types[undo_action['tile_type_name']]
+                # If a stop sign was placed, remove it
                 if undo_action['stop_placed'] and (building_id := undo_action['building_id']):
                     tile = self.game.board.get_tile(r, c)
                     if tile and tile.has_stop_sign:
@@ -278,20 +321,28 @@ class CombinedActionCommand(Command):
                         self.game.board.buildings_with_stops.discard(building_id)
                         if building_id in self.game.board.building_stop_locations:
                             del self.game.board.building_stop_locations[building_id]
+                
                 self.game.board.set_tile(r, c, None)
                 self.player.hand.append(tile_to_return)
 
             elif undo_action['type'] == 'exchange':
                 old_tile = PlacedTile.from_dict(undo_action['old_placed_tile_data'], self.game.tile_types)
                 new_tile_type = self.game.tile_types[undo_action['new_tile_type_name']]
-                if not old_tile: return False
+                if not old_tile: 
+                    return False # Should not happen if data is consistent
+                
                 self.game.board.set_tile(r, c, old_tile)
-                if old_tile.tile_type in self.player.hand: self.player.hand.remove(old_tile.tile_type)
+                
+                if old_tile.tile_type in self.player.hand:
+                    self.player.hand.remove(old_tile.tile_type)
+                
                 self.player.hand.append(new_tile_type)
 
+        # Clear the undo data after a successful rollback to prevent re-undoing
         self._undo_data = []
         print(f"--- [COMMAND] CombinedAction Undo SUCCESS. Actions taken this turn: {self.game.actions_taken_this_turn} ---")
         return True
 
     def get_description(self) -> str:
+        """Provides a user-friendly description for the command."""
         return f"Commit {len(self.moves_to_perform)} staged actions"

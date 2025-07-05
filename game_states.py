@@ -250,19 +250,39 @@ class LayingTrackState(GameState):
             self._commit_staged_moves(active_player)
 
     def _validate_all_staged_moves(self):
+        """
+        Checks the validity of all currently staged moves and any move
+        that is in progress, updating their 'is_valid' flag.
+        """
         player = self.game.get_active_player()
         all_hypothetical_moves = self.staged_moves[:]
         if self.move_in_progress and 'tile_type' in self.move_in_progress:
             all_hypothetical_moves.append(self.move_in_progress)
+
         for i, move_to_validate in enumerate(all_hypothetical_moves):
+            # Create a list of all *other* staged moves to check against.
             other_moves = all_hypothetical_moves[:i] + all_hypothetical_moves[i+1:]
+            
             coord_r, coord_c = move_to_validate['coord']
+            # Determine if the action is a place or an exchange.
             action = 'exchange' if self.game.board.get_tile(coord_r, coord_c) else 'place'
-            is_valid, reason = False, "Not enough info"
+            
+            is_valid = False
             if 'tile_type' in move_to_validate:
                 orientation = move_to_validate.get('orientation', 0)
-                if action == 'place': is_valid, reason = self.game.check_placement_validity(move_to_validate['tile_type'], orientation, coord_r, coord_c, hypothetical_moves=other_moves)
-                else: is_valid, reason = self.game.check_exchange_validity(player, move_to_validate['tile_type'], orientation, coord_r, coord_c, hypothetical_moves=other_moves)
+                
+                # --- START OF FIX ---
+                # Call the validation methods on the rule_engine, not the game object.
+                if action == 'place':
+                    is_valid, _ = self.game.rule_engine.check_placement_validity(
+                        self.game, move_to_validate['tile_type'], orientation, coord_r, coord_c, hypothetical_moves=other_moves
+                    )
+                else: # action == 'exchange'
+                    is_valid, _ = self.game.rule_engine.check_exchange_validity(
+                        self.game, player, move_to_validate['tile_type'], orientation, coord_r, coord_c, hypothetical_moves=other_moves
+                    )
+                # --- END OF FIX ---
+
             move_to_validate['is_valid'] = is_valid
 
     def _commit_staged_moves(self, player):
@@ -320,7 +340,9 @@ class DrivingState(GameState):
                     roll_result = face; break
         elif not self.visualizer.debug_mode and event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
             self.visualizer.sounds.play('dice_roll')
-            roll_result = self.game.roll_special_die()
+            # --- START OF FIX ---
+            roll_result = self.game.deck_manager.roll_special_die()
+            # --- END OF FIX ---
         
         if roll_result is not None:
             self.last_roll = roll_result

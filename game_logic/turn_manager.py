@@ -6,7 +6,7 @@ import pygame
 if TYPE_CHECKING:
     from .game import Game
     
-from .player import HumanPlayer
+from .player import HumanPlayer, AIPlayer
 from .enums import GamePhase, PlayerState
 from constants import START_NEXT_TURN_EVENT, MAX_PLAYER_ACTIONS, HAND_TILE_LIMIT
 from game_states import GameOverState # This import is safe
@@ -18,28 +18,33 @@ class TurnManager:
     """
     def confirm_turn(self, game: 'Game') -> bool:
         """
-        Finalizes a turn, handles all end-game checks, and advances to the
-        next valid player.
+        Finalizes a turn by checking for forfeits, drawing new tiles,
+        advancing the player index, and checking for win/draw conditions.
+        Returns True if the turn was successfully confirmed, False otherwise.
         """
         active_p = game.get_active_player()
         if game.game_phase == GamePhase.GAME_OVER:
             return False
 
-        # --- Forfeit check for Human Players ---
+        # --- Forfeit Check for Human Players ---
         if isinstance(active_p, HumanPlayer) and active_p.player_state == PlayerState.LAYING_TRACK:
             if game.actions_taken_this_turn == 0:
                 if not game.rule_engine.can_player_make_any_move(game, active_p):
-                    # Player has no moves and tried to pass, eliminate them.
                     game.eliminate_player(active_p)
+                    if game.visualizer and game.sounds:
+                        game.sounds.play('eliminated')
                 else:
-                    # Player has moves and tried to pass, which is not allowed.
                     print(f"--- Player {active_p.player_id} attempted to pass with valid moves. Turn not confirmed. ---")
                     return False
         
-        # Draw tiles for players still laying track
+        # --- Draw Tiles for Players still in Laying Track Phase ---
         if active_p.player_state == PlayerState.LAYING_TRACK:
-            for _ in range(min(HAND_TILE_LIMIT - len(active_p.hand), MAX_PLAYER_ACTIONS)):
-                game.draw_tile(active_p)
+            num_to_draw = min(HAND_TILE_LIMIT - len(active_p.hand), game.actions_taken_this_turn)
+            for _ in range(num_to_draw):
+                # --- START OF FIX ---
+                # Call the method on the deck_manager, not the game object.
+                game.deck_manager.draw_tile(active_p)
+                # --- END OF FIX ---
 
         # --- Consolidated End-Game Check ---
         active_players = [p for p in game.players if p.player_state not in [PlayerState.ELIMINATED, PlayerState.FINISHED]]
@@ -61,32 +66,34 @@ class TurnManager:
         if game_is_over:
             if game.visualizer:
                 game.visualizer.request_state_change(GameOverState)
-            return True # Stop the turn confirmation process, the game has ended.
+            return True
 
-        # --- Advance to the next valid player if the game is not over ---
+        # --- Advance to the next valid player ---
         num_checked = 0
+        original_player_index = game.active_player_index
         while num_checked < game.num_players:
             game.active_player_index = (game.active_player_index + 1) % game.num_players
-            if game.get_active_player().player_state != PlayerState.ELIMINATED:
+            if game.get_active_player().player_state not in [PlayerState.ELIMINATED, PlayerState.FINISHED]:
                 break
             num_checked += 1
         
-        if game.active_player_index == 0:
+        if game.active_player_index <= original_player_index:
             game.current_turn += 1
             
         game.actions_taken_this_turn = 0
         game.command_history.clear_redo_history()
+        game.turn_start_history_index = game.command_history.get_current_index()
         
         next_p = game.get_active_player()
         print(f"\n--- Starting Turn {game.current_turn} for Player {next_p.player_id} ({next_p.player_state.name}) ---")
 
-        # Check if the next player has now completed their route
         if next_p.player_state == PlayerState.LAYING_TRACK:
             is_complete, start, path = game.check_player_route_completion(next_p)
             if is_complete and start and path:
+                print(f"  Player {next_p.player_id} completed their route!")
                 game.handle_route_completion(next_p, start, path)
         
-        # Signal the main loop to kick off the next player's turn logic
-        pygame.event.post(pygame.event.Event(START_NEXT_TURN_EVENT))
+        if isinstance(next_p, AIPlayer):
+             pygame.event.post(pygame.event.Event(START_NEXT_TURN_EVENT))
         
         return True
