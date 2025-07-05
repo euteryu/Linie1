@@ -98,11 +98,10 @@ class MagicSystemMod(IMod):
         if a board square was selected first or not.
         """
         if hasattr(tile_type, 'is_super_tile') and tile_type.is_super_tile:
-            print(f"[{self.name}] Super Star Tile clicked! Entering selection mode.")
-            
             if game.visualizer:
-                # Switch to our custom state. This state now handles everything else.
-                game.visualizer.current_state = ChooseAnyTileState(game.visualizer, tile_type)
-            
-            return True # The click was handled by the mod.
+                # Use a lambda to "package" the constructor call with its arguments.
+                game.visualizer.request_state_change(
+                    lambda v: ChooseAnyTileState(v, tile_type)
+                )
+            return True
         return False

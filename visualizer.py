@@ -5,7 +5,7 @@ import sys
 import math
 import tkinter as tk
 from tkinter import filedialog
-from typing import List, Dict, Tuple, Optional, Any
+from typing import List, Dict, Tuple, Optional, Any, Callable 
 from collections import deque
 import copy
 
@@ -109,6 +109,9 @@ class Linie1Visualizer:
         pygame.display.set_caption("Linie 1")
         self.clock = pygame.time.Clock()
 
+        # NEW: The queue now holds a callable (a function) that will create the state.
+        self.next_state_constructor: Optional[Callable] = None
+
         try:
             self.font = pygame.font.SysFont(None, C.DEFAULT_FONT_SIZE)
         except Exception as e:
@@ -163,6 +166,8 @@ class Linie1Visualizer:
         self.debug_toggle_button_rect = pygame.Rect(C.DEBUG_BUTTON_X, C.DEBUG_BUTTON_Y, C.DEBUG_BUTTON_WIDTH, C.DEBUG_BUTTON_HEIGHT)
 
         self.current_state: GameState = LayingTrackState(self)
+        # A queue to hold requests for state changes.
+        self.next_state_request: Optional[type] = None
         self.update_current_state_for_player()
 
         self.sounds.load_sounds()
@@ -225,41 +230,63 @@ class Linie1Visualizer:
                  print(f"Error rendering/blitting text for die face {face}: {e}")
         return surfaces
 
+    def request_state_change(self, new_state_constructor: Callable):
+        """Adds a request to change the game state on the next frame."""
+        self.next_state_constructor = new_state_constructor
+
+    def return_to_base_state(self):
+        """
+        Calculates the correct base game state (LayingTrack, etc.) and
+        requests a transition to it. This replaces the old update method.
+        """
+        target_state_class = LayingTrackState # Default
+        try:
+            active_player = self.game.get_active_player()
+            player_state = active_player.player_state
+            game_phase = self.game.game_phase
+            
+            if game_phase == GamePhase.GAME_OVER: target_state_class = GameOverState
+            elif player_state == PlayerState.DRIVING: target_state_class = DrivingState
+        except Exception as e:
+            print(f"Error determining base state: {e}")
+        
+        self.request_state_change(target_state_class)
+
     def run(self):
-        """ Main game loop. """
+        """ Main game loop with a robust state transition system. """
         running = True
         
+        # Post event to kick off the first turn if it's an AI
         if isinstance(self.game.get_active_player(), AIPlayer):
              pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT))
         
         while running:
             dt = self.clock.tick(C.FPS) / 1000.0
-            events = pygame.event.get()
-
             
+            # --- Handle State Transitions at the beginning of the frame ---
+            if self.next_state_constructor:
+                print(f"Executing State Change Request...")
+                # Create the new state by calling the stored function
+                self.current_state = self.next_state_constructor(self)
+                self.next_state_constructor = None # Clear the request
 
-            self.update_current_state_for_player()
-
+            events = pygame.event.get()
             for event in events:
                 if event.type == pygame.QUIT:
                     running = False
                     break
-
-                # --- THIS IS THE FIX ---
-                # Handle our custom game flow event
+                
                 if event.type == C.START_NEXT_TURN_EVENT:
                     active_player = self.game.get_active_player()
-                    # The turn handler now needs access to the visualizer to force redraws
                     active_player.handle_turn_logic(self.game, self, self.sounds)
                     continue
-                # --- END OF FIX ---
-
+                
                 if self.current_state:
                      self.current_state.handle_event(event)
 
             if not running: break
 
-            # Main drawing loop - this still runs every frame for smooth animation and human input
+            # Drawing logic
             self.screen.fill(C.COLOR_UI_BG)
             if self.current_state:
                 self.current_state.draw(self.screen)
@@ -274,34 +301,35 @@ class Linie1Visualizer:
 
     def update_current_state_for_player(self):
         """
-        Sets self.current_state based on the active player's state,
-        but does NOT override special temporary states created by mods.
+        Sets self.current_state based on the active player's state, but
+        respects special "transient" states created by mods by doing nothing.
         """
-        # --- THIS IS THE FIX ---
-        # 1. Define the "normal" states that this method is allowed to manage.
-        base_game_states = (LayingTrackState, DrivingState, GameOverState)
-
-        # 2. Check if the current state is one of these base states.
-        is_in_base_state = isinstance(self.current_state, base_game_states)
-
-        # 3. If the current state is NOT a base game state, we assume it's a
-        #    special mod state (like ChooseAnyTileState) and we must not touch it.
-        #    Let the mod's state handle its own lifecycle.
-        if not is_in_base_state:
-            return
-        
+        # --- THIS IS THE CORRECT, DECOUPLED LOGIC ---
+        # 1. Safely check if the current state has marked itself as transient.
+        #    `getattr` is used to prevent an error if the attribute doesn't exist.
         if getattr(self.current_state, 'is_transient_state', False):
+            # If it's a transient state (like a mod's pop-up window),
+            # do not touch it. Let that state's own logic handle when to
+            # transition back to a normal game state.
             return
+        # --- END OF CORRECT LOGIC ---
 
+        # If it's not a transient state, proceed with the normal state-switching logic.
         try:
             active_player = self.game.get_active_player()
             player_state = active_player.player_state
             game_phase = self.game.game_phase
             target_state_class = None
-            if game_phase == GamePhase.GAME_OVER: target_state_class = GameOverState
-            elif player_state == PlayerState.DRIVING: target_state_class = DrivingState
-            else: target_state_class = LayingTrackState
-            if not isinstance(self.current_state, target_state_class):
+
+            if game_phase == GamePhase.GAME_OVER:
+                target_state_class = GameOverState
+            elif player_state == PlayerState.DRIVING:
+                target_state_class = DrivingState
+            elif player_state == PlayerState.LAYING_TRACK:
+                target_state_class = LayingTrackState
+            
+            # Only create a new state instance if the class type is different.
+            if target_state_class and not isinstance(self.current_state, target_state_class):
                 print(f"State Change: -> {target_state_class.__name__}")
                 self.current_state = target_state_class(self)
         except (IndexError, AttributeError) as e:
