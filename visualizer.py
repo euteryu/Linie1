@@ -289,7 +289,10 @@ class Linie1Visualizer:
         #    Let the mod's state handle its own lifecycle.
         if not is_in_base_state:
             return
-        # --- END OF FIX ---
+        
+        if getattr(self.current_state, 'is_transient_state', False):
+            return
+
         try:
             active_player = self.game.get_active_player()
             player_state = active_player.player_state
@@ -303,6 +306,41 @@ class Linie1Visualizer:
                 self.current_state = target_state_class(self)
         except (IndexError, AttributeError) as e:
             print(f"Error updating state: {e}")
+
+    # Add this method back to the visualizer class.
+    def draw_preview(self, screen, tile_to_preview: Optional[TileType], orientation: int):
+        """
+        Draws a translucent preview of a tile that follows the mouse cursor
+        over valid, playable board squares.
+        """
+        # Don't draw if no tile is selected for previewing.
+        if tile_to_preview is None:
+            return
+
+        mouse_pos = pygame.mouse.get_pos()
+        # Calculate which grid cell the mouse is over.
+        grid_col_rel = (mouse_pos[0] - C.BOARD_X_OFFSET) // self.TILE_SIZE
+        grid_row_rel = (mouse_pos[1] - C.BOARD_Y_OFFSET) // self.TILE_SIZE
+        grid_col = grid_col_rel + C.PLAYABLE_COLS[0]
+        grid_row = grid_row_rel + C.PLAYABLE_ROWS[0]
+
+        # Only draw the preview if the mouse is over a valid, playable coordinate.
+        if self.game.board.is_playable_coordinate(grid_row, grid_col):
+            # Calculate the top-left screen coordinate of the grid cell.
+            screen_x = C.BOARD_X_OFFSET + grid_col_rel * self.TILE_SIZE
+            screen_y = C.BOARD_Y_OFFSET + grid_row_rel * self.TILE_SIZE
+            rect = pygame.Rect(screen_x, screen_y, self.TILE_SIZE, self.TILE_SIZE)
+            
+            # Get the pre-rendered surface for the selected tile type.
+            tile_surf = self.tile_surfaces.get(tile_to_preview.name)
+            if tile_surf:
+                # Create a copy, rotate it, and make it semi-transparent.
+                rotated_surf = pygame.transform.rotate(tile_surf.copy(), -orientation)
+                rotated_surf.set_alpha(150) # Translucent effect
+                
+                # Center the preview image in the grid cell and draw it.
+                new_rect = rotated_surf.get_rect(center=rect.center)
+                screen.blit(rotated_surf, new_rect.topleft)
 
     def draw_text(self, surface, text, x, y, color=C.COLOR_UI_TEXT, size=C.DEFAULT_FONT_SIZE):
         try:

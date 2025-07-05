@@ -22,6 +22,10 @@ class GameState:
     def __init__(self, visualizer):
         self.visualizer = visualizer
         self.game: Game = visualizer.game
+        # A flag to indicate if this is a temporary state that should
+        # not be overridden by the main state update logic.
+        # Base game states will leave this as False. Mod states will set it to True.
+        self.is_transient_state: bool = False
 
     def handle_event(self, event):
         raise NotImplementedError
@@ -37,21 +41,11 @@ class GameState:
             return False
 
         mouse_pos = event.pos
-
-        # --- NEW: Check for clicks on mod-defined buttons first ---
-        active_player = self.game.get_active_player()
-        if hasattr(self.visualizer, 'mod_buttons'):
-            for button_def in self.visualizer.mod_buttons:
-                if button_def['rect'].collidepoint(mouse_pos):
-                    # Dispatch the click to the ModManager
-                    was_handled = self.game.mod_manager.handle_mod_ui_button_click(
-                        self.game, active_player, button_def['callback_name']
-                    )
-                    if was_handled:
-                        return True # Mod handled it, stop processing
-        # --- END NEW ---
-
         handled = False
+        
+        # --- REMOVE mod button logic from here ---
+
+        # Check standard game buttons
         if self.visualizer.save_button_rect.collidepoint(mouse_pos):
             self.save_game_action()
             handled = True
@@ -66,9 +60,6 @@ class GameState:
             handled = True
         elif self.visualizer.debug_toggle_button_rect.collidepoint(mouse_pos):
             self.toggle_debug_action()
-            handled = True
-        elif self.visualizer.heatmap_button_rect.collidepoint(mouse_pos):
-            self.toggle_heatmap_action()
             handled = True
         return handled
 
@@ -141,31 +132,50 @@ class GameState:
         else: print(f"State Warning: Cannot set message '{msg}'")
 
 # --- Laying Track State ---
-
 class LayingTrackState(GameState):
-    """Handles input and drawing for the staging user flow."""
+    """
+    Handles input and drawing for the 'staging' user flow.
+    This version correctly prioritizes mod hooks for special tiles.
+    """
     def __init__(self, visualizer):
         super().__init__(visualizer)
         self.staged_moves: List[Dict[str, Any]] = []
         self.move_in_progress: Optional[Dict[str, Any]] = None
-        self.message = "Select an interactable board square."
+        self.message = "Select a board square or a special hand tile."
         self.current_hand_rects: Dict[int, pygame.Rect] = {}
-        # The is_committing flag is REMOVED.
 
     def _reset_staging(self):
-        """Helper to clear all staging attributes."""
         self.staged_moves = []
         self.move_in_progress = None
-        self.message = "Select an interactable board square."
+        self.message = "Select a board square or a special hand tile."
 
     def handle_event(self, event):
-        active_player: Player = self.game.get_active_player()
-        if isinstance(active_player, AIPlayer):
-            self.message = f"Waiting for AI Player {active_player.player_id}..."; return
+        active_player = self.game.get_active_player()
+        if isinstance(active_player, AIPlayer): return
 
+        if not isinstance(self.visualizer.current_state, LayingTrackState):
+            return
+
+        # --- THIS IS THE FIX ---
+        # 1. Handle "safe" mod button clicks first, without resetting state.
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if hasattr(self.visualizer, 'mod_buttons'):
+                for button_def in self.visualizer.mod_buttons:
+                    if button_def['rect'].collidepoint(event.pos):
+                        # Dispatch the click but DO NOT reset staging.
+                        self.game.mod_manager.handle_mod_ui_button_click(
+                            self.game, active_player, button_def['callback_name']
+                        )
+                        # The mod action was handled, so we are done with this event.
+                        return
+
+        # 2. Handle "context-breaking" common clicks (Save, Load, Undo, Redo, Debug).
+        # These actions SHOULD reset the staging area.
         if self._handle_common_clicks(event):
-             if self.staged_moves or self.move_in_progress: self._reset_staging()
+             if self.staged_moves or self.move_in_progress:
+                 self._reset_staging()
              return
+        # --- END OF FIX ---
 
         if active_player.player_state != PlayerState.LAYING_TRACK: return
 
@@ -174,19 +184,53 @@ class LayingTrackState(GameState):
         elif event.type == pygame.KEYDOWN:
             self._handle_key_down(event, active_player)
 
+    # We also need to remove the mod button check from _handle_common_clicks
+    # to avoid it being called twice.
+
     def _handle_mouse_down(self, event, active_player):
+        if event.button != 1: return
         mouse_pos = event.pos
 
-        # --- Board Click Logic ---
-        if (C.BOARD_X_OFFSET <= mouse_pos[0] < C.BOARD_X_OFFSET + C.BOARD_DRAW_WIDTH and
-            C.BOARD_Y_OFFSET <= mouse_pos[1] < C.BOARD_Y_OFFSET + C.BOARD_DRAW_HEIGHT):
-            
-            # Play the generic board click sound
+        # --- THIS IS THE NEW, SIMPLIFIED, AND CORRECT FLOW ---
+
+        # 1. Check if the click was on a hand tile.
+        for index, rect in self.current_hand_rects.items():
+            if rect.collidepoint(mouse_pos):
+                tile_to_use = active_player.hand[index]
+                
+                # A. Give mods the first chance to handle the click.
+                if self.game.mod_manager.on_hand_tile_clicked(self.game, active_player, tile_to_use):
+                    # A mod took over (e.g., switched to ChooseAnyTileState).
+                    # Our work is done for this event. This return is CRITICAL.
+                    return
+                
+                # B. If no mod handled it, it's a normal tile.
+                # Proceed with normal staging logic ONLY if a board square is selected.
+                if self.move_in_progress and self.move_in_progress.get('coord'):
+                    self.visualizer.sounds.play('click_hand')
+                    # This logic is for completing a move-in-progress.
+                    if any(m['hand_index'] == index for m in self.staged_moves):
+                        self.message = "Tile already staged."
+                    else:
+                        self.move_in_progress['hand_index'] = index
+                        self.move_in_progress['tile_type'] = tile_to_use
+                        self.move_in_progress['orientation'] = 0
+                        self.message = f"Selected tile. [R] Rotate, [S] Stage."
+                    self._validate_all_staged_moves()
+                else:
+                    self.message = "Select a board square before clicking a normal tile."
+                
+                # Whether we staged a move or showed a message, we handled a hand click.
+                return
+
+        # 2. If the code reaches here, no hand tile was clicked. Check for a board click.
+        if C.BOARD_X_OFFSET <= mouse_pos[0] < C.BOARD_X_OFFSET + C.BOARD_DRAW_WIDTH and \
+           C.BOARD_Y_OFFSET <= mouse_pos[1] < C.BOARD_Y_OFFSET + C.BOARD_DRAW_HEIGHT:
             self.visualizer.sounds.play('click')
-            
-            # ... (rest of the board click logic is correct) ...
             grid_r, grid_c = (mouse_pos[1] - C.BOARD_Y_OFFSET) // C.TILE_SIZE + C.PLAYABLE_ROWS[0], \
                              (mouse_pos[0] - C.BOARD_X_OFFSET) // C.TILE_SIZE + C.PLAYABLE_COLS[0]
+            
+            # This is the logic for starting a move-in-progress.
             self.move_in_progress = None
             self._validate_all_staged_moves()
             if not self.game.board.is_valid_coordinate(grid_r, grid_c): self.message = "Cannot select outside grid."; return
@@ -197,27 +241,7 @@ class LayingTrackState(GameState):
             self.move_in_progress = {'coord': (grid_r, grid_c)}
             self.message = f"Selected {self.move_in_progress['coord']}. Click a hand tile."
             return
-
-        # --- Hand Click Logic ---
-        if self.move_in_progress and self.move_in_progress.get('coord'):
-            for index, rect in self.current_hand_rects.items():
-                if rect.collidepoint(mouse_pos) and event.button == 1:
-                    tile_to_use = active_player.hand[index]
-                    # Call the new hook first. If a mod handles the click, we stop.
-                    if self.game.mod_manager.on_hand_tile_clicked(self.game, active_player, tile_to_use):
-                        return
-                    self.visualizer.sounds.play('click_hand')
-                    
-                    if any(m['hand_index'] == index for m in self.staged_moves): 
-                        self.message = "Tile already staged."; return
-                    if self.move_in_progress.get('hand_index') == index: 
-                        self.move_in_progress.pop('hand_index', None); self.move_in_progress.pop('tile_type', None); self.message = f"Deselected hand tile."
-                    else: 
-                        self.move_in_progress['hand_index'] = index
-                        self.move_in_progress['tile_type'] = active_player.hand[index]
-                        self.move_in_progress['orientation'] = 0
-                        self.message = f"Selected hand tile. [R] Rotate, [S] Stage."
-                    self._validate_all_staged_moves(); return
+        # --- END OF NEW FLOW ---
 
     def _handle_key_down(self, event, active_player):
         # This method's logic is correct and does not need to change.

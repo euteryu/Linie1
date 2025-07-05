@@ -93,17 +93,16 @@ class MagicSystemMod(IMod):
         return False
 
     def on_hand_tile_clicked(self, game: 'Game', player: 'Player', tile_type: 'TileType') -> bool:
-        """Checks if the clicked tile is a Super Tile and handles it."""
-        # The tile has the custom attributes we added.
+        """
+        This hook is now the *only* trigger for the spell. It doesn't matter
+        if a board square was selected first or not.
+        """
         if hasattr(tile_type, 'is_super_tile') and tile_type.is_super_tile:
             print(f"[{self.name}] Super Star Tile clicked! Entering selection mode.")
             
-            # The mod now takes control of the game state.
-            # We need access to the visualizer to change the state.
             if game.visualizer:
-                # We create a new GameState defined entirely within this mod file.
-                # We pass the Super Tile object to the new state so it knows which tile to remove from the hand.
+                # Switch to our custom state. This state now handles everything else.
                 game.visualizer.current_state = ChooseAnyTileState(game.visualizer, tile_type)
             
-            return True # The click has been handled.
+            return True # The click was handled by the mod.
         return False
