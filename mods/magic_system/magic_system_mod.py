@@ -1,8 +1,9 @@
 # mods/magic_system/magic_system_mod.py
 import pygame
-from typing import TYPE_CHECKING, List, Dict, Any, Tuple, Optional
+from typing import TYPE_CHECKING, List, Dict, Any
 
-# Since the project root is on the path, we can do an absolute import.
+# --- FIX #1: Import the standalone draw_text function ---
+from rendering_utils import draw_text
 from mods.magic_system.choose_any_tile_state import ChooseAnyTileState
 from imod import IMod 
 
@@ -11,11 +12,9 @@ if TYPE_CHECKING:
     from game_logic.player import Player
     from visualizer import Linie1Visualizer
     from game_logic.tile import TileType
-    from game_states import GameState
     
 import constants as C
 
-# --- NEW: Define the Super Tile's name ---
 SUPER_TILE_ID = "SUPER_STAR_TILE"
 
 class MagicSystemMod(IMod):
@@ -46,7 +45,10 @@ class MagicSystemMod(IMod):
             
             draw_x = C.UI_PANEL_X + 15
             draw_y = C.UI_ROUTE_INFO_Y + (C.UI_LINE_HEIGHT * 2)
-            visualizer.draw_text(screen, mana_text, draw_x, draw_y, color=(0, 100, 255), size=20)
+            
+            # --- FIX #2: Call the imported function directly, not as a method ---
+            # The 'screen' object is passed in this method's signature.
+            draw_text(screen, mana_text, draw_x, draw_y, color=(0, 100, 255), size=20)
 
     def get_ui_buttons(self, current_game_state_name: str) -> List[Dict[str, Any]]:
         """Adds a 'Create Super Tile' button."""
@@ -71,16 +73,11 @@ class MagicSystemMod(IMod):
             if mana_pool.get('mana', 0) >= cost:
                 mana_pool['mana'] -= cost
                 
-                # Get a base tile type to use as a placeholder. 'Curve' is visually distinct.
                 placeholder_tile = game.tile_types.get('Curve')
                 if placeholder_tile:
-                    # --- This is the key part ---
-                    # We create a *copy* of the tile type to avoid modifying the original.
                     super_tile = placeholder_tile.copy() 
-                    # We add a custom, namespaced attribute to identify it.
                     super_tile.mod_id = self.mod_id 
                     super_tile.is_super_tile = True
-                    # We change its name for display purposes.
                     super_tile.name = SUPER_TILE_ID
                     
                     player.hand.append(super_tile)
@@ -93,13 +90,9 @@ class MagicSystemMod(IMod):
         return False
 
     def on_hand_tile_clicked(self, game: 'Game', player: 'Player', tile_type: 'TileType') -> bool:
-        """
-        This hook is now the *only* trigger for the spell. It doesn't matter
-        if a board square was selected first or not.
-        """
+        """Triggers the spell when a super tile is clicked in hand."""
         if hasattr(tile_type, 'is_super_tile') and tile_type.is_super_tile:
             if game.visualizer:
-                # Use a lambda to "package" the constructor call with its arguments.
                 game.visualizer.request_state_change(
                     lambda v: ChooseAnyTileState(v, tile_type)
                 )

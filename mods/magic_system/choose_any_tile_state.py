@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from game_logic.tile import TileType
 
 from game_states import GameState, LayingTrackState
+from rendering_utils import draw_text
 import constants as C
 
 class ChooseAnyTileState(GameState):
@@ -18,7 +19,7 @@ class ChooseAnyTileState(GameState):
     """
     def __init__(self, visualizer: 'Linie1Visualizer', super_tile_instance: 'TileType'):
         super().__init__(visualizer)
-        self.is_transient_state = True # Mark this as a special mod state
+        self.is_transient_state = True
         self.super_tile_to_consume = super_tile_instance
         self.all_tile_types = list(self.game.tile_types.values())
         self.message = "Choose a tile to craft, or press [ESC] / [X] to cancel."
@@ -70,26 +71,21 @@ class ChooseAnyTileState(GameState):
         self.visualizer.return_to_base_state()
 
     def draw(self, screen):
-        """Renders the spell-casting UI on top of the main game screen."""
-        # 1. Draw the base game screen completely.
-        # It's better to ask the visualizer to do this rather than creating a temp state.
-        self.visualizer.draw_board(screen)
-        self.visualizer.draw_ui(screen, "Casting Spell...", "")
-        # This will also draw the player's hand, which is good context.
-        if isinstance(self.visualizer.current_state, LayingTrackState):
-             self.visualizer.current_state.draw(screen)
-
-        # 2. Draw the dimming overlay.
+        """
+        Renders ONLY the spell-casting UI. The standard game view has already
+        been drawn by the main visualizer loop.
+        """
+        # --- FIX ---
+        # 1. Draw the dimming overlay.
         overlay = pygame.Surface((C.SCREEN_WIDTH, C.SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((20, 0, 40, 190))
         screen.blit(overlay, (0, 0))
 
-        # 3. Draw this state's specific UI elements on top.
-        self.visualizer.draw_text(screen, "Craft Your Tile", 100, 50, C.COLOR_WHITE, size=36)
-        self.visualizer.draw_text(screen, self.message, 100, C.SCREEN_HEIGHT - 50, C.COLOR_WHITE, size=20)
+        # 2. Draw this state's specific UI elements on top.
+        draw_text(screen, "Craft Your Tile", 100, 50, C.COLOR_WHITE, size=36)
+        draw_text(screen, self.message, 100, C.SCREEN_HEIGHT - 50, C.COLOR_WHITE, size=20)
         
         self.palette_rects.clear()
-        # ... (palette drawing logic is correct) ...
         x, y = 100, 120
         tiles_per_row, tile_size, spacing = 10, C.TILE_SIZE, 10
         for i, tile_type in enumerate(self.all_tile_types):
@@ -105,11 +101,11 @@ class ChooseAnyTileState(GameState):
             x += tile_size + spacing
             if (i + 1) % tiles_per_row == 0: x = 100; y += tile_size + spacing
         
-        # Close button
         close_rect = self.close_button_rect
         pygame.draw.rect(screen, (200, 50, 50), close_rect)
         if close_rect.collidepoint(pygame.mouse.get_pos()):
             pygame.draw.rect(screen, C.COLOR_WHITE, close_rect, 3)
         else:
             pygame.draw.rect(screen, C.COLOR_WHITE, close_rect, 1)
-        self.visualizer.draw_text(screen, "X", close_rect.centerx - 8, close_rect.centery - 12, C.COLOR_WHITE, size=30)
+        draw_text(screen, "X", close_rect.centerx, close_rect.centery, C.COLOR_WHITE, size=30, center_x=True, center_y=True)
+        # --- END FIX ---
