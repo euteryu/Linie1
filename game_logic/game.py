@@ -947,8 +947,75 @@ class Game:
     def confirm_turn(self) -> bool:
         return self.turn_manager.confirm_turn(self)
 
+    @staticmethod
+    def load_game(filename: str, tile_types: Dict[str, 'TileType'], mod_manager: 'ModManager') -> Optional['Game']:
+        """
+        Loads a game state from a file.
+
+        Args:
+            filename: The path to the save file.
+            tile_types: The dictionary of all TileType objects.
+            mod_manager: The game's active ModManager instance.
+
+        Returns:
+            A new Game instance populated with the loaded data, or None on failure.
+        """
+        print(f"Loading game state from {filename}...")
+        try:
+            with open(filename, 'r') as f:
+                data = json.load(f)
+
+            # --- START OF FIX ---
+            # 1. We need player_types to create a new Game instance.
+            #    We can reconstruct this from the saved player data.
+            player_data = data.get("players", [])
+            player_types = ['ai' if p.get('is_ai') else 'human' for p in player_data]
+            difficulty = player_data[0].get('difficulty_mode', 'normal') if player_data else 'normal'
+
+            # 2. Create the new game instance, passing the now-required mod_manager.
+            game = Game(player_types=player_types, difficulty=difficulty, mod_manager=mod_manager)
+            # --- END OF FIX ---
+            
+            # Now, populate the new game instance with the loaded data
+            game.active_player_index = data.get("active_player_index", 0)
+            game.game_phase = GamePhase[data.get("game_phase", "LAYING_TRACK")]
+            game.current_turn = data.get("current_turn", 1)
+            game.actions_taken_this_turn = data.get("actions_taken", 0)
+            game.winner = None
+            game.command_history = CommandHistory() # Reset history
+            
+            # Load board and players
+            game.board = Board.from_dict(data["board"], tile_types)
+            game.players = [Player.from_dict(p_data, tile_types) for p_data in data["players"]]
+            
+            # Load winner if exists
+            winner_id = data.get("winner_id")
+            if winner_id is not None:
+                game.winner = game.players[winner_id]
+                
+            # Load draw pile and clear line cards (as they are dealt)
+            game.tile_draw_pile = [tile_types[name] for name in data.get("tile_draw_pile", [])]
+            game.line_cards_pile = []
+            
+            # --- MODS ---
+            # Deactivate all current mods and reactivate only those from the save file
+            mod_manager.deactivate_all_mods()
+            mod_data = data.get("mod_manager", {})
+            for mod_id in mod_data.get("active_mod_ids", []):
+                mod_manager.activate_mod(mod_id)
+
+            print(f"Load successful. Phase: {game.game_phase.name}, Turn: {game.current_turn}, Active P: {game.active_player_index}")
+            return game
+            
+        except Exception as e:
+            print(f"!!! Error loading game from {filename}: {e} !!!")
+            traceback.print_exc()
+            return None
 
     def save_game(self, filename: str) -> bool:
+        """
+        Saves the current game state to a file, now including mod data.
+        """
         print(f"Saving game state to {filename}...")
         try:
             game_state_data = {
@@ -961,36 +1028,17 @@ class Game:
                 "current_turn": self.current_turn,
                 "actions_taken": self.actions_taken_this_turn,
                 "winner_id": self.winner.player_id if self.winner else None,
+                # --- ADDED: Save the mod manager's state ---
+                "mod_manager": self.mod_manager.to_dict()
             }
-            with open(filename, 'w') as f: json.dump(game_state_data, f, indent=4)
+            with open(filename, 'w') as f:
+                json.dump(game_state_data, f, indent=4)
             print("Save successful.")
             return True
         except Exception as e:
-            print(f"!!! Error saving game to {filename}: {e} !!!"); traceback.print_exc(); return False
-
-    @staticmethod
-    def load_game(filename: str, tile_types: Dict[str, 'TileType']) -> Optional['Game']:
-        print(f"Loading game state from {filename}...")
-        try:
-            with open(filename, 'r') as f: data = json.load(f)
-            num_players = data.get("num_players", 2)
-            game = Game(num_players) # Create a fresh instance
-            game.active_player_index = data.get("active_player_index", 0)
-            game.game_phase = GamePhase[data.get("game_phase", "LAYING_TRACK")]
-            game.current_turn = data.get("current_turn", 1)
-            game.actions_taken_this_turn = data.get("actions_taken", 0)
-            game.winner = None
-            game.command_history = CommandHistory() # Reset history
-            game.board = Board.from_dict(data["board"], tile_types)
-            game.players = [Player.from_dict(p_data, tile_types) for p_data in data["players"]]
-            winner_id = data.get("winner_id")
-            if winner_id is not None: game.winner = game.players[winner_id]
-            game.tile_draw_pile = [tile_types[name] for name in data.get("tile_draw_pile", [])]
-            game.line_cards_pile = []
-            print(f"Load successful. Phase: {game.game_phase.name}, Turn: {game.current_turn}, Active P: {game.active_player_index}")
-            return game
-        except Exception as e:
-            print(f"!!! Error loading game from {filename}: {e} !!!"); traceback.print_exc(); return None
+            print(f"!!! Error saving game to {filename}: {e} !!!")
+            traceback.print_exc()
+            return False
         
 
     def copy_for_simulation(self) -> 'Game':

@@ -95,15 +95,20 @@ class Player(ABC):
         """
         is_ai = data.get("is_ai", False)
         player_id = data.get("player_id", -1)
-        difficulty = data.get('difficulty_mode', 'normal')
+        # --- START OF FIX ---
+        # 1. Get the difficulty_mode from the saved data. Default to 'normal' if not found.
+        difficulty_mode = data.get('difficulty_mode', 'normal')
 
         if is_ai:
             strategy_name = data.get('strategy', 'easy')
             strategy = HardStrategy() if strategy_name == 'hard' else EasyStrategy()
-            player = AIPlayer(player_id, strategy)
+            # 2. Pass the difficulty_mode to the constructor.
+            player = AIPlayer(player_id, strategy, difficulty_mode)
         else:
-            player = HumanPlayer(player_id)
-        
+            # 3. Also pass the difficulty_mode to the HumanPlayer constructor for consistency.
+            player = HumanPlayer(player_id, difficulty_mode)
+        # --- END OF FIX ---
+
         # Populate the common attributes for the newly created player object
         player.hand = [tile_types[name] for name in data.get("hand", [])]
         if (lc_num := data.get("line_card")) is not None: player.line_card = LineCard(lc_num)
@@ -121,10 +126,7 @@ class Player(ABC):
                 arrival_direction=Direction[s["arrival_dir"]] if s["arrival_dir"] else None
             ) for s in route_data]
         
-        # --- NEW: Deserialize the components dictionary ---
-        # This automatically loads all mod data from the save file.
         player.components = data.get('components', {})
-        # --- END NEW ---
         
         return player
 

@@ -52,24 +52,37 @@ class GameState:
         else: self.set_message("Save Cancelled.")
 
     def load_game_action(self):
+        """
+        Handles the file dialog and game loading process.
+        """
+        # --- START OF FIX ---
+        # We perform a local import here to break the circular dependency at runtime.
+        from game_logic.game import Game
+        # --- END OF FIX ---
+
         if not self.visualizer.tk_root:
             self.set_message("Error: Tkinter not available.")
             return
+            
         filepath = filedialog.askopenfilename(
              title="Load Game", filetypes=[("Linie 1 Saves", "*.json"), ("All", "*.*")]
         )
         if filepath:
-            # We need to pass the mod manager to the load function
+            # We now correctly call the imported Game class
             loaded_game = Game.load_game(filepath, self.game.tile_types, self.game.mod_manager)
             if loaded_game:
+                # Replace the game instance in the visualizer and the current state
                 self.visualizer.game = loaded_game
                 self.game = loaded_game
-                # Link the newly loaded game back to the visualizer
+                # Link the newly loaded game back to the visualizer so it can request redraws
                 self.game.visualizer = self.visualizer
+                # Update the visualizer's state based on the loaded game's reality
                 self.visualizer.update_current_state_for_player()
                 self.set_message("Game Loaded.")
-            else: self.set_message("Error Loading Game.")
-        else: self.set_message("Load Cancelled.")
+            else: 
+                self.set_message("Error Loading Game.")
+        else: 
+            self.set_message("Load Cancelled.")
 
     def undo_action(self):
         if hasattr(self, 'staged_moves') and self.staged_moves:

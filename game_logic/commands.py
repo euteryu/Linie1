@@ -407,13 +407,18 @@ class CombinedActionCommand(Command):
             return False
 
     def undo(self) -> bool:
+        """
+        Reverses all sub-actions performed by this command.
+        """
         print(f"--- [COMMAND] Undoing CombinedAction for P{self.player.player_id} ---")
         
-        # --- THIS IS THE FIX FOR UNDO ---
-        # The command must correctly decrement the action counter it previously incremented.
+        # --- START OF FIX ---
+        # When undoing, we must DECREMENT the action counter by the number of
+        # moves that were originally performed.
         self.game.actions_taken_this_turn -= len(self._undo_data)
         # --- END OF FIX ---
         
+        # Reverse the actions in the opposite order of execution
         for undo_action in reversed(self._undo_data):
             coord = undo_action['coord']
             r, c = coord
@@ -433,12 +438,17 @@ class CombinedActionCommand(Command):
             elif undo_action['type'] == 'exchange':
                 old_tile = PlacedTile.from_dict(undo_action['old_placed_tile_data'], self.game.tile_types)
                 new_tile_type = self.game.tile_types[undo_action['new_tile_type_name']]
-                if not old_tile: return False
+                if not old_tile: 
+                    # This would indicate a serious state inconsistency.
+                    print(f"CRITICAL UNDO ERROR: Could not reconstruct old tile for exchange at {coord}")
+                    return False
                 self.game.board.set_tile(r, c, old_tile)
-                if old_tile.tile_type in self.player.hand: self.player.hand.remove(old_tile.tile_type)
+                # Ensure the tile being removed from hand exists to prevent a crash
+                if old_tile.tile_type in self.player.hand: 
+                    self.player.hand.remove(old_tile.tile_type)
                 self.player.hand.append(new_tile_type)
 
-        self._undo_data = []
+        self._undo_data = [] # Clear the undo data after a successful rollback
         print(f"--- [COMMAND] CombinedAction Undo SUCCESS. Actions taken this turn: {self.game.actions_taken_this_turn} ---")
         return True
 
