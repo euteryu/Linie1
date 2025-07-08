@@ -1,0 +1,16 @@
+{
+    "id": "economic_mod",
+    "name": "Gilded Rails",
+    "description": "Introduces Capital and market forces to the railway expansion.",
+    "class_name": "EconomicMod",
+    "main_module": "economic_mod",
+    "starting_capital": 50,
+    "max_capital": 200,
+    "capital_regen_per_turn": 5,
+    "cost_priority_requisition": 25,
+    "capital_from_straight": 5,
+    "capital_from_curve": 5,
+    "capital_from_junction": 15,
+    "capital_from_special": 10,
+    "capital_from_permit": 25
+}
