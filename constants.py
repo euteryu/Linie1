@@ -62,7 +62,7 @@ TERMINAL_COORDS: Dict[int, Tuple[Tuple[int,int], Tuple[int,int]]] = { line: (dat
 
 
 # --- Pygame/Visual Layout Constants ---
-SCREEN_WIDTH: int = 1250; SCREEN_HEIGHT: int = 800
+SCREEN_WIDTH: int = 1366; SCREEN_HEIGHT: int = 800
 VISIBLE_GRID_ROWS: int = 12; VISIBLE_GRID_COLS: int = 12
 BOARD_AREA_HEIGHT: float = SCREEN_HEIGHT * 0.90; BOARD_AREA_WIDTH: float = BOARD_AREA_HEIGHT
 TILE_SIZE: int = int(BOARD_AREA_HEIGHT / VISIBLE_GRID_ROWS)

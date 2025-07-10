@@ -26,16 +26,25 @@ class TurnManager:
         if game.game_phase == GamePhase.GAME_OVER:
             return False
 
-        # --- Forfeit Check for Human Players ---
+        # --- Forfeit/End Turn Check for Human Players ---
         if isinstance(active_p, HumanPlayer) and active_p.player_state == PlayerState.LAYING_TRACK:
-            if game.actions_taken_this_turn == 0:
-                if not game.rule_engine.can_player_make_any_move(game, active_p):
+            # --- START OF FIX ---
+            # A human player cannot end their turn unless they have used all their actions,
+            # OR they have no possible moves left (which leads to elimination).
+            if game.actions_taken_this_turn < game.MAX_PLAYER_ACTIONS:
+                if game.rule_engine.can_player_make_any_move(game, active_p):
+                    # Player has moves left and tried to pass, which is not allowed.
+                    print(f"--- Player {active_p.player_id} attempted to end turn with only {game.actions_taken_this_turn}/{game.MAX_PLAYER_ACTIONS} actions. Turn not confirmed. ---")
+                    # We need to set a message on the UI for the player
+                    if game.visualizer:
+                        game.visualizer.current_state.message = f"You must take {game.MAX_PLAYER_ACTIONS} actions to end your turn."
+                    return False
+                else:
+                    # Player has no more moves and is trying to pass. This is a valid forfeit.
                     game.eliminate_player(active_p)
                     if game.visualizer and game.sounds:
                         game.sounds.play('eliminated')
-                else:
-                    print(f"--- Player {active_p.player_id} attempted to pass with valid moves. Turn not confirmed. ---")
-                    return False
+            # --- END OF FIX ---
         
         # --- Draw Tiles for Players still in Laying Track Phase ---
         if active_p.player_state == PlayerState.LAYING_TRACK:

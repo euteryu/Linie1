@@ -11,6 +11,7 @@ import constants as C
 from mods.economic_mod.economic_commands import PriorityRequisitionCommand, SellToScrapyardCommand
 from ui.palette_selection_state import PaletteSelectionState
 from mods.economic_mod import constants_economic as CE
+from mods.economic_mod.headline_manager import HeadlineManager
 
 if TYPE_CHECKING:
     from game_logic.game import Game
@@ -35,6 +36,17 @@ class EconomicMod(IMod):
                 'max_capital': max_capital,
                 'sell_mode_active': False # Add a flag for our new mode
             }
+        self.headline_manager = HeadlineManager()
+        # Set how often events trigger based on player count
+        self.headline_manager.event_trigger_threshold = 2 # Every 2 full rounds
+
+    def on_player_turn_start(self, game: 'Game', player: 'Player'):
+        """Called at the very start of a turn to tick the event manager."""
+        new_event = self.headline_manager.tick(game)
+        if new_event and game.visualizer and game.sounds:
+            # If a new event was drawn, play a sound
+            # You'll need to add a 'headline_news.wav' or similar to your sound manager
+            game.sounds.play('headline_news') 
 
     def on_player_turn_end(self, game: 'Game', player: 'Player'):
         """Players regenerate Capital at the end of their turn."""
@@ -53,11 +65,32 @@ class EconomicMod(IMod):
             # Use the new constants for positioning
             draw_text(screen, capital_text, CE.CAPITAL_DISPLAY_X, CE.CAPITAL_DISPLAY_Y, color=(118, 165, 32), size=20)
 
+        # --- NEW: Draw the headline ticker ---
+        if self.headline_manager.active_event:
+            event = self.headline_manager.active_event
+            
+            # Create a semi-transparent background bar for the headline
+            bar_height = 55
+            bar_rect = pygame.Rect(0, 0, C.SCREEN_WIDTH, bar_height)
+            bar_surface = pygame.Surface(bar_rect.size, pygame.SRCALPHA)
+            bar_surface.fill((0, 0, 0, 150)) # Black, semi-transparent
+            screen.blit(bar_surface, bar_rect.topleft)
+
+            # Display the headline text
+            headline_text = f"HEADLINE: {event['headline']}"
+            draw_text(screen, headline_text, C.SCREEN_WIDTH // 2, 15, C.COLOR_WHITE, size=22, center_x=True)
+            
+            # Display the effect description and duration
+            effect_text = f"{event['description']} (Rounds Remaining: {self.headline_manager.rounds_remaining})"
+            draw_text(screen, effect_text, C.SCREEN_WIDTH // 2, 38, (200, 200, 200), size=18, center_x=True) # Light grey color
+
     def get_ui_buttons(self, current_game_state_name: str) -> List[Dict[str, Any]]:
         """Adds buttons for all economic actions using its own constants."""
         buttons = []
         if current_game_state_name == "LayingTrackState":
-            cost = self.config.get("cost_priority_requisition", 25)
+            # --- FIX: Get cost dynamically from the headline manager ---
+            base_cost = self.config.get("cost_priority_requisition", 25)
+            cost = self.headline_manager.get_modified_requisition_cost(base_cost)
             
             # Button 1: Priority Requisition
             buttons.append({
@@ -111,11 +144,11 @@ class EconomicMod(IMod):
         if player_mod_data.get('sell_mode_active', False):
             player_mod_data['sell_mode_active'] = False
 
-            # --- START OF FIX: Simplified Reward Lookup ---
             sell_rewards = self.config.get("sell_rewards", {})
             # Get the reward for the specific tile name, or use the "default" value.
-            reward = sell_rewards.get(tile_type.name, sell_rewards.get("default", 0))
-            # --- END OF FIX ---
+            base_reward = sell_rewards.get(tile_type.name, sell_rewards.get("default", 0))
+            # --- FIX: Get reward dynamically from the headline manager ---
+            reward = self.headline_manager.get_modified_sell_reward(base_reward)
 
             command = SellToScrapyardCommand(game, player, self.mod_id, tile_type, reward)
             if game.command_history.execute_command(command):
