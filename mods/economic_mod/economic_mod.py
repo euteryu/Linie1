@@ -104,32 +104,26 @@ class EconomicMod(IMod):
         return False
 
     def on_hand_tile_clicked(self, game: 'Game', player: 'Player', tile_type: 'TileType') -> bool:
-        """Handles special behavior when a hand tile is clicked, now including sell mode."""
         player_mod_data = player.components.get(self.mod_id)
         if not player_mod_data:
             return False
 
-        # --- Check for Sell Mode ---
         if player_mod_data.get('sell_mode_active', False):
             player_mod_data['sell_mode_active'] = False
 
-            # --- START OF FIX: Use new reward values from config ---
-            reward = 0
-            if hasattr(tile_type, 'is_requisition_permit') and tile_type.is_requisition_permit:
-                reward = self.config.get("capital_from_permit", 25)
-            elif "Straight" in tile_type.name or "Curve" in tile_type.name:
-                reward = self.config.get("capital_from_straight", 5) # Covers both Straight and Curve
-            elif "Tree" in tile_type.name:
-                reward = self.config.get("capital_from_junction", 15) # Covers all Tree/Junction types
-            else: # All other special types
-                reward = self.config.get("capital_from_special", 10)
+            # --- START OF FIX: Simplified Reward Lookup ---
+            sell_rewards = self.config.get("sell_rewards", {})
+            # Get the reward for the specific tile name, or use the "default" value.
+            reward = sell_rewards.get(tile_type.name, sell_rewards.get("default", 0))
             # --- END OF FIX ---
 
             command = SellToScrapyardCommand(game, player, self.mod_id, tile_type, reward)
             if game.command_history.execute_command(command):
                 game.visualizer.current_state.message = f"Sold {tile_type.name} for ${reward}."
             else:
-                game.visualizer.current_state.message = "Sell failed (no actions left?)."
+                # The command now handles the capital limit, so the message here can be simpler.
+                # The command itself will set a more specific message if needed.
+                game.visualizer.current_state.message = "Sell failed."
             
             return True
 

@@ -8,9 +8,16 @@
     "max_capital": 200,
     "capital_regen_per_turn": 5,
     "cost_priority_requisition": 25,
-    "capital_from_straight": 5,
-    "capital_from_curve": 5,
-    "capital_from_junction": 15,
-    "capital_from_special": 10,
-    "capital_from_permit": 25
+    "sell_rewards": {
+        "default": 10,
+        "Straight": 5,
+        "Curve": 5,
+        "Tree_JunctionTop": 15,
+        "Tree_JunctionRight": 15,
+        "Tree_Roundabout": 15,
+        "Tree_Crossroad": 15,
+        "Tree_StraightDiagonal1": 15,
+        "Tree_StraightDiagonal2": 15,
+        "REQUISITION_PERMIT": 25
+    }
 }

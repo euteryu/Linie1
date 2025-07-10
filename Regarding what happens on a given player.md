@@ -1177,3 +1177,30 @@ corrections to be made:
 2. the buy tile $50 ui button and related text is partially covering over at-hand tiles and player line descsriptions. can we move it to a different location? in fact, in future it'd be nice to have like a pop up menu called trading, which pops up a mini window with various trading features incl the buy tile $50 button, as well as the standard 'x' cross at top-right to close the mini window tab and return to playing game. how to implement and extend these complex UI features?
 
 3. what does buy tile $50 exactly do right now? How about we add to the at-hand tile another tile slot (and assign from remaining tile piles a randomly drawn tile when user clicks that button? this would mean the affected player has ability to have lots of at-hand tile capacity than normally enforced, so inform what changes would be necessary to accomodate this mod feature scaleably.
+
+-----------
+------------
+
+
+
+i like it. few modifications to milestone 4:
+
+Core Mechanics:
+    Event Deck: A new deck of "Headline News" cards is created and shuffled at the start of the game. There will be lots of variations of the same cards, each with slightly different numbers and narratives, but they will largely fall into 3 categories listed in 3 examples below.
+    Event Trigger: A new event is drawn at the start of every two full round of play (e.g., every 4 turns in a 2-player game, every 6 in a 3-player game).
+    UI Display: A dedicated area on the top of the UI panel will display the current headline and its effect in news ticker style. It will loop round for however long that effect is in place. An event will last between 1 full round to 2 full rounds at most. A headline_news sound effect will play when headline in effect for very first time.
+
+Example Events to Implementing 3 categories:
+1.    Economic Events: These directly affect Capital costs and rewards. Chance of an economic event occurring is 45%.
+        "Steel Boom!": The Capital reward for selling all tiles to the Scrapyard is doubled for one full round.
+        "Inflationary Panic!": The Capital cost of "Priority Requisition" increases by 50% for two full round.
+2.    Rule-Modifying Events: These temporarily change what players can or cannot do. Chance of a rule-modifying event occurring is 45%.
+        "Union Negotiations Fail!": Each player only gets one action (place/sell) this 1 full round instead of two actions normally.
+        "Technological Breakthrough!": Players with a functioning R&D centre may get 1 additional action (on top of their usual 2 actions per turn).
+3.    Environmental Events: These directly alter the game board. Chance of an environmental event occurring is 10%.
+        "Sudden Sinkhole!": The tile at a random, non-building coordinate is immediately destroyed and removed from the board.
+        "Train Maintenance Issue!": For this round, the STOP_SYMBOL on the die is counted as a 0 i.e. tram halts for that turn.
+
+There are also "localised" events that are initiated to specific player(s) by other player(s), rather than global events that apply to all players equally like above 3 categories. These include sabotage, e.g. if player 1 is in driving mode, and player 2 sends a spy engineer over to their company in game narrative, then spy has chance to commit an action directed at player 1 (counting as a valid action for that turn) like "train blown up due to sabotage by unknown actors. if in driving phase train cannot move forward this turn - die roll is skipped." or "50 capital stolen by rogue accountant who absconded to unknown player's company". Player 1 may find out who unknown spy's organisation is if they have built a corporate intelligence division in their train company. Players may use capital to purchase and enhance R&D / intelligence centres, and they would also have a separate UI with a slot per "economic", "intelligence", "research" where they may swap out cards specific to their motivations from a range of cards they may collect / trade throughout game via surprise rewards unlocked for certain activities / bought via capital.
+
+i know these localised events features and UI elements - and related conditionals like building R&D centre / intelligence centre - is a lot to grasp right now, so for now focus on implementing in code just the base core mechanics of headline cards and just focus on economic events from the 3 categories for now. Also where in files to scalably store economic event cards (and associated data like headline news, for how many rounds active, numbers, etc.)?
