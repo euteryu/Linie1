@@ -1,0 +1,27 @@
+{
+    "font": {
+        "main": null,
+        "title_size": 48,
+        "header_size": 28,
+        "body_size": 20,
+        "small_size": 16
+    },
+    "colors": {
+        "background": [18, 22, 33],
+        "panel_bg": [28, 33, 48],
+        "panel_border": [60, 68, 89],
+        "text_light": [220, 225, 237],
+        "text_dark": [18, 22, 33],
+        "text_muted": [130, 140, 160],
+        "accent": [79, 112, 229],
+        "accent_hover": [107, 134, 237],
+        "accent_disabled": [45, 52, 71],
+        "positive": [34, 139, 34],
+        "negative": [178, 34, 34],
+        "board_bg": [45, 52, 71],
+        "grid_lines": [60, 68, 89],
+        "track": [210, 215, 225],
+        "building_bg": [47, 79, 79],
+        "building_fg": [220, 225, 237]
+    }
+}

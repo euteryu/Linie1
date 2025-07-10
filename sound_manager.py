@@ -55,12 +55,18 @@ class SoundManager:
         else:
             print(f"Music file not found: {music_file}")
             
-    def set_volume(self, sound_volume, music_volume):
-        """Set volume for sound effects and music (0.0 to 1.0)."""
+    def set_music_volume(self, volume: float):
+        """Sets the music volume. Volume should be between 0.0 and 1.0."""
+        # Clamp volume between 0.0 and 1.0
+        clamped_volume = max(0.0, min(1.0, volume))
+        pygame.mixer.music.set_volume(clamped_volume)
+
+    def set_sfx_volume(self, volume: float):
+        """Sets the sound effects volume."""
+        clamped_volume = max(0.0, min(1.0, volume))
         for sound in self.sounds.values():
             if sound:
-                sound.set_volume(sound_volume)
-        pygame.mixer.music.set_volume(music_volume)
+                sound.set_volume(clamped_volume)
 
     def toggle_mute(self):
         """Mute or unmute all audio."""

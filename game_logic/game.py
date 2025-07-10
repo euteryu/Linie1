@@ -82,8 +82,8 @@ class Game:
         self.current_turn = 1
         self.turn_start_history_index = -1
         
-        if isinstance(self.get_active_player(), AIPlayer):
-             pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT))
+        # if isinstance(self.get_active_player(), AIPlayer):
+        #      pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT))
 
     # --- Core Public API ---
     def get_active_player(self) -> Player:

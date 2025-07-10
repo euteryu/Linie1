@@ -8,7 +8,7 @@ class UIManager:
     Manages all the individual UI components (panels) for the in-game screen.
     It delegates drawing and event handling to the appropriate components.
     """
-    def __init__(self, screen: pygame.Surface, tile_surfaces: dict, mod_manager):
+    def __init__(self, screen, tile_surfaces, mod_manager, theme):
         """
         Initializes the UI Manager.
 
@@ -17,18 +17,16 @@ class UIManager:
             tile_surfaces: A dictionary of pre-rendered tile surfaces from the Visualizer.
             mod_manager: The game's mod manager instance.
         """
-        # Create scaled-down surfaces specifically for the hand from the provided surfaces
         hand_tile_surfaces = {name: pygame.transform.scale(surf, (C.HAND_TILE_SIZE, C.HAND_TILE_SIZE)) 
                               for name, surf in tile_surfaces.items()}
 
-        # The order in this list determines the drawing order.
         self.components = [
-            GameInfoPanel(screen),
-            PlayerInfoPanel(screen),
-            HandPanel(screen, hand_tile_surfaces), # Only draws in LayingTrackState
-            MessagePanel(screen),
-            ButtonPanel(screen),
-            ModPanel(screen), # Draws mod elements and buttons
+            GameInfoPanel(screen, theme),
+            PlayerInfoPanel(screen, theme),
+            HandPanel(screen, hand_tile_surfaces, theme),
+            MessagePanel(screen, theme),
+            ButtonPanel(screen, theme),
+            ModPanel(screen, theme),
         ]
 
     def draw(self, game, current_state):

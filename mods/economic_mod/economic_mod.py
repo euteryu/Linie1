@@ -137,65 +137,39 @@ class EconomicMod(IMod):
         return False
 
     def on_hand_tile_clicked(self, game: 'Game', player: 'Player', tile_type: 'TileType') -> bool:
+        """
+        Handles special behavior when a hand tile is clicked. This method
+        checks for sell mode first, then checks for special permit tiles.
+        """
         player_mod_data = player.components.get(self.mod_id)
         if not player_mod_data:
             return False
 
+        # --- Priority 1: Check if Sell Mode is active ---
         if player_mod_data.get('sell_mode_active', False):
             player_mod_data['sell_mode_active'] = False
 
+            # Prevent selling the permit itself
+            if hasattr(tile_type, 'is_requisition_permit') and tile_type.is_requisition_permit:
+                game.visualizer.current_state.message = "Cannot sell a Requisition Permit."
+                return True
+
             sell_rewards = self.config.get("sell_rewards", {})
-            # Get the reward for the specific tile name, or use the "default" value.
-            base_reward = sell_rewards.get(tile_type.name, sell_rewards.get("default", 0))
-            # --- FIX: Get reward dynamically from the headline manager ---
-            reward = self.headline_manager.get_modified_sell_reward(base_reward)
+            reward = sell_rewards.get(tile_type.name, sell_rewards.get("default", 0))
 
             command = SellToScrapyardCommand(game, player, self.mod_id, tile_type, reward)
             if game.command_history.execute_command(command):
                 game.visualizer.current_state.message = f"Sold {tile_type.name} for ${reward}."
             else:
-                # The command now handles the capital limit, so the message here can be simpler.
-                # The command itself will set a more specific message if needed.
-                game.visualizer.current_state.message = "Sell failed."
+                # The command now sets a more specific error message if it fails
+                pass
             
             return True
 
         # --- Priority 2: Check if the clicked tile is a Requisition Permit ---
-        if hasattr(tile_type, 'is_requisition_permit') and tile_type.is_requisition_permit:
-            if game.visualizer:
-                
-                # Define the callback function to be executed upon tile selection.
-                def on_tile_selected(chosen_tile: 'TileType'):
-                    # Find and remove the first available permit from the hand.
-                    permit_index = -1
-                    for i, hand_tile in enumerate(player.hand):
-                        if hasattr(hand_tile, 'is_requisition_permit') and hand_tile.is_requisition_permit:
-                            permit_index = i
-                            break
-                    
-                    if permit_index != -1:
-                        player.hand.pop(permit_index)
-                        player.hand.append(chosen_tile)
-                        print(f"Permit was fulfilled and replaced with a '{chosen_tile.name}'.")
-                    else:
-                        print("Error: Could not find permit in hand to fulfill.")
-                    
-                    # Return to the main game state.
-                    game.visualizer.return_to_base_state()
-
-                # Request a state change to the generic palette selection UI.
-                game.visualizer.request_state_change(
-                    lambda v: PaletteSelectionState(
-                        visualizer=v,
-                        title="Fulfill Requisition",
-                        items=list(game.tile_types.values()),
-                        item_surfaces=game.visualizer.tile_surfaces,
-                        on_select_callback=on_tile_selected
-                    )
-                )
-
-            # Return True because the mod handled this click.
-            return True
+        # This logic was moved to the UI button handler in a previous step,
+        # but the placeholder 'if' statement was causing the IndentationError.
+        # The correct logic is to simply not handle it here anymore.
         
         # If neither of the above conditions were met, the mod does nothing with this click.
         return False
