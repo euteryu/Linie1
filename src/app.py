@@ -1,32 +1,35 @@
-# app.py
+# src/app.py
+import os
 import pygame
 import sys
 import json
+from tkinter import filedialog # Need to import this for save/load
 
 # Import your scenes
 from scenes.main_menu_scene import MainMenuScene
 from scenes.game_scene import GameScene
 from scenes.settings_scene import SettingsScene
-
-# Import game logic and managers needed for setup
 from game_logic.game import Game
-from sound_manager import SoundManager
-from mod_manager import ModManager
-import constants as C
+from common.sound_manager import SoundManager
+from mods.mod_manager import ModManager
+from common import constants as C
 
 class App:
     """The main application class, now acting as a Scene Manager."""
-    def __init__(self, player_types: list[str], difficulty: str, mod_manager: ModManager):
+    def __init__(self, root_dir: str, player_types: list[str], difficulty: str, mod_manager: ModManager):
         pygame.init()
         self.screen = pygame.display.set_mode((C.SCREEN_WIDTH, C.SCREEN_HEIGHT))
         pygame.display.set_caption("Linie 1: Gilded Rails")
         self.clock = pygame.time.Clock()
         
-        with open('ui_theme_dark.json', 'r') as f:
+        self.root_dir = root_dir
+
+        theme_path = os.path.join(self.root_dir, 'src', 'assets', 'themes', 'ui_theme_dark.json')
+        with open(theme_path, 'r') as f:
             self.theme = json.load(f)
             
         # Create shared instances of the game and managers
-        self.sounds = SoundManager()
+        self.sounds = SoundManager(root_dir)
         self.mod_manager = mod_manager
         self.game_instance = Game(player_types, difficulty, mod_manager)
         
@@ -73,7 +76,8 @@ class App:
     def load_theme(self, theme_file):
         """Loads a new theme and re-initializes all scenes to apply it."""
         try:
-            with open(theme_file, 'r') as f:
+            theme_path = os.path.join(self.root_dir, 'src', 'assets', 'themes', theme_file)
+            with open(theme_path, 'r') as f:
                 self.theme = json.load(f)
             print(f"Theme '{theme_file}' loaded successfully.")
 

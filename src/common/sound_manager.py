@@ -3,7 +3,7 @@ import pygame
 import os
 
 class SoundManager:
-    def __init__(self):
+    def __init__(self, root_dir: str):
         # Initialize the mixer with recommended settings
         pygame.mixer.pre_init(44100, -16, 2, 512)
         pygame.mixer.init()
@@ -11,19 +11,21 @@ class SoundManager:
         self.music_path = ""
         self.is_muted = False
         
+        assets_path = os.path.join(root_dir, 'src', 'assets', 'sounds')
+
         # Define sound paths relative to the assets directory
         self.sound_paths = {
-            'click': os.path.join('assets', 'sounds', 'ui', 'click.wav'),
-            'click_hand': os.path.join('assets', 'sounds', 'ui', 'click_at_hand.wav'),
-            'place': os.path.join('assets', 'sounds', 'tiles', 'place_tile.wav'),
-            'error': os.path.join('assets', 'sounds', 'ui', 'error.wav'),
-            'commit': os.path.join('assets', 'sounds', 'ui', 'commit_turn.wav'),
-            'dice_roll': os.path.join('assets', 'sounds', 'driving', 'dice_roll.mp3'),
-            'train_move': os.path.join('assets', 'sounds', 'driving', 'train_move.mp3'),
-            'eliminated': os.path.join('assets', 'sounds', 'condition', 'eliminated.mp3'),
+            'click': os.path.join(assets_path, 'ui', 'click.wav'),
+            'click_hand': os.path.join(assets_path, 'ui', 'click_at_hand.wav'),
+            'place': os.path.join(assets_path, 'tiles', 'place_tile.wav'),
+            'error': os.path.join(assets_path, 'ui', 'error.wav'),
+            'commit': os.path.join(assets_path, 'ui', 'commit_turn.wav'),
+            'dice_roll': os.path.join(assets_path, 'driving', 'dice_roll.mp3'),
+            'train_move': os.path.join(assets_path, 'driving', 'train_move.mp3'),
+            'eliminated': os.path.join(assets_path, 'condition', 'eliminated.mp3'),
         }
         self.music_paths = {
-            'main_theme': os.path.join('assets', 'sounds', 'music', 'background_theme.wav')
+            'main_theme': os.path.join(assets_path, 'music', 'background_theme.wav')
         }
 
     def load_sounds(self):

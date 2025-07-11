@@ -1,7 +1,7 @@
 # rendering_utils.py
 import pygame
 import math
-import constants as C
+import common.constants as C
 
 def create_tile_surface(tile_type: 'TileType', size: int) -> pygame.Surface:
     """ Creates a Pygame Surface using lines and arcs for a tile type. """

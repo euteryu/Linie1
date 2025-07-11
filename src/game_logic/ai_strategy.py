@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 from .enums import Direction
 from .tile import PlacedTile
-from constants import KING_AI_TREE_TILE_BIAS, MAX_TARGETS_FOR_COMBO_SEARCH
+from common.constants import KING_AI_TREE_TILE_BIAS, MAX_TARGETS_FOR_COMBO_SEARCH
 
 class AIStrategy(ABC):
     """Abstract base class for all AI difficulty levels (brains)."""

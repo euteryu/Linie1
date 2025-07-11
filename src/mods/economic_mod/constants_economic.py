@@ -1,6 +1,6 @@
 # mods/economic_mod/constants_economic.py
 
-import constants as C # Import the base constants for reference
+import common.constants as C # Import the base constants for reference
 
 # --- UI Panel Positions ---
 # We position our mod's UI elements relative to the main UI panel for consistency.

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Dict, Any, List, Tuple
 if TYPE_CHECKING:
     from game_logic.game import Game
     from game_logic.player import Player
-    from visualizer import Linie1Visualizer # For UI hooks
+    # from visualizer import Linie1Visualizer # For UI hooks
     import pygame
 
 class IMod(ABC):

@@ -8,8 +8,8 @@ if TYPE_CHECKING:
     
 from .player import HumanPlayer, AIPlayer
 from .enums import GamePhase, PlayerState
-from constants import START_NEXT_TURN_EVENT, MAX_PLAYER_ACTIONS, HAND_TILE_LIMIT
-from game_states import GameOverState # This import is safe
+from common.constants import START_NEXT_TURN_EVENT, MAX_PLAYER_ACTIONS, HAND_TILE_LIMIT
+from states.game_states import GameOverState # This import is safe
 
 class TurnManager:
     """

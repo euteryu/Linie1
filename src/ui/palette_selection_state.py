@@ -4,12 +4,11 @@ import pygame
 from typing import TYPE_CHECKING, Optional, Dict, List, Callable, Any
 
 if TYPE_CHECKING:
-    from visualizer import Linie1Visualizer
     from game_logic.tile import TileType
 
-from game_states import GameState
-from rendering_utils import draw_text
-import constants as C
+from states.game_states import GameState
+from common.rendering_utils import draw_text
+import common.constants as C
 
 class PaletteSelectionState(GameState):
     """

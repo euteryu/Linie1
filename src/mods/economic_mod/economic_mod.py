@@ -3,20 +3,20 @@ import pygame
 from typing import TYPE_CHECKING, List, Dict, Any
 
 # Since this is a new mod, it needs its own imports
-from rendering_utils import draw_text
-from imod import IMod
-from mods.economic_mod.economic_commands import PriorityRequisitionCommand
+from common.rendering_utils import draw_text
+from ..imod import IMod 
+from .economic_commands import PriorityRequisitionCommand
 
-import constants as C
-from mods.economic_mod.economic_commands import PriorityRequisitionCommand, SellToScrapyardCommand
+from common import constants as C # Import base constants
+from .economic_commands import PriorityRequisitionCommand, SellToScrapyardCommand
 from ui.palette_selection_state import PaletteSelectionState
-from mods.economic_mod import constants_economic as CE
-from mods.economic_mod.headline_manager import HeadlineManager
+from . import constants_economic as CE
+from .headline_manager import HeadlineManager
 
 if TYPE_CHECKING:
     from game_logic.game import Game
     from game_logic.player import Player
-    from visualizer import Linie1Visualizer
+    from scenes.game_scene import GameScene
     from game_logic.tile import TileType
 
 # A unique identifier for our special tile's name

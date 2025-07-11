@@ -1,9 +1,9 @@
 # ui/panels.py
 import pygame
 from ui.ui_component import IUIComponent
-import constants as C
-from rendering_utils import draw_text, get_font
-from game_states import LayingTrackState, DrivingState, GameOverState
+import common.constants as C
+from common.rendering_utils import draw_text, get_font
+from states.game_states import LayingTrackState, DrivingState, GameOverState
 
 class GameInfoPanel(IUIComponent):
     """Displays turn number, active player, and action count."""

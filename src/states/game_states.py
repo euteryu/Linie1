@@ -1,5 +1,4 @@
-# game_states.py
-
+# src/states/game_states.py
 from __future__ import annotations
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 import pygame
@@ -7,14 +6,17 @@ import tkinter as tk
 from tkinter import filedialog
 import copy
 
+# --- FIX: Import from new, correct locations ---
+from game_logic.commands import CombinedActionCommand, StageMoveCommand, UnstageAllCommand
+from common import constants as C
+from common.rendering_utils import get_font
+from game_logic.player import AIPlayer, HumanPlayer
+from game_logic.enums import GamePhase, PlayerState, Direction
+from game_logic.commands import CombinedActionCommand
+
 if TYPE_CHECKING:
     from game_logic.game import Game
     from game_logic.tile import TileType
-
-from game_logic.player import Player, HumanPlayer, AIPlayer
-from game_logic.enums import GamePhase, PlayerState, Direction
-from game_logic.commands import CombinedActionCommand
-import constants as C
 
 class GameState:
     """Abstract base class for different game phases/states."""
@@ -260,14 +262,14 @@ class LayingTrackState(GameState):
                 self.message = "All staged moves cleared."
         # --- END OF FIX ---
         
-        elif event.key == pygame.K_s:
-            # --- FIX: Use a command to stage a move ---
+        elif event.key == C.pygame.K_s: # Using C to be safe
             if self.move_in_progress and 'tile_type' in self.move_in_progress:
                 if len(self.staged_moves) + self.game.actions_taken_this_turn >= C.MAX_PLAYER_ACTIONS:
                     self.message = "Cannot stage more moves."
                     return
-                # Finalize the move data before creating the command
                 self.move_in_progress['action_type'] = 'exchange' if self.game.board.get_tile(*self.move_in_progress['coord']) else 'place'
+                
+                # This now works because StageMoveCommand is imported correctly.
                 command = StageMoveCommand(self.game, self, self.move_in_progress)
                 self.game.command_history.execute_command(command)
             else:
@@ -409,8 +411,6 @@ class GameOverState(GameState):
         pass
 
     def draw(self, screen):
-        # ... (implementation is correct)
-        from rendering_utils import get_font
         # Draw a big "Game Over" message in the center of the screen
         font = get_font(50)
         text_surface = font.render(self.message, True, C.COLOR_STOP)

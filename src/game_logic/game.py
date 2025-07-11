@@ -20,7 +20,7 @@ from .pathfinding import BFSPathfinder
 from .rule_engine import RuleEngine
 from .turn_manager import TurnManager
 from .deck_manager import DeckManager
-import constants as C
+import common.constants as C
 
 class Game:
     """

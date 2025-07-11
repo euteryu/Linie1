@@ -11,12 +11,12 @@ from game_logic.player import Player, AIPlayer
 from game_logic.enums import GamePhase, PlayerState, Direction
 # --- END FIX ---
 
-from game_states import GameState, LayingTrackState, DrivingState, GameOverState
-from mod_manager import ModManager
-from sound_manager import SoundManager
+from states.game_states import GameState, LayingTrackState, DrivingState, GameOverState
+from mods.mod_manager import ModManager
+from common.sound_manager import SoundManager
 from ui.ui_manager import UIManager
-from rendering_utils import create_tile_surface, get_font
-import constants as C
+from common.rendering_utils import create_tile_surface, get_font
+import common.constants as C
 
 class GameScene(Scene):
     def __init__(self, scene_manager, game_instance, sounds, mod_manager):

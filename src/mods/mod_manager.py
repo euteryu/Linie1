@@ -1,17 +1,23 @@
-# mod_manager.py
+# src/mods/mod_manager.py
 import sys
 import os
 import importlib.util
 import json
 from typing import List, Dict, Any, Optional, Tuple, TYPE_CHECKING
 
-from imod import IMod
+# --- START OF FIX ---
+# Since imod.py is in the same 'mods' package, we use a relative import.
+from .imod import IMod
 
-# The TYPE_CHECKING block is still essential for the imports themselves.
+# The TYPE_CHECKING block is for preventing circular dependencies at runtime,
+# while still allowing type hints for your IDE.
+# We use absolute imports from the 'src' root for these external packages.
 if TYPE_CHECKING:
     from game_logic.game import Game
     from game_logic.player import Player
-    from visualizer import Linie1Visualizer
+    from game_logic.tile import TileType # Added for on_hand_tile_clicked
+    from scenes.game_scene import GameScene # Was 'visualizer'
+# --- END OF FIX ---
 
 
 class ModManager:
@@ -31,7 +37,7 @@ class ModManager:
         # but we use a flag to ensure the expensive setup logic runs only once.
         if hasattr(self, '_is_new') and self._is_new:
             print("--- Initializing ModManager (should only happen once) ---")
-            self.mods_directory = "mods"
+            self.mods_directory = os.path.dirname(os.path.abspath(__file__))
             self.available_mods: Dict[str, IMod] = {}
             self.active_mod_ids: List[str] = []
             
@@ -44,8 +50,9 @@ class ModManager:
     def discover_mods(self):
         self.available_mods.clear()
         
-        project_root = os.path.dirname(os.path.abspath(__file__))
-        mods_dir_absolute = os.path.join(project_root, self.mods_directory)
+        mods_dir_absolute = self.mods_directory
+        # The project root is one level up from the mods directory
+        project_root = os.path.dirname(mods_dir_absolute)
 
         if project_root not in sys.path:
             sys.path.insert(0, project_root)

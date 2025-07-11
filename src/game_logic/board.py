@@ -3,10 +3,9 @@ from typing import List, Dict, Tuple, Optional, Set
 from .enums import Direction # Relative import
 from .tile import PlacedTile, TileType # Relative import
 # Import constants used *only* by Board
-from constants import GRID_ROWS, GRID_COLS, PLAYABLE_ROWS, PLAYABLE_COLS, BUILDING_COORDS, TERMINAL_DATA
+from common.constants import GRID_ROWS, GRID_COLS, PLAYABLE_ROWS, PLAYABLE_COLS, BUILDING_COORDS, TERMINAL_DATA
 
 class Board:
-    # ... (Implementation including _initialize_terminals, to_dict, from_dict as before) ...
     # Make sure _initialize_terminals uses PlacedTile correctly
     def __init__(self, rows: int = GRID_ROWS, cols: int = GRID_COLS): # ... implementation ...
         self.rows = rows; self.cols = cols; self.grid: List[List[Optional[PlacedTile]]] = [[None for _ in range(cols)] for _ in range(rows)]; self.building_coords = BUILDING_COORDS; self.coord_to_building: Dict[Tuple[int, int], str] = { v: k for k, v in self.building_coords.items() }; self.buildings_with_stops: Set[str] = set(); self.building_stop_locations: Dict[str, Tuple[int, int]] = {}

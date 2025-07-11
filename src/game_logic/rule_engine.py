@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from .tile import TileType, PlacedTile
 
 from .enums import Direction, GamePhase, PlayerState
-from game_states import GameOverState
+from states.game_states import GameOverState
 
 class RuleEngine:
     """A stateless service that contains all the core validation logic for the game."""

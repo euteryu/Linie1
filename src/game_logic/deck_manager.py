@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from .cards import LineCard, RouteCard
 
 from .cards import LineCard, RouteCard
-import constants as C
+import common.constants as C
 
 class DeckManager:
     """Manages all game decks: tiles, line cards, and route cards."""

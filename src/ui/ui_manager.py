@@ -1,7 +1,7 @@
 # ui/ui_manager.py
 import pygame
 from ui.panels import GameInfoPanel, PlayerInfoPanel, HandPanel, MessagePanel, ButtonPanel, ModPanel
-import constants as C
+import common.constants as C
 
 class UIManager:
     """

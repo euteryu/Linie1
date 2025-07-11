@@ -6,14 +6,14 @@ import pygame
 
 if TYPE_CHECKING:
     from .game import Game
-    from ..sound_manager import SoundManager
+    from ..common.sound_manager import SoundManager
     from .commands import CombinedActionCommand # For type hinting
 
 from .enums import PlayerState, Direction, GamePhase
 from .tile import TileType
 from .cards import LineCard, RouteCard
 from .ai_strategy import AIStrategy, EasyStrategy, HardStrategy
-import constants as C
+import common.constants as C
 
 
 class RouteStep(NamedTuple):
