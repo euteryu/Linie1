@@ -3,6 +3,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Tuple, Optional, Dict, List
 import copy
+import pygame
+
+from common import constants as C # Import base constants
 
 from .enums import PlayerState, Direction, GamePhase
 from .tile import TileType, PlacedTile
@@ -197,12 +200,11 @@ class MoveCommand(Command):
         self.game.actions_taken_this_turn = self.game.MAX_PLAYER_ACTIONS
         
         print(f"--> Move Execute SUCCESS. Landed at {self.player.streetcar_position}. Win: {win}")
-        
-        # If the move resulted in a win, the state is already GAME_OVER.
-        # Otherwise, the turn must be confirmed.
+
+        # Post the event instead of directly confirming the turn.
         if self.game.game_phase != GamePhase.GAME_OVER:
-            self.game.confirm_turn()
-            
+            pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'driving_move'}))
+        
         return True
 
     def undo(self) -> bool:
@@ -291,6 +293,14 @@ class CombinedActionCommand(Command):
 
             # Update the action counter only after all moves succeed
             self.game.actions_taken_this_turn += len(self.moves_to_perform)
+
+            # After executing, check if the turn is now complete.
+            if self.game.actions_taken_this_turn >= C.MAX_PLAYER_ACTIONS:
+                # Instead of calling confirm_turn directly, post an event.
+                # This decouples the command from the turn manager and ensures
+                # the event is processed cleanly by the main loop.
+                pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'turn_commit'}))
+
             print(f"--- [COMMAND] CombinedAction Execute SUCCESS. Actions taken this turn: {self.game.actions_taken_this_turn} ---")
             return True
 

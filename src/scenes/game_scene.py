@@ -48,21 +48,32 @@ class GameScene(Scene):
         self.debug_die_rects: Dict[any, pygame.Rect] = {}
 
     def handle_events(self, events):
-        """Implementation of the abstract method."""
         for event in events:
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 self.scene_manager.go_to_scene("MAIN_MENU")
                 return
 
+            # --- START OF FIX: Simplified and Corrected Turn Logic ---
+            if event.type == C.START_NEXT_TURN_EVENT:
+                # 1. First, confirm the turn of the player who just finished.
+                #    This advances the player index and updates game state.
+                self.game.confirm_turn()
+
+                # 2. After confirmation, get the NEW active player.
+                active_player = self.game.get_active_player()
+
+                # 3. If this new player is an AI and it's their turn to act,
+                #    tell them to start their logic.
+                if isinstance(active_player, AIPlayer) and self.game.actions_taken_this_turn == 0:
+                    active_player.handle_turn_logic(self.game, self, self.sounds)
+                
+                # This event has been fully handled.
+                continue
+            # --- END OF FIX ---
+
+            # Standard UI and game state event handling
             if self.ui_manager.handle_event(event, self.game, self.current_state):
                 continue
-
-            if event.type == C.START_NEXT_TURN_EVENT:
-                active_player = self.game.get_active_player()
-                if isinstance(active_player, AIPlayer):
-                    active_player.handle_turn_logic(self.game, self, self.sounds)
-                continue
-                
             if self.current_state:
                 self.current_state.handle_event(event)
 

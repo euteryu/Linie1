@@ -115,44 +115,51 @@ class AIPlayer(Player):
         super().__init__(player_id, difficulty_mode)
         self.strategy = strategy
 
-    def handle_turn_logic(self, game: 'Game', visualizer: Optional['Linie1Visualizer'] = None, sounds: Optional['SoundManager'] = None):
+    def handle_turn_logic(self, game: 'Game', visualizer: Optional['GameScene'] = None, sounds: Optional['SoundManager'] = None):
         """
-        Orchestrates the AI's entire turn logic for both laying track and driving.
+        AI's turn logic. It plans its moves and executes them via a command.
+        The command it executes is now responsible for posting the event that
+        signals the end of the turn.
         """
-        from .commands import CombinedActionCommand
+        from .commands import CombinedActionCommand, MoveCommand # Local import for command classes
 
-        if game.game_phase == GamePhase.GAME_OVER:
+        if game.game_phase == GamePhase.GAME_OVER or self.player_state == PlayerState.ELIMINATED:
             return
 
+        # --- DRIVING PHASE LOGIC ---
         if self.player_state == PlayerState.DRIVING:
             print(f"\n--- AI Player {self.player_id}'s Turn (Driving) ---")
             
-            # --- START OF FIX ---
-            # Call the method on the deck_manager, not the game object.
             roll_result = game.deck_manager.roll_special_die()
-            # --- END OF FIX ---
-
             print(f"  AI Player {self.player_id} rolls a '{roll_result}'.")
-            if sounds: sounds.play('dice_roll')
+            
+            if sounds:
+                sounds.play('dice_roll')
             
             if visualizer:
                 visualizer.force_redraw(f"AI rolling... {roll_result}")
                 pygame.time.delay(C.AI_MOVE_DELAY_MS)
-
+            
+            # The attempt_driving_move method creates and executes a MoveCommand.
+            # That command will post the START_NEXT_TURN_EVENT on success.
+            # If it fails, the AI has no move and its turn is effectively over,
+            # so we must post the event to advance to the next player.
             if not game.attempt_driving_move(self, roll_result):
                  if sounds: sounds.play('error')
-                 # If the move fails (e.g., blocked path), the turn still ends.
-                 game.confirm_turn()
+                 pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'driving_move_failed'}))
         
+        # --- LAYING TRACK PHASE LOGIC ---
         elif self.player_state == PlayerState.LAYING_TRACK:
             hand_str = ", ".join([t.name for t in self.hand])
             print(f"\n--- AI Player {self.player_id} ({self.strategy.__class__.__name__}) is thinking... (Hand: [{hand_str}]) ---")
 
+            # 1. The AI's strategy plans the best set of moves.
             planned_actions = self.strategy.plan_turn(game, self)
             
+            # 2. Convert the plan into the format for the CombinedActionCommand.
             staged_moves_for_command = []
             for move in planned_actions:
-                score_str = ", ".join([f"{k}: {v:.1f}" for k,v in move.get('score_breakdown', {}).items() if v>0])
+                score_str = ", ".join([f"{k}: {v:.1f}" for k, v in move.get('score_breakdown', {}).items() if v > 0])
                 print(f"  AI plans to {move['type'].upper()} {move['details'][0].name} at {move['details'][2:]} (Score: {move.get('score', 0):.2f} -> [{score_str}])")
                 
                 tile_type, orientation, r, c = move['details']
@@ -161,9 +168,10 @@ class AIPlayer(Player):
                     'tile_type': tile_type,
                     'orientation': orientation,
                     'action_type': move['type'],
-                    'is_valid': True
+                    'is_valid': True # We trust the AI's plan is valid
                 })
 
+            # 3. Execute the plan or forfeit.
             if len(staged_moves_for_command) >= game.MAX_PLAYER_ACTIONS:
                 print(f"  AI committing its plan...")
                 if visualizer:
@@ -171,17 +179,18 @@ class AIPlayer(Player):
                     pygame.time.delay(C.AI_MOVE_DELAY_MS)
 
                 command = CombinedActionCommand(game, self, staged_moves_for_command)
+                
+                # The CombinedActionCommand will post the event on success.
+                # If it fails, we must post the event to forfeit and advance.
                 if not game.command_history.execute_command(command):
                     print("  CRITICAL AI ERROR: Planned combo command failed to execute.")
                     game.eliminate_player(self)
                     if sounds: sounds.play('error')
+                    pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'ai_plan_failed'}))
             else:
+                # The AI couldn't find enough moves, so it forfeits.
                 print(f"--- AI Player {self.player_id} could only find {len(planned_actions)}/{game.MAX_PLAYER_ACTIONS} moves. Forfeiting turn. ---")
                 if sounds: sounds.play('eliminated')
                 game.eliminate_player(self)
-            
-            if game.game_phase != GamePhase.GAME_OVER:
-                print(f"--- AI Player {self.player_id} ends its turn. ---")
-                if self.player_state != PlayerState.ELIMINATED and sounds:
-                    sounds.play('commit')
-                game.confirm_turn()
+                # Post the event to advance to the next player after forfeiting.
+                pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'ai_forfeit'}))

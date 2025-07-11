@@ -315,7 +315,6 @@ class LayingTrackState(GameState):
             move_to_validate['is_valid'] = is_valid
 
     def _commit_staged_moves(self, player):
-        """Attempts to commit all staged moves as a single atomic command."""
         if self.move_in_progress:
             self.message = "A move is being built. [S] to stage or [ESC] to clear."
             return
@@ -325,29 +324,18 @@ class LayingTrackState(GameState):
             if all(move.get('is_valid', False) for move in self.staged_moves):
                 command = CombinedActionCommand(self.game, player, self.staged_moves)
                 if self.game.command_history.execute_command(command):
-                    self.scene.sounds.play('commit') # Use self.scene
-                    
-                    # --- START OF FIX ---
-                    # Reset the staging area IMMEDIATELY after a successful commit.
-                    # This prevents the highlights from being drawn on the next frame.
+                    self.scene.sounds.play('commit')
                     self._reset_staging()
-                    # --- END OF FIX ---
-
-                    if self.game.actions_taken_this_turn >= C.MAX_PLAYER_ACTIONS:
-                        if not self.game.confirm_turn():
-                             self.message = "Error confirming turn."
+                    # --- FIX: No longer calls confirm_turn() here. ---
+                    # The command now posts an event to handle this.
                 else:
                     self.message = "Commit failed: Action limit would be exceeded."
             else:
                 self.message = "Cannot commit: one or more moves are invalid (red)."
-                self.scene.sounds.play('error') # Use self.scene
+                self.scene.sounds.play('error')
         else:
-            # Forfeit logic
-            if self.game.confirm_turn():
-                self._reset_staging()
-            else:
-                self.message = "You have possible moves; you must play."
-                self.scene.sounds.play('error') # Use self.scene
+            # Forfeit logic now also posts the event to be safe.
+            pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'forfeit_attempt'}))
 
     def draw(self, screen):
         # We now call draw_board and draw_overlays from the main visualizer loop
