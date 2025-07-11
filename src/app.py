@@ -59,16 +59,19 @@ class App:
             self.current_scene = self.scenes[scene_name]
             print(f"Switching to scene: {scene_name}")
 
-            # --- START OF FIX ---
-            # If we are entering the game scene, check if the first player is an AI.
-            # If so, post the event now that the game loop is active.
+            # If we are entering the game scene, check if we need to kick-start an AI player's turn.
             if scene_name == "GAME":
-                from game_logic.player import AIPlayer # Local import
+                from game_logic.player import AIPlayer
                 active_player = self.game_instance.get_active_player()
-                # Also check that it's the very beginning of the game.
-                if isinstance(active_player, AIPlayer) and self.game_instance.current_turn == 1 and self.game_instance.actions_taken_this_turn == 0:
+                
+                # --- START OF FIX ---
+                # This check now covers two scenarios:
+                # 1. The very start of the game (turn 1, 0 actions).
+                # 2. Resuming the game when it's an AI's turn but no actions have been taken yet.
+                if isinstance(active_player, AIPlayer) and self.game_instance.actions_taken_this_turn == 0:
+                    print(f"Resuming/Starting AI Player {active_player.player_id}'s turn.")
                     pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT))
-            # --- END OF FIX ---
+                # --- END OF FIX ---
             
         else:
             print(f"Warning: Scene '{scene_name}' not found.")
@@ -81,17 +84,22 @@ class App:
                 self.theme = json.load(f)
             print(f"Theme '{theme_file}' loaded successfully.")
 
-            # --- START OF FIX: Re-create ALL scenes and managers that use the theme ---
-            # This ensures the new theme is propagated everywhere.
+            # Re-create ALL scenes to apply the new theme
             self.scenes["MAIN_MENU"] = MainMenuScene(self)
             self.scenes["GAME"] = GameScene(self, self.game_instance, self.sounds, self.mod_manager)
             self.scenes["SETTINGS"] = SettingsScene(self)
+            
+            # --- START OF FIX ---
+            # After creating the new GameScene, we MUST update the game instance's
+            # reference to point to this new scene object.
+            self.game_instance.visualizer = self.scenes["GAME"]
             # --- END OF FIX ---
 
         except FileNotFoundError:
             print(f"ERROR: Theme file '{theme_file}' not found.")
             # Revert to a default if loading fails
-            with open('ui_theme_dark.json', 'r') as f:
+            default_theme_path = os.path.join(self.root_dir, 'src', 'assets', 'themes', 'ui_theme_dark.json')
+            with open(default_theme_path, 'r') as f:
                 self.theme = json.load(f)
 
     # --- Save/Load Logic Moved Here from GameState ---
@@ -114,7 +122,12 @@ class App:
                 self.game_instance = loaded_game
                 # Re-create the game scene with the new game instance
                 self.scenes["GAME"] = GameScene(self, self.game_instance, self.sounds, self.mod_manager)
+                
+                # --- START OF FIX ---
+                # Update the new game instance's reference to point to the new scene
                 self.game_instance.visualizer = self.scenes["GAME"]
+                # --- END OF FIX ---
+                
                 self.go_to_scene("GAME")
 
     def run(self):
