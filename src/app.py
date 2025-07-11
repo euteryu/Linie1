@@ -3,7 +3,7 @@ import os
 import pygame
 import sys
 import json
-from tkinter import filedialog # Need to import this for save/load
+import tkinter as tk
 
 # Import your scenes
 from scenes.main_menu_scene import MainMenuScene
@@ -37,7 +37,8 @@ class App:
         try:
             self.tk_root = tk.Tk()
             self.tk_root.withdraw()
-        except Exception:
+        except Exception as e:
+            print(f"Warning: Tkinter could not be initialized. File dialogs will be disabled. Error: {e}")
             self.tk_root = None
 
         # --- Create Scenes ---
@@ -105,7 +106,7 @@ class App:
     # --- Save/Load Logic Moved Here from GameState ---
     def save_game_action(self):
         if not self.tk_root: return
-        filepath = filedialog.asksaveasfilename(
+        filepath = tk.filedialog.asksaveasfilename(
             title="Save Game", defaultextension=".json", filetypes=[("Linie 1 Saves", "*.json")]
         )
         if filepath:
@@ -113,7 +114,7 @@ class App:
 
     def load_game_action(self):
         if not self.tk_root: return
-        filepath = filedialog.askopenfilename(
+        filepath = tk.filedialog.askopenfilename(
             title="Load Game", filetypes=[("Linie 1 Saves", "*.json")]
         )
         if filepath:
