@@ -52,17 +52,19 @@ class PlaceTileCommand(Command):
         print(f"Executing Place: P{self.player.player_id} places {self.tile_type.name} at ({self.row},{self.col})")
         
         if self.game.actions_taken_this_turn >= self.game.MAX_PLAYER_ACTIONS:
-            print("--> Place Failed: Action limit reached.")
             return False
 
         if self.tile_type not in self.player.hand:
-            print(f"--> Place Failed: Player lacks {self.tile_type.name}.")
             return False
         self._original_hand_contains_tile = True
 
-        is_valid, message = self.game.check_placement_validity(
-            self.tile_type, self.orientation, self.row, self.col
+        # --- START OF FIX ---
+        # Call the validation method on the rule_engine, not the game object.
+        is_valid, message = self.game.rule_engine.check_placement_validity(
+            self.game, self.tile_type, self.orientation, self.row, self.col
         )
+        # --- END OF FIX ---
+
         if not is_valid:
             print(f"--> Place Failed: {message}")
             return False
@@ -71,15 +73,9 @@ class PlaceTileCommand(Command):
         placed_tile = PlacedTile(self.tile_type, self.orientation)
         self.game.board.set_tile(self.row, self.col, placed_tile)
 
-        building_before = self.game.board.buildings_with_stops.copy()
-        self.game._check_and_place_stop_sign(placed_tile, self.row, self.col)
-        newly_stopped = self.game.board.buildings_with_stops - building_before
-        if newly_stopped:
-             self._stop_sign_placed = True
-             self._building_id_stopped = newly_stopped.pop()
-
+        self.game.rule_engine.check_and_place_stop_sign(self.game, placed_tile, self.row, self.col)
+        
         self.game.actions_taken_this_turn += 1
-        print(f"--> Place SUCCESS.")
         return True
 
     def undo(self) -> bool:
@@ -117,20 +113,24 @@ class ExchangeTileCommand(Command):
         print(f"Executing Exchange: P{self.player.player_id} exchanges for {self.new_tile_type.name} at ({self.row},{self.col})")
         
         if self.game.actions_taken_this_turn >= self.game.MAX_PLAYER_ACTIONS:
-            print("--> Exchange Failed: Action limit reached.")
             return False
 
         if self.new_tile_type not in self.player.hand:
-            print(f"--> Exchange Failed: Player lacks {self.new_tile_type.name}.")
             return False
         self._original_hand_contains_tile = True
 
-        # Simplified validity check for brevity; full logic is in RuleEngine
-        old_placed_tile = self.game.board.get_tile(self.row, self.col)
-        if not self.game.check_exchange_validity(self.player, self.new_tile_type, self.new_orientation, self.row, self.col)[0]:
-            print("--> Exchange Failed: Move is invalid.")
-            return False
+        # --- START OF FIX ---
+        # Call the validation method on the rule_engine, not the game object.
+        is_valid, message = self.game.rule_engine.check_exchange_validity(
+            self.game, self.player, self.new_tile_type, self.new_orientation, self.row, self.col
+        )
+        # --- END OF FIX ---
 
+        if not is_valid:
+            print(f"--> Exchange Failed: {message}")
+            return False
+        
+        old_placed_tile = self.game.board.get_tile(self.row, self.col)
         self._old_placed_tile_data = old_placed_tile.to_dict()
 
         self.player.hand.remove(self.new_tile_type)
@@ -139,7 +139,6 @@ class ExchangeTileCommand(Command):
         self.game.board.set_tile(self.row, self.col, new_placed_tile)
         
         self.game.actions_taken_this_turn += 1
-        print("--> Exchange SUCCESS.")
         return True
 
     def undo(self) -> bool:

@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING, Dict, Any, List, Tuple
 
 if TYPE_CHECKING:
     from game_logic.game import Game
-    from game_logic.player import Player
+    from game_logic.player import Player, AIPlayer
+    from game_logic.ai_actions import PotentialAction # Add this import
     # from visualizer import Linie1Visualizer # For UI hooks
     import pygame
 
@@ -73,5 +74,11 @@ class IMod(ABC):
         For example, a "Super Star Tile" mod would use this to trigger a special state.
         """
         return False # Default behavior: mod does not handle the click
+
+    def get_ai_potential_actions(self, game: 'Game', player: 'AIPlayer') -> List['PotentialAction']:
+        """
+        Allows a mod to provide a list of its own special actions for the AI to consider.
+        """
+        return []
 
     # Add other hooks as needed (e.g., on_tile_placed, on_money_changed, on_route_validated)

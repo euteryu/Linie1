@@ -8,6 +8,8 @@
     "max_capital": 200,
     "capital_regen_per_turn": 5,
     "cost_priority_requisition": 25,
+    "cost_bribe_official": 80,
+    "reward_influence_from_bribe": 1,
     "sell_rewards": {
         "default": 10,
         "Straight": 5,

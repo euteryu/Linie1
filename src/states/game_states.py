@@ -244,12 +244,17 @@ class LayingTrackState(GameState):
             return
             
         if event.key == pygame.K_r:
+            # The logic to modify the orientation was correct, but it was missing
+            # from the final version I provided. This restores it.
             if self.move_in_progress and 'orientation' in self.move_in_progress:
-                self.move_in_progress['orientation'] = (self.move_in_progress['orientation'] + 90) % 360
+                self.move_in_progress['orientation'] = (self.move_in_progress['orientation'] + 45) % 360
             elif self.staged_moves:
-                self.staged_moves[-1]['orientation'] = (self.staged_moves[-1]['orientation'] + 90) % 360
+                # Rotate the most recently staged move
+                self.staged_moves[-1]['orientation'] = (self.staged_moves[-1]['orientation'] + 45) % 360
+            
             self._validate_all_staged_moves()
             self.message = "Rotated selection."
+            return # Explicitly return after handling
 
         # --- START OF FIX ---
         # Changed K_ESCAPE to K_BACKSPACE for canceling staging

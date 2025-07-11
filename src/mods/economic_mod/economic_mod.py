@@ -5,9 +5,11 @@ from typing import TYPE_CHECKING, List, Dict, Any
 # Since this is a new mod, it needs its own imports
 from common.rendering_utils import draw_text
 from ..imod import IMod 
-from .economic_commands import PriorityRequisitionCommand
+from .economic_commands import BribeOfficialCommand, PriorityRequisitionCommand
 
 from common import constants as C # Import base constants
+from game_logic.ai_actions import PotentialAction
+from game_logic.enums import PlayerState
 from .economic_commands import PriorityRequisitionCommand, SellToScrapyardCommand
 from ui.palette_selection_state import PaletteSelectionState
 from . import constants_economic as CE
@@ -18,6 +20,7 @@ if TYPE_CHECKING:
     from game_logic.player import Player
     from scenes.game_scene import GameScene
     from game_logic.tile import TileType
+    from game_logic.ai_actions import PotentialAction
 
 # A unique identifier for our special tile's name
 REQUISITION_PERMIT_ID = "REQUISITION_PERMIT"
@@ -189,3 +192,65 @@ class EconomicMod(IMod):
             return True
 
         return False
+
+    def get_ai_potential_actions(self, game: 'Game', player: 'AIPlayer') -> List[PotentialAction]:
+        """The mod provides fully-formed, scored actions for the AI to consider."""
+        actions = []
+        mod_data = player.components.get(self.mod_id)
+        if not mod_data: return []
+
+        current_capital = mod_data.get('capital', 0)
+        max_capital = mod_data.get('max_capital', 200)
+        urgency_modifier = 1.5 if current_capital < (max_capital * 0.25) else 1.0
+
+        # --- Action 1: Selling Tiles (1 Action Cost) ---
+        sell_rewards = self.config.get("sell_rewards", {})
+        for tile in player.hand:
+            reward = sell_rewards.get(tile.name, sell_rewards.get("default", 0))
+            if current_capital + reward <= max_capital:
+                sell_score = 5.0 + (reward * urgency_modifier)
+                actions.append(PotentialAction(
+                    action_type='sell_tile',
+                    details={'tile': tile, 'reward': reward},
+                    score=sell_score,
+                    score_breakdown={'sell_value': sell_score},
+                    command_generator=lambda g, p, t=tile, r=reward: SellToScrapyardCommand(g, p, self.mod_id, t, r),
+                    action_cost=1
+                ))
+
+        # --- Action 2: Priority Requisition (1 Action Cost) ---
+        # --- START OF FIX ---
+        # Define 'req_cost' before using it.
+        req_cost = self.config.get("cost_priority_requisition", 25)
+        # --- END OF FIX ---
+        if current_capital >= req_cost and len(player.hand) < game.HAND_TILE_LIMIT:
+            req_score = 60.0 - req_cost
+            permit_tile = game.tile_types['Curve'].copy()
+            permit_tile.is_requisition_permit = True
+            permit_tile.name = "REQUISITION_PERMIT"
+            
+            actions.append(PotentialAction(
+                action_type='priority_requisition',
+                details={'cost': req_cost},
+                score=req_score,
+                command_generator=lambda g, p, c=req_cost, t=permit_tile: PriorityRequisitionCommand(g, p, c, self.mod_id, t),
+                action_cost=1
+            ))
+
+        # --- Action 3: Bribe Official (2 Action Cost) ---
+        bribe_cost = self.config.get("cost_bribe_official", 80)
+        if current_capital >= bribe_cost:
+            bribe_reward = self.config.get("reward_influence_from_bribe", 1)
+            bribe_score = 50.0
+            if player.player_state == PlayerState.DRIVING: bribe_score *= 1.5
+            if current_capital == max_capital: bribe_score *= 1.2
+
+            actions.append(PotentialAction(
+                action_type='bribe_official',
+                details={'cost': bribe_cost, 'reward': bribe_reward},
+                score=bribe_score,
+                command_generator=lambda g, p, c=bribe_cost, r=bribe_reward: BribeOfficialCommand(g, p, c, r, self.mod_id),
+                action_cost=2
+            ))
+            
+        return actions

@@ -1,9 +1,7 @@
-# game_logic/ai_strategy.py
+# src/game_logic/ai_strategy.py
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional, TYPE_CHECKING, Tuple, Set
-from itertools import permutations
-import random
 from collections import Counter
 import pygame
 
@@ -15,6 +13,9 @@ if TYPE_CHECKING:
 from .enums import Direction
 from .tile import PlacedTile
 from common.constants import KING_AI_TREE_TILE_BIAS, MAX_TARGETS_FOR_COMBO_SEARCH
+from .ai_actions import PotentialAction
+# We need the base command class to type hint the generator
+from .commands import PlaceTileCommand, ExchangeTileCommand, CombinedActionCommand
 
 class AIStrategy(ABC):
     """Abstract base class for all AI difficulty levels (brains)."""
@@ -126,73 +127,149 @@ class HardStrategy(EasyStrategy):
     An advanced AI that prunes a large set of possible moves down to the most
     promising, then runs a combinatorial search on that small subset.
     """
-    def plan_turn(self, game: Game, player: AIPlayer) -> List[Dict]:
-        print(f"  (HardStrategy starting... Looking for combo plays)")
-        ideal_plan = self._calculate_ideal_route(game, player)
+    def _gather_standard_actions(self, game: Game, player: AIPlayer, ideal_plan) -> List[PotentialAction]:
+        """Gathers all standard place/exchange moves as PotentialActions."""
+        actions = []
+        rule_engine = game.rule_engine
         target_squares = self._get_high_value_target_squares(game, player, ideal_plan)
-        
         if len(target_squares) > MAX_TARGETS_FOR_COMBO_SEARCH:
             target_squares = self._prune_targets(game, player, target_squares, ideal_plan)
         
-        if hasattr(game, 'visualizer') and game.visualizer and game.visualizer.show_ai_heatmap:
-            game.visualizer.heatmap_data = target_squares
-            game.visualizer.force_redraw(f"AI targeting {len(target_squares)} squares...")
-            pygame.time.delay(1500)
-
-        # --- START OF FIX ---
-        rule_engine = game.rule_engine
-        # --- END OF FIX ---
-        
-        possible_moves_for_targets = []
         unique_hand_tiles = list(set(player.hand))
-
         for r, c in target_squares:
             for tile in unique_hand_tiles:
                 for o in [0, 90, 180, 270]:
                     if rule_engine.check_placement_validity(game, tile, o, r, c)[0]:
-                        possible_moves_for_targets.append({'type': 'place', 'coord': (r, c), 'tile_type': tile, 'orientation': o})
+                        score, breakdown = self._score_move(game, player, ideal_plan, 'place', tile, o, r, c)
+                        actions.append(PotentialAction(
+                            action_type='place',
+                            details={'tile': tile, 'orientation': o, 'coord': (r, c)},
+                            score=score, score_breakdown=breakdown,
+                            command_generator=lambda g, p, t=tile, orient=o, row=r, col=c: PlaceTileCommand(g, p, t, orient, row, col)
+                        ))
                     if game.board.get_tile(r,c) and rule_engine.check_exchange_validity(game, player, tile, o, r, c)[0]:
-                         possible_moves_for_targets.append({'type': 'exchange', 'coord': (r,c), 'tile_type': tile, 'orientation': o})
+                        score, breakdown = self._score_move(game, player, ideal_plan, 'exchange', tile, o, r, c)
+                        actions.append(PotentialAction(
+                            action_type='exchange',
+                            details={'tile': tile, 'orientation': o, 'coord': (r, c)},
+                            score=score, score_breakdown=breakdown,
+                            command_generator=lambda g, p, t=tile, orient=o, row=r, col=c: ExchangeTileCommand(g, p, t, orient, row, col)
+                        ))
+        return actions
 
-        if len(possible_moves_for_targets) < 2:
-            print("  (HardStrategy: Not enough valid single moves for a combo. Falling back to Easy.)")
-            return super().plan_turn(game, player)
+    def plan_turn(self, game: Game, player: AIPlayer) -> List[PotentialAction]:
+        """Generic plan_turn that finds the best turn plan from all available actions."""
+        print(f"  (HardStrategy starting... Analyzing all options)")
+        ideal_plan = self._calculate_ideal_route(game, player)
 
-        best_combo_score = -1.0
-        best_combo_actions = None
+        # 1. Gather all possible actions from the base game and all active mods.
+        all_actions = self._gather_standard_actions(game, player, ideal_plan)
+        for mod in game.mod_manager.get_active_mods():
+            all_actions.extend(mod.get_ai_potential_actions(game, player))
         
-        for i in range(len(possible_moves_for_targets)):
-            for j in range(i + 1, len(possible_moves_for_targets)):
-                move1, move2 = possible_moves_for_targets[i], possible_moves_for_targets[j]
-                if move1['coord'] == move2['coord']: continue
-                required_tiles = Counter([move1['tile_type'], move2['tile_type']])
-                if any(count > Counter(player.hand)[tile] for tile, count in required_tiles.items()): continue
+        if not all_actions:
+            print("  (HardStrategy: No possible actions found.)")
+            return []
 
-                is_valid1, _ = (rule_engine.check_placement_validity(game, move1['tile_type'], move1['orientation'], *move1['coord'], [move2]) if move1['type'] == 'place'
-                                else rule_engine.check_exchange_validity(game, player, move1['tile_type'], move1['orientation'], *move1['coord'], [move2]))
-                if not is_valid1: continue
+        # 2. Separate actions by their cost.
+        one_action_moves = [a for a in all_actions if a.action_cost == 1]
+        two_action_moves = [a for a in all_actions if a.action_cost == 2]
 
-                is_valid2, _ = (rule_engine.check_placement_validity(game, move2['tile_type'], move2['orientation'], *move2['coord'], [move1]) if move2['type'] == 'place'
-                                else rule_engine.check_exchange_validity(game, player, move2['tile_type'], move2['orientation'], *move2['coord'], [move1]))
-
-                if is_valid1 and is_valid2:
+        # 3. Find the best possible 2-action turn by combining two 1-action moves.
+        best_combo_score = -1.0
+        best_combo_plan = None
+        if len(one_action_moves) >= 2:
+            # This loop finds the best pair of compatible 1-action moves.
+            for i in range(len(one_action_moves)):
+                for j in range(i, len(one_action_moves)):
+                    action1 = one_action_moves[i]
+                    action2 = one_action_moves[j]
+                    if not self._is_combo_compatible(player, action1, action2): continue
+                    
                     sim_game = game.copy_for_simulation()
                     sim_player = next(p for p in sim_game.players if p.player_id == player.player_id)
-                    self._apply_move_to_sim(sim_game, sim_player, move1)
-                    self._apply_move_to_sim(sim_game, sim_player, move2)
-                    score = self._score_board_state(sim_game, sim_player)
-                    if score > best_combo_score:
-                        best_combo_score = score
-                        action1 = {'type': move1['type'], 'details': (move1['tile_type'], move1['orientation'], *move1['coord']), 'score': score, 'score_breakdown': {'combo': score}}
-                        action2 = {'type': move2['type'], 'details': (move2['tile_type'], move2['orientation'], *move2['coord']), 'score': 0, 'score_breakdown': {}}
-                        best_combo_actions = [action1, action2]
+                    self._apply_potential_action_to_sim(sim_game, sim_player, action1)
+                    self._apply_potential_action_to_sim(sim_game, sim_player, action2)
+                    
+                    # The total score is the quality of the resulting board plus the inherent value of the actions.
+                    combo_score = self._score_board_state(sim_game, sim_player) + action1.score + action2.score
+                    if combo_score > best_combo_score:
+                        best_combo_score = combo_score
+                        best_combo_plan = [action1, action2]
 
-        if best_combo_actions:
-            print("  (HardStrategy: Found a valid combo play!)")
-            return best_combo_actions
+        # 4. Find the best possible 2-action turn from a single 2-action move.
+        best_single_move_score = -1.0
+        best_single_move_plan = None
+        if two_action_moves:
+            # The best 2-action move is simply the one with the highest score.
+            best_2_action_move = max(two_action_moves, key=lambda a: a.score)
+            best_single_move_score = best_2_action_move.score
+            best_single_move_plan = [best_2_action_move]
 
-        print("  (HardStrategy: No valid combo found. Falling back to Easy.)")
-        return super().plan_turn(game, player)
+        # 5. Compare the best combo against the best single move and decide the turn plan.
+        if best_combo_plan and best_combo_score > best_single_move_score:
+            print(f"  (HardStrategy: Chose combo plan with score {best_combo_score:.2f})")
+            return best_combo_plan
+        elif best_single_move_plan:
+            print(f"  (HardStrategy: Chose single 2-action plan with score {best_single_move_score:.2f})")
+            return best_single_move_plan
+        
+        # Fallback: If no 2-action plan is possible, take the single best 1-action move.
+        # This is a failsafe and means the AI will only take one action.
+        if one_action_moves:
+            print("  (HardStrategy: No valid 2-action plan. Taking best single action.)")
+            return [max(one_action_moves, key=lambda a: a.score)]
+        
+        return [] # No moves possible at all.
+
+    def _is_combo_compatible(self, player: AIPlayer, action1: PotentialAction, action2: PotentialAction) -> bool:
+        """Checks if two actions can be performed together in a turn."""
+        # Rule 1: Cannot place/exchange on the same coordinate
+        coord1 = action1.details.get('coord')
+        coord2 = action2.details.get('coord')
+        # This check is only relevant if both actions involve coordinates.
+        if coord1 and coord2 and coord1 == coord2:
+            return False
+
+        # --- START OF FIX: Robust tile requirement check ---
+        # Rule 2: Check if player has enough tiles in hand for the combo
+        required_tiles = Counter()
+        
+        # Get the tile required for the first action, if any
+        tile1 = action1.details.get('tile')
+        if tile1:
+            required_tiles[tile1] += 1
+
+        # Get the tile required for the second action, if any
+        tile2 = action2.details.get('tile')
+        if tile2:
+            required_tiles[tile2] += 1
+        
+        player_hand_counts = Counter(player.hand)
+        for tile, required_count in required_tiles.items():
+            if player_hand_counts[tile] < required_count:
+                # The player does not have enough of this tile type to perform both actions.
+                return False
+        # --- END OF FIX ---
+
+        return True
+
+    def _apply_potential_action_to_sim(self, sim_game, sim_player, action: PotentialAction):
+        """New helper to apply any PotentialAction to a simulated game."""
+        if action.action_type == 'place':
+            d = action.details
+            sim_game.board.set_tile(d['coord'][0], d['coord'][1], PlacedTile(d['tile'], d['orientation']))
+            sim_player.hand.remove(d['tile'])
+        elif action.action_type == 'exchange':
+            d = action.details
+            old_tile = sim_game.board.get_tile(*d['coord'])
+            sim_game.board.set_tile(d['coord'][0], d['coord'][1], PlacedTile(d['tile'], d['orientation']))
+            sim_player.hand.remove(d['tile'])
+            sim_player.hand.append(old_tile.tile_type)
+        elif action.action_type == 'sell_tile':
+            d = action.details
+            sim_player.hand.remove(d['tile'])
+            # In simulation, we don't need to worry about capital, just the hand state.
 
     def _prune_targets(self, game: Game, player: Player, targets: Set[Tuple[int, int]], ideal_plan: Optional[List[RouteStep]]) -> Set[Tuple[int, int]]:
         next_goal = None

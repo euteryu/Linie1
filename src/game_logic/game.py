@@ -125,10 +125,22 @@ class Game:
         
         if target_idx == current_idx:
             print(f"Driving Info: No move for roll {roll_result}. Ending turn.")
-            return self.confirm_turn()
+            # If no move, the turn still ends. Post the event.
+            pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'no_drive_move'}))
+            return True # The "action" of doing nothing was successful.
 
         command = MoveCommand(self, player, target_idx)
-        return self.command_history.execute_command(command)
+        
+        # --- START OF FIX ---
+        # Execute the command. The command itself will post the event on SUCCESS.
+        if self.command_history.execute_command(command):
+            return True
+        else:
+            # If the command FAILS for any reason, we must still end the turn.
+            # Post the event here to ensure the game doesn't get stuck.
+            print(f"Driving move command failed for P{player.player_id}. Forfeiting turn.")
+            pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'driving_move_failed'}))
+            return False
         
     def check_player_route_completion(self, player: Player) -> Tuple[bool, Optional[Tuple[int, int]], Optional[List[RouteStep]]]:
         """
