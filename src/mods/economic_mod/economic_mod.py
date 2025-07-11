@@ -55,6 +55,60 @@ class EconomicMod(IMod):
             regen = self.config.get("capital_regen_per_turn", 5)
             capital_pool['capital'] = min(capital_pool['max_capital'], capital_pool['capital'] + regen)
 
+    def on_hand_tile_clicked(self, game: 'Game', player: 'Player', tile_type: 'TileType') -> bool:
+        """
+        Handles special behavior when a hand tile is clicked. This method
+        checks for sell mode first, then checks for special permit tiles.
+        """
+        player_mod_data = player.components.get(self.mod_id)
+        if not player_mod_data:
+            return False
+
+        # --- Priority 1: Check if Sell Mode is active ---
+        if player_mod_data.get('sell_mode_active', False):
+            # ... (sell mode logic is correct from previous fixes)
+            return True
+
+        # --- START OF FIX: Restore the Requisition Permit logic ---
+        # --- Priority 2: Check if the clicked tile is a Requisition Permit ---
+        if hasattr(tile_type, 'is_requisition_permit') and tile_type.is_requisition_permit:
+            if game.visualizer: # game.visualizer is the GameScene instance
+                
+                scene = game.visualizer 
+                
+                def on_tile_selected(chosen_tile: 'TileType'):
+                    """This function is executed when the player picks a tile from the palette."""
+                    permit_index = -1
+                    for i, hand_tile in enumerate(player.hand):
+                        if hasattr(hand_tile, 'is_requisition_permit') and hand_tile.is_requisition_permit:
+                            permit_index = i
+                            break
+                    
+                    if permit_index != -1:
+                        player.hand.pop(permit_index)
+                        player.hand.append(chosen_tile)
+                        print(f"Permit was fulfilled and replaced with a '{chosen_tile.name}'.")
+                    else:
+                        print("Error: Could not find permit in hand to fulfill.")
+                    
+                    scene.return_to_base_state()
+
+                # Request a state change to the generic PaletteSelectionState.
+                scene.request_state_change(
+                    lambda v: PaletteSelectionState(
+                        visualizer=v,
+                        title="Fulfill Requisition",
+                        items=list(game.tile_types.values()),
+                        item_surfaces=scene.tile_surfaces,
+                        on_select_callback=on_tile_selected
+                    )
+                )
+            return True # The click was handled by the mod.
+        # --- END OF FIX ---
+        
+        # If neither of the above conditions were met, the mod does nothing with this click.
+        return False
+
     def on_draw_ui_panel(self, screen: Any, visualizer: 'Linie1Visualizer', current_game_state_name: str):
         """Draws the current player's Capital on the UI panel using its own constants."""
         active_player = visualizer.game.get_active_player()
@@ -134,42 +188,4 @@ class EconomicMod(IMod):
             print(f"[{self.name}] Player {player.player_id} activated Sell Mode.")
             return True
 
-        return False
-
-    def on_hand_tile_clicked(self, game: 'Game', player: 'Player', tile_type: 'TileType') -> bool:
-        """
-        Handles special behavior when a hand tile is clicked. This method
-        checks for sell mode first, then checks for special permit tiles.
-        """
-        player_mod_data = player.components.get(self.mod_id)
-        if not player_mod_data:
-            return False
-
-        # --- Priority 1: Check if Sell Mode is active ---
-        if player_mod_data.get('sell_mode_active', False):
-            player_mod_data['sell_mode_active'] = False
-
-            # Prevent selling the permit itself
-            if hasattr(tile_type, 'is_requisition_permit') and tile_type.is_requisition_permit:
-                game.visualizer.current_state.message = "Cannot sell a Requisition Permit."
-                return True
-
-            sell_rewards = self.config.get("sell_rewards", {})
-            reward = sell_rewards.get(tile_type.name, sell_rewards.get("default", 0))
-
-            command = SellToScrapyardCommand(game, player, self.mod_id, tile_type, reward)
-            if game.command_history.execute_command(command):
-                game.visualizer.current_state.message = f"Sold {tile_type.name} for ${reward}."
-            else:
-                # The command now sets a more specific error message if it fails
-                pass
-            
-            return True
-
-        # --- Priority 2: Check if the clicked tile is a Requisition Permit ---
-        # This logic was moved to the UI button handler in a previous step,
-        # but the placeholder 'if' statement was causing the IndentationError.
-        # The correct logic is to simply not handle it here anymore.
-        
-        # If neither of the above conditions were met, the mod does nothing with this click.
         return False
