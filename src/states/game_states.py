@@ -14,6 +14,8 @@ from game_logic.player import AIPlayer, HumanPlayer
 from game_logic.enums import GamePhase, PlayerState, Direction
 from game_logic.commands import CombinedActionCommand
 
+from mods.economic_mod.economic_commands import AuctionTileCommand, PlaceBidCommand
+
 if TYPE_CHECKING:
     from game_logic.game import Game
     from game_logic.tile import TileType
@@ -414,3 +416,149 @@ class GameOverState(GameState):
         pygame.draw.rect(screen, C.COLOR_BLACK, bg_rect, 3, border_radius=10)
         
         screen.blit(text_surface, text_rect)
+
+
+class AuctionHouseState(GameState):
+    """
+    A transient state for viewing market prices and participating in auctions.
+    """
+    def __init__(self, scene: 'GameScene'):
+        super().__init__(scene)
+        self.is_transient_state = True
+        self.eco_mod = self.game.mod_manager.available_mods.get('economic_mod')
+        self.font = get_font(18)
+        self.header_font = get_font(24)
+        
+        # Tabs
+        self.tabs = ["Market Prices", "Live Auctions"]
+        self.active_tab = "Market Prices"
+        self.tab_rects = {
+            "Market Prices": pygame.Rect(50, 50, 200, 40),
+            "Live Auctions": pygame.Rect(260, 50, 200, 40)
+        }
+        
+        # UI Elements
+        self.close_button_rect = pygame.Rect(C.SCREEN_WIDTH - 50, 10, 40, 40)
+        self.scroll_offset = 0
+        self.bid_buttons: Dict[int, pygame.Rect] = {} # auction_index -> rect
+
+    def handle_event(self, event):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.scene.return_to_base_state()
+            return
+
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1: # Left click
+                if self.close_button_rect.collidepoint(event.pos):
+                    self.scene.return_to_base_state()
+                    return
+                # Handle tab clicks
+                for tab_name, rect in self.tab_rects.items():
+                    if rect.collidepoint(event.pos):
+                        self.active_tab = tab_name
+                        self.scroll_offset = 0
+                        return
+                # Handle bid button clicks
+                if self.active_tab == "Live Auctions":
+                    for auction_idx, rect in self.bid_buttons.items():
+                        if rect.collidepoint(event.pos):
+                            self._handle_bid_action(auction_idx)
+                            return
+            # Mouse wheel scrolling
+            elif event.button == 4: self.scroll_offset = max(0, self.scroll_offset - 30)
+            elif event.button == 5: self.scroll_offset += 30
+
+    def _handle_bid_action(self, auction_index: int):
+        """Opens a dialog for the user to enter their bid amount."""
+        if not self.scene.tk_root: return
+        
+        auction = self.game.live_auctions[auction_index]
+        min_bid = max([b['amount'] for b in auction['bids']], default=auction['min_bid']) + 1
+
+        try:
+            bid_str = simpledialog.askstring("Place Bid", f"Enter your bid amount (minimum: ${min_bid}):", parent=self.scene.tk_root)
+            if not bid_str: return
+
+            bid_amount = int(bid_str)
+            if bid_amount < min_bid:
+                messagebox.showerror("Error", f"Bid must be at least ${min_bid}.")
+                return
+
+            player = self.game.get_active_player()
+            command = PlaceBidCommand(self.game, player, 'economic_mod', auction_index, bid_amount)
+            if not self.game.command_history.execute_command(command):
+                 messagebox.showerror("Error", "Could not place bid. Check your available Capital.")
+            else:
+                 self.scene.return_to_base_state()
+        except (ValueError, TypeError):
+             messagebox.showerror("Error", "Invalid input. Please enter a number.")
+
+    def draw(self, screen):
+        # Background Overlay
+        overlay = pygame.Surface((C.SCREEN_WIDTH, C.SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((20, 0, 40, 220)); screen.blit(overlay, (0, 0))
+        
+        # Close button
+        pygame.draw.rect(screen, (200, 50, 50), self.close_button_rect)
+        draw_text(screen, "X", self.close_button_rect.centerx, self.close_button_rect.centery, C.COLOR_WHITE, 30, True, True)
+
+        # Draw Tabs
+        for name, rect in self.tab_rects.items():
+            color = (80, 80, 120) if self.active_tab == name else (40, 40, 60)
+            pygame.draw.rect(screen, color, rect, border_top_left_radius=8, border_top_right_radius=8)
+            draw_text(screen, name, rect.centerx, rect.centery, C.COLOR_WHITE, 20, True, True)
+
+        # Content Panel
+        panel_rect = pygame.Rect(50, 90, C.SCREEN_WIDTH - 100, C.SCREEN_HEIGHT - 150)
+        pygame.draw.rect(screen, (30, 30, 50), panel_rect)
+
+        # Draw content based on active tab
+        if self.active_tab == "Market Prices":
+            self._draw_market_prices(screen, panel_rect)
+        elif self.active_tab == "Live Auctions":
+            self._draw_live_auctions(screen, panel_rect)
+
+    def _draw_market_prices(self, screen, panel_rect):
+        y_pos = panel_rect.top + 20 - self.scroll_offset
+        for tile_type in self.game.tile_types.values():
+            if y_pos > panel_rect.bottom - 40 or y_pos < panel_rect.top:
+                y_pos += 40; continue
+            
+            price = self.eco_mod.get_market_price(self.game, tile_type)
+            supply = self.game.deck_manager.tile_draw_pile.count(tile_type)
+            initial_supply = self.game.deck_manager.initial_tile_counts.get(tile_type.name, 0)
+            
+            color = C.COLOR_WHITE if supply > 0 else (100, 100, 100)
+            
+            draw_text(screen, f"{tile_type.name}:", panel_rect.left + 20, y_pos, color, 20)
+            draw_text(screen, f"Market Price: ${price}", panel_rect.left + 300, y_pos, color, 20)
+            draw_text(screen, f"Supply: {supply}/{initial_supply}", panel_rect.left + 550, y_pos, color, 20)
+            y_pos += 40
+
+    def _draw_live_auctions(self, screen, panel_rect):
+        self.bid_buttons.clear()
+        if not self.game.live_auctions:
+            draw_text(screen, "No active auctions.", panel_rect.centerx, panel_rect.centery, (150, 150, 150), 30, True, True)
+            return
+
+        y_pos = panel_rect.top + 20 - self.scroll_offset
+        for i, auction in enumerate(self.game.live_auctions):
+            if y_pos > panel_rect.bottom - 80 or y_pos < panel_rect.top:
+                y_pos += 80; continue
+
+            seller = self.game.players[auction['seller_id']]
+            tile_name = auction['tile_type_name']
+            current_high_bid = max([b['amount'] for b in auction['bids']], default=auction['min_bid'])
+
+            draw_text(screen, f"Item: {tile_name}", panel_rect.left + 20, y_pos, C.COLOR_WHITE, 20)
+            draw_text(screen, f"Seller: Player {seller.player_id}", panel_rect.left + 20, y_pos + 25, (200, 200, 200), 18)
+            draw_text(screen, f"Current Bid: ${current_high_bid}", panel_rect.left + 350, y_pos, C.COLOR_WHITE, 20)
+            draw_text(screen, f"Ends in: {auction['turn_of_resolution'] - self.game.current_turn} turn(s)", panel_rect.left + 350, y_pos + 25, (200, 200, 200), 18)
+            
+            # Draw Bid button
+            bid_button_rect = pygame.Rect(panel_rect.right - 170, y_pos + 10, 150, 40)
+            self.bid_buttons[i] = bid_button_rect
+            pygame.draw.rect(screen, (0, 150, 100), bid_button_rect, border_radius=5)
+            draw_text(screen, "Place Bid", bid_button_rect.centerx, bid_button_rect.centery, C.COLOR_WHITE, 20, True, True)
+            
+            y_pos += 80

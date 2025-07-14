@@ -5,6 +5,9 @@ from typing import TYPE_CHECKING, Optional, Dict, List, Callable, Any
 
 if TYPE_CHECKING:
     from game_logic.tile import TileType
+    from game_logic.game import Game
+    from mods.economic_mod.economic_mod import EconomicMod
+    from scenes.game_scene import GameScene
 
 from states.game_states import GameState
 from common.rendering_utils import draw_text
@@ -15,9 +18,12 @@ class PaletteSelectionState(GameState):
     A generic, transient game state that displays a palette of choices
     (like tiles) and executes a callback function with the chosen item.
     """
-    def __init__(self, visualizer: 'Linie1Visualizer', title: str, items: List[Any],
-                 item_surfaces: Dict[str, pygame.Surface], on_select_callback: Callable[[Any], None]):
-        super().__init__(visualizer)
+    # --- START OF CHANGE: The state is owned by a Scene. Changed 'visualizer' to 'scene' ---
+    def __init__(self, scene: 'GameScene', title: str, items: List[Any],
+                 item_surfaces: Dict[str, pygame.Surface], on_select_callback: Callable[[Any], None],
+                 economic_mod_instance: Optional['EconomicMod'] = None,
+                 current_capital: Optional[int] = None):
+        super().__init__(scene) # Pass the scene to the parent constructor
         self.is_transient_state = True
         
         self.title = title
@@ -28,6 +34,10 @@ class PaletteSelectionState(GameState):
         
         self.palette_rects: Dict[int, pygame.Rect] = {}
         self.close_button_rect = pygame.Rect(C.SCREEN_WIDTH - 50, 10, 40, 40)
+
+        self.eco_mod = economic_mod_instance
+        self.current_capital = current_capital
+    # --- END OF CHANGE ---
 
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
@@ -42,122 +52,81 @@ class PaletteSelectionState(GameState):
             for index, rect in self.palette_rects.items():
                 if rect.collidepoint(mouse_pos):
                     chosen_item = self.items_to_display[index]
+                    
+                    # --- START OF CHANGE: Check affordability before executing callback ---
+                    if self.eco_mod and self.current_capital is not None:
+                        price = self.eco_mod.get_market_price(self.game, chosen_item)
+                        supply = self.game.deck_manager.tile_draw_pile.count(chosen_item)
+                        if self.current_capital < price or supply == 0:
+                            self.visualizer.sounds.play('error') # Play an error sound
+                            return # Cannot select this item
+                    # --- END OF CHANGE ---
+
                     self.on_select_callback(chosen_item)
-                    # The callback is now responsible for returning to the base state.
                     return
 
     def draw(self, screen):
-        # Dimming overlay
         overlay = pygame.Surface((C.SCREEN_WIDTH, C.SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((20, 0, 40, 190))
-        screen.blit(overlay, (0, 0))
+        overlay.fill((20, 0, 40, 190)); screen.blit(overlay, (0, 0))
 
-        # UI elements
         draw_text(screen, self.title, 100, 50, C.COLOR_WHITE, size=36)
         draw_text(screen, self.message, 100, C.SCREEN_HEIGHT - 50, C.COLOR_WHITE, size=20)
         
-        # Close button
         close_rect = self.close_button_rect
         pygame.draw.rect(screen, (200, 50, 50), close_rect)
-        if close_rect.collidepoint(pygame.mouse.get_pos()):
-            pygame.draw.rect(screen, C.COLOR_WHITE, close_rect, 3)
-        else:
-            pygame.draw.rect(screen, C.COLOR_WHITE, close_rect, 1)
+        if close_rect.collidepoint(pygame.mouse.get_pos()): pygame.draw.rect(screen, C.COLOR_WHITE, close_rect, 3)
+        else: pygame.draw.rect(screen, C.COLOR_WHITE, close_rect, 1)
         draw_text(screen, "X", close_rect.centerx, close_rect.centery, C.COLOR_WHITE, size=30, center_x=True, center_y=True)
 
-        # Draw the palette of items
         self.palette_rects.clear()
         x, y = 100, 120
-        tiles_per_row, tile_size, spacing = 10, C.TILE_SIZE, 10
+        # --- START OF CHANGE: Adjust layout for more info ---
+        tiles_per_row, tile_size, spacing = 8, C.TILE_SIZE, 10
+        y_spacing = C.TILE_SIZE + 40 # Increased vertical spacing for text
+        # --- END OF CHANGE ---
+
         for i, item in enumerate(self.items_to_display):
             rect = pygame.Rect(x, y, tile_size, tile_size)
             self.palette_rects[i] = rect
-            pygame.draw.rect(screen, C.COLOR_UI_BG, rect)
             
-            # Use the pre-rendered surfaces
+            # --- START OF CHANGE: Dynamic coloring and text based on price/supply ---
+            is_affordable = True
+            is_in_stock = True
+            market_price = 0
+
+            if self.eco_mod:
+                market_price = self.eco_mod.get_market_price(self.game, item)
+                supply = self.game.deck_manager.tile_draw_pile.count(item)
+                if self.current_capital is not None and self.current_capital < market_price:
+                    is_affordable = False
+                if supply == 0:
+                    is_in_stock = False
+
             item_surf = self.item_surfaces.get(item.name)
             if item_surf:
-                screen.blit(item_surf, rect.topleft)
+                tile_image = item_surf.copy()
+                # Grey out the tile if it cannot be purchased
+                if not is_affordable or not is_in_stock:
+                    tile_image.set_alpha(80)
+                screen.blit(tile_image, rect.topleft)
 
-            if rect.collidepoint(pygame.mouse.get_pos()):
+            if rect.collidepoint(pygame.mouse.get_pos()) and is_affordable and is_in_stock:
                 pygame.draw.rect(screen, C.COLOR_HIGHLIGHT, rect, 3)
             else:
                 pygame.draw.rect(screen, C.COLOR_BLACK, rect, 1)
+
+            # Display price and supply info below the tile
+            price_color = C.COLOR_WHITE if is_affordable else (255, 80, 80)
+            supply_color = C.COLOR_WHITE if is_in_stock else (255, 80, 80)
+
+            price_text = f"${market_price}"
+            supply_text = f"Supply: {supply}"
+            
+            draw_text(screen, price_text, rect.centerx, rect.bottom + 15, price_color, size=18, center_x=True)
+            draw_text(screen, supply_text, rect.centerx, rect.bottom + 30, supply_color, size=14, center_x=True)
+            # --- END OF CHANGE ---
                 
             x += tile_size + spacing
             if (i + 1) % tiles_per_row == 0:
                 x = 100
-                y += tile_size + spacing
-
-    def on_hand_tile_clicked(self, game: 'Game', player: 'Player', tile_type: 'TileType') -> bool:
-        """
-        Handles special behavior when a hand tile is clicked. This method
-        checks for sell mode first, then checks for special permit tiles.
-        """
-        player_mod_data = player.components.get(self.mod_id)
-        if not player_mod_data:
-            return False
-
-        # --- Priority 1: Check if Sell Mode is active ---
-        if player_mod_data.get('sell_mode_active', False):
-            player_mod_data['sell_mode_active'] = False
-
-            if hasattr(tile_type, 'is_requisition_permit') and tile_type.is_requisition_permit:
-                game.visualizer.current_state.message = "Cannot sell a Requisition Permit."
-                return True
-
-            sell_rewards = self.config.get("sell_rewards", {})
-            reward = sell_rewards.get(tile_type.name, sell_rewards.get("default", 0))
-
-            command = SellToScrapyardCommand(game, player, self.mod_id, tile_type, reward)
-            if game.command_history.execute_command(command):
-                game.visualizer.current_state.message = f"Sold {tile_type.name} for ${reward}."
-            else:
-                pass # Command sets its own failure message
-            
-            return True
-
-        # --- Priority 2: Check if the clicked tile is a Requisition Permit ---
-        if hasattr(tile_type, 'is_requisition_permit') and tile_type.is_requisition_permit:
-            if game.visualizer:
-                
-                # --- START OF FIX: The logic for the callback is now complete ---
-                scene = game.visualizer # Get the scene instance
-                
-                def on_tile_selected(chosen_tile: 'TileType'):
-                    """This function is executed when the player picks a tile from the palette."""
-                    # 1. Find and remove the first available permit from the hand.
-                    permit_index = -1
-                    for i, hand_tile in enumerate(player.hand):
-                        if hasattr(hand_tile, 'is_requisition_permit') and hand_tile.is_requisition_permit:
-                            permit_index = i
-                            break
-                    
-                    if permit_index != -1:
-                        # 2. Perform the swap
-                        player.hand.pop(permit_index)
-                        player.hand.append(chosen_tile)
-                        print(f"Permit was fulfilled and replaced with a '{chosen_tile.name}'.")
-                    else:
-                        print("Error: Could not find permit in hand to fulfill.")
-                    
-                    # 3. IMPORTANT: Return to the main game state.
-                    scene.return_to_base_state()
-
-                # Request a state change to the generic PaletteSelectionState.
-                # Pass it the scene, title, items to show, and the callback function we just defined.
-                scene.request_state_change(
-                    lambda v: PaletteSelectionState(
-                        visualizer=v, # 'v' is the scene instance
-                        title="Fulfill Requisition",
-                        items=list(game.tile_types.values()),
-                        item_surfaces=scene.tile_surfaces,
-                        on_select_callback=on_tile_selected
-                    )
-                )
-                # --- END OF FIX ---
-
-            return True # The click was handled by the mod.
-        
-        # If neither of the above conditions were met, the mod does nothing with this click.
-        return False
+                y += y_spacing

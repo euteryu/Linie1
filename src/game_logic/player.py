@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 from .enums import PlayerState, Direction, GamePhase
 from .tile import TileType
 from .cards import LineCard, RouteCard
-from .ai_strategy import AIStrategy, EasyStrategy, HardStrategy
+from .ai_strategy import AIStrategy, HardStrategy, GreedySequentialStrategy
 from .ai_actions import PotentialAction # AI needs to know about the action structure
 import common.constants as C
 from .commands import CombinedActionCommand
@@ -116,76 +116,43 @@ class AIPlayer(Player):
         self.strategy = strategy
 
     def handle_turn_logic(self, game: 'Game', visualizer: Optional['GameScene'] = None, sounds: Optional['SoundManager'] = None):
-        """
-        Orchestrates the AI's turn for any game phase. It gets a plan, updates the
-        heatmap, executes the plan action-by-action using the correct commands,
-        and ensures the turn progresses correctly.
-        """
-        if game.game_phase == GamePhase.GAME_OVER:
-            return
-
-        # --- Phase 1: Logic for Laying Track ---
+        if game.game_phase == GamePhase.GAME_OVER: return
         if self.player_state == PlayerState.LAYING_TRACK:
             print(f"\n--- AI Player {self.player_id} ({self.strategy.__class__.__name__}) is thinking...")
-            
             final_plan: List[PotentialAction] = []
-            
             mod_plan = game.mod_manager.on_ai_plan_turn(game, self, self.strategy)
             if mod_plan is not None:
                 final_plan = mod_plan
             else:
                 print(f"No mod override for AI planning. Using default strategy: {self.strategy.__class__.__name__}")
                 final_plan = self.strategy.plan_turn(game, self)
-
+            
+            # --- START OF CHANGE: The new fallback logic ---
             if len(final_plan) < game.MAX_PLAYER_ACTIONS:
                 print("Primary strategy failed to find a 2-action plan. Attempting fallback.")
-                fallback_strategy = EasyStrategy()
-                single_move_plan = fallback_strategy.plan_turn(game, self)
-                if single_move_plan:
-                    best_single_move = single_move_plan[0]
-                    final_plan = [best_single_move, best_single_move]
-                else:
-                    final_plan = []
-
-            # --- HEATMAP FIX ---
-            # After the final plan is decided, update the visualizer's heatmap data.
-            if visualizer:
-                # Extract coordinates from all actions in the plan that have them.
-                heatmap_coords = {tuple(action.details['coord']) for action in final_plan if action.details.get('coord')}
-                visualizer.heatmap_data = heatmap_coords
-            # --- END HEATMAP FIX ---
+                fallback_strategy = GreedySequentialStrategy()
+                final_plan = fallback_strategy.plan_turn(game, self)
+            # --- END OF CHANGE ---
 
             if len(final_plan) >= game.MAX_PLAYER_ACTIONS:
                 print(f"  AI committing its plan...")
                 if visualizer:
                     visualizer.force_redraw("AI committing moves...")
                     pygame.time.delay(C.AI_MOVE_DELAY_MS)
-                
-                # --- CRASH FIX: Execute each action's command individually ---
-                # This is the correct way to handle a plan with mixed action types.
                 for action in final_plan:
-                    # Use the action's specific command generator
                     command_to_run = action.command_generator(game, self)
                     game.command_history.execute_command(command_to_run)
-
-                # After all actions are executed, the turn must end.
                 pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'ai_actions_committed'}))
-                # --- END CRASH FIX ---
-
             else:
-                # Both primary and fallback strategies failed. The player must be eliminated.
                 print(f"--- AI Player {self.player_id} could not find any valid moves after fallback. Forfeiting turn. ---")
                 if sounds: sounds.play('eliminated')
                 game.eliminate_player(self)
                 pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'ai_forfeit'}))
-
-        # --- Phase 2: Logic for Driving ---
         elif self.player_state == PlayerState.DRIVING:
             print(f"--- AI Player {self.player_id} is in DRIVING phase. Rolling die... ---")
             if visualizer:
                 visualizer.force_redraw("AI Rolling...")
                 pygame.time.delay(C.AI_MOVE_DELAY_MS)
-
             roll_result = game.deck_manager.roll_special_die()
             print(f"  AI Player {self.player_id} rolled a '{roll_result}'.")
             game.attempt_driving_move(self, roll_result)

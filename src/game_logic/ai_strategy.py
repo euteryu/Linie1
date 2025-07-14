@@ -119,112 +119,88 @@ class AIStrategy(ABC):
                     if tile.tile_type.name.startswith("Tree"): score += 50.0
         return score
 
-# --- START OF CHANGE ---
-class EasyStrategy(AIStrategy):
+class GreedySequentialStrategy(AIStrategy):
     """
-    A greedy, exhaustive AI strategy. Its goal is to find the single best
-    possible move on the entire board to ensure the player does not forfeit.
+    A robust, greedy fallback strategy. It finds the best first move, simulates it,
+    then finds the best second move from the new board state. Its only goal is
+    to find a valid 2-action turn to avoid forfeiting.
     """
     def plan_turn(self, game: Game, player: AIPlayer) -> List[PotentialAction]:
-        """
-        Finds the single best action possible and returns it in a list.
-        Returns an empty list if no moves are possible at all.
-        """
-        print(f"  (EasyStrategy Fallback starting... Exhaustively searching for any valid move)")
+        print(f"  (Fallback starting... Searching for a greedy sequential plan)")
         ideal_plan = self._calculate_ideal_route(game, player)
-        
-        # Check ALL playable squares on the board to be absolutely sure.
         all_playable_squares = {(r, c) for r in range(game.board.rows) for c in range(game.board.cols) if game.board.is_playable_coordinate(r,c)}
         
-        all_possible_actions = self._gather_standard_actions(game, player, ideal_plan, all_playable_squares)
-
-        if not all_possible_actions:
-            # This means the player is truly stuck.
+        # 1. Find the best possible first action
+        possible_first_actions = self._gather_standard_actions(game, player, ideal_plan, all_playable_squares)
+        if not possible_first_actions:
+            print("  (Fallback: No valid first move found.)")
             return []
-            
-        # Find and return the single best action found.
-        best_action = max(all_possible_actions, key=lambda a: a.score)
-        print(f"  (EasyStrategy Fallback found best single move with score: {best_action.score:.2f})")
-        return [best_action]
-# --- END OF CHANGE ---
+        best_first_action = max(possible_first_actions, key=lambda a: a.score)
+        
+        # 2. Simulate the best first action
+        sim_game = game.copy_for_simulation()
+        sim_player = next(p for p in sim_game.players if p.player_id == player.player_id)
+        self._apply_potential_action_to_sim(sim_game, sim_player, best_first_action)
+
+        # 3. From the simulated state, find the best possible second action
+        possible_second_actions = self._gather_standard_actions(sim_game, sim_player, ideal_plan, all_playable_squares)
+        if not possible_second_actions:
+            print("  (Fallback: Found a first move, but no valid second move.)")
+            return []
+        best_second_action = max(possible_second_actions, key=lambda a: a.score)
+
+        print("  (Fallback: Successfully found a 2-step sequential plan.)")
+        return [best_first_action, best_second_action]
 
 class HardStrategy(AIStrategy):
     """An advanced AI that finds the best combination of two actions."""
     
     def plan_turn(self, game: Game, player: AIPlayer) -> List[PotentialAction]:
-        """
-        Plans the AI's turn by finding the best combination of two actions.
-        Returns an empty list if no valid 2-action plan is found.
-        """
         print(f"  (HardStrategy starting... Analyzing options)")
         ideal_plan = self._calculate_ideal_route(game, player)
-
         target_squares = self._get_high_value_target_squares(game, player, ideal_plan)
         if len(target_squares) > MAX_TARGETS_FOR_COMBO_SEARCH:
             target_squares = self._prune_targets(game, player, target_squares, ideal_plan)
         
         one_action_moves = self._gather_standard_actions(game, player, ideal_plan, target_squares)
         
-        best_combo_score = -1.0
-        best_combo_plan = None
+        best_combo_score = -1.0; best_combo_plan = None
         if len(one_action_moves) >= 2:
-            # Sort moves by score to check the most promising pairs first
             sorted_moves = sorted(one_action_moves, key=lambda a: a.score, reverse=True)
             for i in range(len(sorted_moves)):
                 for j in range(i + 1, len(sorted_moves)):
-                    action1 = sorted_moves[i]
-                    action2 = sorted_moves[j]
-                    
+                    action1, action2 = sorted_moves[i], sorted_moves[j]
                     if not self._is_combo_compatible(player, action1, action2): continue
-                    
-                    # Create a copy of the game to simulate the moves
-                    sim_game = game.copy_for_simulation()
-                    sim_player = next(p for p in sim_game.players if p.player_id == player.player_id)
-
-                    # Simulate the first move
+                    sim_game, sim_player = game.copy_for_simulation(), next(p for p in game.copy_for_simulation().players if p.player_id == player.player_id)
                     self._apply_potential_action_to_sim(sim_game, sim_player, action1)
-                    
-                    # Check if the second move is still valid after the first one
                     details2 = action2.details
-                    if action2.action_type == 'place':
-                         is_valid2, _ = sim_game.rule_engine.check_placement_validity(sim_game, details2['tile'], details2['orientation'], *details2['coord'])
-                    elif action2.action_type == 'exchange':
-                         is_valid2, _ = sim_game.rule_engine.check_exchange_validity(sim_game, sim_player, details2['tile'], details2['orientation'], *details2['coord'])
-                    else:
-                        is_valid2 = True # Other actions don't conflict spatially
-
+                    is_valid2 = False
+                    if action2.action_type == 'place': is_valid2, _ = sim_game.rule_engine.check_placement_validity(sim_game, details2['tile'], details2['orientation'], *details2['coord'])
+                    elif action2.action_type == 'exchange': is_valid2, _ = sim_game.rule_engine.check_exchange_validity(sim_game, sim_player, details2['tile'], details2['orientation'], *details2['coord'])
+                    else: is_valid2 = True
                     if not is_valid2: continue
-
-                    # If the combo is valid, score the resulting board state
                     self._apply_potential_action_to_sim(sim_game, sim_player, action2)
                     combo_score = self._score_board_state(sim_game, sim_player)
-                    if combo_score > best_combo_score:
-                        best_combo_score = combo_score
-                        best_combo_plan = [action1, action2]
-
+                    if combo_score > best_combo_score: best_combo_score, best_combo_plan = combo_score, [action1, action2]
         if best_combo_plan:
             print(f"  (HardStrategy: Found a valid combo plan with score {best_combo_score:.2f})")
             return best_combo_plan
-        
         print("  (HardStrategy: No valid 2-action plan found.)")
         return []
 
     def _get_high_value_target_squares(self, game: Game, player: Player, ideal_plan: Optional[List[RouteStep]]) -> Set[Tuple[int, int]]:
-        """Identifies a small, highly relevant set of squares to consider."""
         targets: Set[Tuple[int, int]] = set()
         if ideal_plan:
             for step in ideal_plan:
                 r, c = step.coord
-                if not game.board.get_tile(r, c) and game.board.is_playable_coordinate(r, c):
-                    targets.add((r, c))
+                if not game.board.get_tile(r, c) and game.board.is_playable_coordinate(r, c): targets.add((r, c))
         if player.route_card:
             for building_id in player.route_card.stops:
                 if building_id not in game.board.buildings_with_stops:
                     if building_coord := game.board.building_coords.get(building_id):
                         for d in Direction:
                             nr, nc = building_coord[0] + d.value[0], building_coord[1] + d.value[1]
-                            if game.board.is_playable_coordinate(nr, nc) and not game.board.get_tile(nr, nc):
-                                targets.add((nr, nc))
+                            if game.board.is_playable_coordinate(nr, nc) and not game.board.get_tile(nr, nc): targets.add((nr, nc))
         if not targets:
             for r_idx in range(game.board.rows):
                 for c_idx in range(game.board.cols):
@@ -234,13 +210,11 @@ class HardStrategy(AIStrategy):
                         for exit_dir_str in all_exits:
                             exit_dir = Direction.from_str(exit_dir_str)
                             nr, nc = r_idx + exit_dir.value[0], c_idx + exit_dir.value[1]
-                            if game.board.is_playable_coordinate(nr, nc) and not game.board.get_tile(nr, nc):
-                                targets.add((nr, nc))
+                            if game.board.is_playable_coordinate(nr, nc) and not game.board.get_tile(nr, nc): targets.add((nr, nc))
         print(f"  (HardStrategy identified {len(targets)} high-value squares)")
         return targets
 
     def _prune_targets(self, game: Game, player: Player, targets: Set[Tuple[int, int]], ideal_plan: Optional[List[RouteStep]]) -> Set[Tuple[int, int]]:
-        """Scores and sorts a large set of targets, returning only the best N."""
         next_goal = None
         if ideal_plan:
             for step in ideal_plan:
@@ -253,19 +227,12 @@ class HardStrategy(AIStrategy):
         return pruned_set
 
     def _is_combo_compatible(self, player: AIPlayer, action1: PotentialAction, action2: PotentialAction) -> bool:
-        """Checks if two actions can be performed together in a turn."""
-        coord1 = action1.details.get('coord')
-        coord2 = action2.details.get('coord')
-        if coord1 and coord2 and coord1 == coord2:
-            return False
-
+        coord1, coord2 = action1.details.get('coord'), action2.details.get('coord')
+        if coord1 and coord2 and coord1 == coord2: return False
         required_tiles = Counter()
         if tile1 := action1.details.get('tile'): required_tiles[tile1] += 1
         if tile2 := action2.details.get('tile'): required_tiles[tile2] += 1
-        
         player_hand_counts = Counter(player.hand)
         for tile, required_count in required_tiles.items():
-            if player_hand_counts[tile] < required_count:
-                return False
-        
+            if player_hand_counts[tile] < required_count: return False
         return True

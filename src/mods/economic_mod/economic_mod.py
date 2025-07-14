@@ -11,7 +11,8 @@ from .economic_commands import BribeOfficialCommand, PriorityRequisitionCommand
 from common import constants as C # Import base constants
 from game_logic.ai_actions import PotentialAction
 from game_logic.enums import PlayerState
-from .economic_commands import PriorityRequisitionCommand, SellToScrapyardCommand
+from .economic_commands import PriorityRequisitionCommand, SellToScrapyardCommand, FulfillPermitCommand
+
 from ui.palette_selection_state import PaletteSelectionState
 from . import constants_economic as CE
 from .headline_manager import HeadlineManager
@@ -32,14 +33,17 @@ class EconomicMod(IMod):
 
     def on_game_setup(self, game: 'Game'):
         """Initializes Capital and other mod-specific player data."""
-        print(f"[{self.name}] Initializing player Capital pools...")
         starting_capital = self.config.get("starting_capital", 50)
         max_capital = self.config.get("max_capital", 200)
         for player in game.players:
             player.components[self.mod_id] = {
                 'capital': starting_capital,
                 'max_capital': max_capital,
-                'sell_mode_active': False # Add a flag for our new mode
+                'sell_mode_active': False,
+                'influence': 0,
+                # --- START OF CHANGE: Initialize frozen capital tracker ---
+                'frozen_capital': 0
+                # --- END OF CHANGE ---
             }
         self.headline_manager = HeadlineManager()
         self.headline_manager.event_trigger_threshold = 2
@@ -59,39 +63,6 @@ class EconomicMod(IMod):
             regen = self.config.get("capital_regen_per_turn", 5)
             capital_pool['capital'] = min(capital_pool['max_capital'], capital_pool['capital'] + regen)
 
-    def on_hand_tile_clicked(self, game: 'Game', player: 'Player', tile_type: 'TileType') -> bool:
-        """Handles special behavior when a hand tile is clicked."""
-        player_mod_data = player.components.get(self.mod_id)
-        if not player_mod_data:
-            return False
-
-        if player_mod_data.get('sell_mode_active', False):
-            player_mod_data['sell_mode_active'] = False
-            if hasattr(tile_type, 'is_requisition_permit') and tile_type.is_requisition_permit:
-                game.visualizer.current_state.message = "Cannot sell a Requisition Permit."
-                return True
-            base_reward = self.config.get("sell_rewards", {}).get(tile_type.name, self.config.get("sell_rewards", {}).get("default", 0))
-            reward = self.headline_manager.get_modified_sell_reward(base_reward)
-            command = SellToScrapyardCommand(game, player, self.mod_id, tile_type, reward)
-            if game.command_history.execute_command(command):
-                game.visualizer.current_state.message = f"Sold {tile_type.name} for ${reward}."
-            return True
-
-        if hasattr(tile_type, 'is_requisition_permit') and tile_type.is_requisition_permit:
-            if game.visualizer:
-                scene = game.visualizer
-                def on_tile_selected(chosen_tile: 'TileType'):
-                    permit_index = next((i for i, t in enumerate(player.hand) if hasattr(t, 'is_requisition_permit') and t.is_requisition_permit), -1)
-                    if permit_index != -1:
-                        player.hand.pop(permit_index)
-                        player.hand.append(chosen_tile)
-                    scene.return_to_base_state()
-
-                scene.request_state_change(
-                    lambda v: PaletteSelectionState(v, "Fulfill Requisition", list(game.tile_types.values()), scene.tile_surfaces, on_tile_selected)
-                )
-            return True
-        return False
 
     def on_draw_ui_panel(self, screen: Any, visualizer: 'GameScene', current_game_state_name: str):
         """Draws the current player's Capital and any active headlines."""
@@ -115,38 +86,97 @@ class EconomicMod(IMod):
         """Adds buttons for all economic actions."""
         buttons = []
         if current_game_state_name == "LayingTrackState":
-            base_cost = self.config.get("cost_priority_requisition", 25)
-            cost = self.headline_manager.get_modified_requisition_cost(base_cost)
+            # Button 1: Priority Requisition
+            cost = self.config.get("cost_priority_requisition", 35)
             buttons.append({
-                "text": f"Priority Requisition (${cost})",
+                "text": f"Buy Permit (${cost})",
                 "rect": pygame.Rect(CE.BUTTON_X, CE.BUTTON_Y_START, CE.BUTTON_WIDTH, CE.BUTTON_HEIGHT),
                 "callback_name": "issue_priority_requisition"
             })
-            y_pos_sell = CE.BUTTON_Y_START + CE.BUTTON_HEIGHT + CE.BUTTON_SPACING
+            
+            # Button 2: Sell Tile to Scrapyard
+            y_pos2 = CE.BUTTON_Y_START + CE.BUTTON_HEIGHT + CE.BUTTON_SPACING
             buttons.append({
                 "text": "Sell Tile to Scrapyard",
-                "rect": pygame.Rect(CE.BUTTON_X, y_pos_sell, CE.BUTTON_WIDTH, CE.BUTTON_HEIGHT),
+                "rect": pygame.Rect(CE.BUTTON_X, y_pos2, CE.BUTTON_WIDTH, CE.BUTTON_HEIGHT),
                 "callback_name": "activate_sell_mode"
             })
+
+            # Button 3: Auction a Tile
+            y_pos3 = y_pos2 + CE.BUTTON_HEIGHT + CE.BUTTON_SPACING
+            buttons.append({
+                "text": "Auction a Tile",
+                "rect": pygame.Rect(CE.BUTTON_X, y_pos3, CE.BUTTON_WIDTH, CE.BUTTON_HEIGHT),
+                "callback_name": "auction_a_tile"
+            })
+
+            # Button 4: Open Auction House
+            y_pos4 = y_pos3 + CE.BUTTON_HEIGHT + CE.BUTTON_SPACING * 3 # Extra spacing
+            buttons.append({
+                "text": "Open Auction House",
+                "rect": pygame.Rect(CE.BUTTON_X, y_pos4, CE.BUTTON_WIDTH, CE.BUTTON_HEIGHT),
+                "callback_name": "open_auction_house"
+            })
+
         return buttons
 
     def handle_ui_button_click(self, game: 'Game', player: 'Player', button_name: str) -> bool:
-        """Handles the logic for the mod's buttons."""
+        """Handles the logic when the economic buttons are clicked."""
         if button_name == "issue_priority_requisition":
-            cost = self.headline_manager.get_modified_requisition_cost(self.config.get("cost_priority_requisition", 25))
-            placeholder_tile = game.tile_types.get('Curve')
-            if not placeholder_tile: return True
-            requisition_permit = placeholder_tile.copy()
-            requisition_permit.is_requisition_permit = True
-            requisition_permit.name = REQUISITION_PERMIT_ID
-            command = PriorityRequisitionCommand(game, player, cost, self.mod_id, requisition_permit)
+            cost = self.config.get("cost_priority_requisition", 35)
+            permit = game.tile_types['Curve'].copy(); permit.is_requisition_permit = True; permit.name = REQUISITION_PERMIT_ID
+            command = PriorityRequisitionCommand(game, player, cost, self.mod_id, permit)
             game.command_history.execute_command(command)
             return True
+            
         elif button_name == "activate_sell_mode":
             player.components[self.mod_id]['sell_mode_active'] = True
             game.visualizer.current_state.message = "SELL MODE: Click a tile in your hand to sell."
             return True
+
+        elif button_name == "open_auction_house":
+            game.visualizer.request_state_change(AuctionHouseState)
+            return True
+
+        elif button_name == "auction_a_tile":
+            # This requires another transient state to select the tile from hand.
+            # We will implement this as a variation of the PaletteSelectionState.
+            self._handle_auction_selection(game, player)
+            return True
+
         return False
+
+    def _handle_auction_selection(self, game, player):
+        """Opens a palette for the player to choose which tile to auction."""
+        scene = game.visualizer
+        
+        def on_tile_to_auction_selected(tile_to_auction: 'TileType'):
+            # Now prompt for the minimum bid
+            try:
+                bid_str = simpledialog.askstring("Set Minimum Bid", f"Enter minimum bid for {tile_to_auction.name}:", parent=scene.tk_root)
+                if not bid_str: return
+                min_bid = int(bid_str)
+                if min_bid <= 0: return
+
+                command = AuctionTileCommand(game, player, self.mod_id, tile_to_auction, min_bid)
+                if not game.command_history.execute_command(command):
+                    messagebox.showerror("Error", "Could not auction tile.")
+                scene.return_to_base_state()
+            except (ValueError, TypeError):
+                messagebox.showerror("Error", "Invalid input.")
+                scene.return_to_base_state()
+
+        # Request a state change to the palette UI
+        scene.request_state_change(
+            lambda v: PaletteSelectionState(
+                scene=v,
+                title="Select Tile to Auction",
+                items=player.hand, # Show only tiles in the player's hand
+                item_surfaces=scene.tile_surfaces,
+                on_select_callback=on_tile_to_auction_selected
+            )
+        )
+
 
     def plan_ai_turn(self, game: 'Game', player: 'AIPlayer', base_strategy: 'AIStrategy') -> Optional[List[PotentialAction]]:
         """
@@ -278,3 +308,71 @@ class EconomicMod(IMod):
             ))
             
         return actions
+
+    def on_hand_tile_clicked(self, game: 'Game', player: 'Player', tile_type: 'TileType') -> bool:
+        player_mod_data = player.components.get(self.mod_id)
+        if not player_mod_data: return False
+
+        if player_mod_data.get('sell_mode_active', False):
+            player_mod_data['sell_mode_active'] = False
+            market_price = self.get_market_price(game, tile_type)
+            scrapyard_yield = self.config.get("scrapyard_yield", 0.3)
+            reward = int(market_price * scrapyard_yield)
+            command = SellToScrapyardCommand(game, player, self.mod_id, tile_type, reward)
+            if game.command_history.execute_command(command):
+                game.visualizer.current_state.message = f"Sold {tile_type.name} for ${reward}."
+            return True
+
+        if hasattr(tile_type, 'is_requisition_permit') and tile_type.is_requisition_permit:
+            if game.visualizer:
+                scene = game.visualizer
+                
+                def on_tile_selected(chosen_tile: 'TileType'):
+                    cost = self.get_market_price(game, chosen_tile)
+                    command = FulfillPermitCommand(game, player, self.mod_id, chosen_tile, tile_type, cost)
+                    if game.command_history.execute_command(command):
+                         scene.return_to_base_state()
+                    else:
+                        scene.current_state.message = "Could not complete purchase."
+
+                economic_mod = game.mod_manager.available_mods[self.mod_id]
+                
+                # --- START OF CHANGE: Call PaletteSelectionState with 'scene=v' ---
+                scene.request_state_change(
+                    lambda v: PaletteSelectionState(
+                        scene=v, # Use 'scene' keyword argument
+                        title="Foundry Catalog - Select Tile to Purchase",
+                        items=list(game.tile_types.values()),
+                        item_surfaces=scene.tile_surfaces,
+                        on_select_callback=on_tile_selected,
+                        economic_mod_instance=economic_mod,
+                        current_capital=player_mod_data.get('capital', 0)
+                    )
+                )
+                # --- END OF CHANGE ---
+            return True
+        return False
+
+    def get_market_price(self, game: 'Game', tile_type: 'TileType') -> int:
+        """
+        Calculates the dynamic market price of a tile based on its scarcity.
+        """
+        initial_supply = game.deck_manager.initial_tile_counts.get(tile_type.name, 0)
+        if initial_supply == 0:
+            # This tile was never supposed to be in the game, return a high price.
+            return 999
+
+        current_supply_in_pile = game.deck_manager.tile_draw_pile.count(tile_type)
+        
+        # Scarcity is based on how many have been REMOVED from the initial pile.
+        # This includes tiles on the board and in player hands.
+        tiles_removed = initial_supply - current_supply_in_pile
+        scarcity_factor = tiles_removed / initial_supply
+        
+        base_cost = self.config.get("tile_base_cost", {}).get(tile_type.name, 1)
+        price_multiplier = self.config.get("price_multiplier", 20)
+        
+        # Final price is base cost plus a premium based on scarcity.
+        market_price = base_cost + (scarcity_factor * price_multiplier)
+        
+        return int(market_price)

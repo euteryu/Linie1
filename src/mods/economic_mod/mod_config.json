@@ -7,19 +7,25 @@
     "starting_capital": 50,
     "max_capital": 200,
     "capital_regen_per_turn": 5,
-    "cost_priority_requisition": 25,
     "cost_bribe_official": 80,
     "reward_influence_from_bribe": 1,
-    "sell_rewards": {
-        "default": 10,
-        "Straight": 5,
-        "Curve": 5,
-        "Tree_JunctionTop": 15,
-        "Tree_JunctionRight": 15,
-        "Tree_Roundabout": 15,
-        "Tree_Crossroad": 15,
-        "Tree_StraightDiagonal1": 15,
-        "Tree_StraightDiagonal2": 15,
-        "REQUISITION_PERMIT": 25
+
+    "cost_priority_requisition": 35,
+    "scrapyard_yield": 0.3,
+    "price_multiplier": 20,
+
+    "tile_base_cost": {
+        "Straight": 1,
+        "Curve": 1,
+        "StraightLeftCurve": 1,
+        "StraightRightCurve": 1,
+        "DoubleCurveY": 1,
+        "DiagonalCurve": 1,
+        "Tree_JunctionTop": 2,
+        "Tree_JunctionRight": 2,
+        "Tree_Roundabout": 2,
+        "Tree_Crossroad": 2,
+        "Tree_StraightDiagonal1": 2,
+        "Tree_StraightDiagonal2": 2
     }
 }

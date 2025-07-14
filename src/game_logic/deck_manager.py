@@ -18,6 +18,9 @@ class DeckManager:
         self.game = game
         self.tile_draw_pile: List['TileType'] = []
         self.line_cards_pile: List['LineCard'] = []
+        # --- START OF CHANGE ---
+        self.initial_tile_counts: Dict[str, int] = {}
+        # --- END OF CHANGE ---
 
     def create_and_shuffle_piles(self):
         """Creates and shuffles the tile draw pile and line card pile."""
@@ -27,6 +30,12 @@ class DeckManager:
         if self.game.num_players >= 5:
             for name, count in C.TILE_COUNTS_5_PLUS_ADD.items():
                 tile_counts[name] = tile_counts.get(name, 0) + count
+
+        # --- START OF CHANGE ---
+        # Create a permanent record of the initial supply before shuffling.
+        self.initial_tile_counts = tile_counts.copy()
+        print(f"Initial tile supply recorded: {sum(self.initial_tile_counts.values())} total tiles.")
+        # --- END OF CHANGE ---
 
         self.tile_draw_pile = []
         for name, count in tile_counts.items():
@@ -43,7 +52,6 @@ class DeckManager:
     def deal_starting_hands_and_cards(self):
         """Deals starting tiles and mission cards to all players."""
         print("Dealing starting hands and cards...")
-        # Deal starting tiles
         straight_type = self.game.tile_types.get('Straight')
         curve_type = self.game.tile_types.get('Curve')
         if not straight_type or not curve_type:
@@ -56,12 +64,10 @@ class DeckManager:
             for _ in range(C.STARTING_HAND_TILES['Curve']):
                 player.hand.append(curve_type)
 
-        # Deal mission cards
         available_variants = list(range(len(C.ROUTE_CARD_VARIANTS)))
         random.shuffle(available_variants)
         player_range = "1-4" if self.game.num_players <= 4 else "5-6"
 
-        print("--- Dealing Player Cards (DEBUG) ---")
         for player in self.game.players:
             if not self.line_cards_pile:
                 raise RuntimeError("Not enough line cards for all players.")
@@ -74,39 +80,32 @@ class DeckManager:
             try:
                 stops = C.ROUTE_CARD_VARIANTS[variant_index][player_range][player.line_card.line_number]
             except (KeyError, IndexError):
-                print(f"Warning: Route lookup failed. Assigning default.")
                 stops = C.ROUTE_CARD_VARIANTS[0]["1-4"][1]
             
             player.route_card = RouteCard(stops, variant_index)
-            print(f"  Player {player.player_id} assigned: Line {player.line_card.line_number}, Stops {player.route_card.stops}")
-        print("------------------------------------")
         
     def draw_tile(self, player: 'Player') -> bool:
         """Draws a tile for a player, considering difficulty biases and mods."""
-        from .player import AIPlayer # Local import to avoid circular dependency
+        from .player import AIPlayer
         
         if not self.tile_draw_pile or len(player.hand) >= C.HAND_TILE_LIMIT:
             return False
 
-        # Mod hook
         handled_by_mod, name = self.game.mod_manager.on_tile_drawn(self.game, player, None, [t.name for t in self.tile_draw_pile])
         if handled_by_mod and name and (chosen_tile := next((t for t in self.tile_draw_pile if t.name == name), None)):
             self.tile_draw_pile.remove(chosen_tile)
             player.hand.append(chosen_tile)
             return True
 
-        # KING AI difficulty bias
         if isinstance(player, AIPlayer) and player.difficulty_mode == 'king':
             tree_tiles = [t for t in self.tile_draw_pile if t.name.startswith("Tree")]
             if tree_tiles:
                 weights = [C.KING_AI_TREE_TILE_BIAS if t.name.startswith("Tree") else 1 for t in self.tile_draw_pile]
                 chosen_tile = random.choices(self.tile_draw_pile, weights=weights, k=1)[0]
-                print(f"  (KING AI Bonus: Drew '{chosen_tile.name}' with weighted chance)")
                 self.tile_draw_pile.remove(chosen_tile)
                 player.hand.append(chosen_tile)
                 return True
 
-        # Normal Draw
         drawn_tile = self.tile_draw_pile.pop()
         player.hand.append(drawn_tile)
         return True
