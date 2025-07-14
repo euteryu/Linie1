@@ -28,12 +28,10 @@ class App:
         with open(theme_path, 'r') as f:
             self.theme = json.load(f)
             
-        # Create shared instances of the game and managers
         self.sounds = SoundManager(root_dir)
         self.mod_manager = mod_manager
         self.game_instance = Game(player_types, difficulty, mod_manager)
         
-        # --- Tkinter Root for File Dialogs ---
         try:
             self.tk_root = tk.Tk()
             self.tk_root.withdraw()
@@ -41,7 +39,6 @@ class App:
             print(f"Warning: Tkinter could not be initialized. File dialogs will be disabled. Error: {e}")
             self.tk_root = None
 
-        # --- Create Scenes ---
         self.scenes = {
             "MAIN_MENU": MainMenuScene(self),
             "GAME": GameScene(self, self.game_instance, self.sounds, self.mod_manager),
@@ -49,9 +46,6 @@ class App:
         }
         self.current_scene = self.scenes["MAIN_MENU"]
 
-        # --- Link Game to Scene ---
-        # The game object needs a reference to its scene (the old visualizer)
-        # to request redraws.
         self.game_instance.visualizer = self.scenes["GAME"]
 
     def go_to_scene(self, scene_name: str):
@@ -60,19 +54,10 @@ class App:
             self.current_scene = self.scenes[scene_name]
             print(f"Switching to scene: {scene_name}")
 
-            # If we are entering the game scene, check if we need to kick-start an AI player's turn.
-            if scene_name == "GAME":
-                from game_logic.player import AIPlayer
-                active_player = self.game_instance.get_active_player()
-                
-                # --- START OF FIX ---
-                # This check now covers two scenarios:
-                # 1. The very start of the game (turn 1, 0 actions).
-                # 2. Resuming the game when it's an AI's turn but no actions have been taken yet.
-                if isinstance(active_player, AIPlayer) and self.game_instance.actions_taken_this_turn == 0:
-                    print(f"Resuming/Starting AI Player {active_player.player_id}'s turn.")
-                    pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT))
-                # --- END OF FIX ---
+            # --- START OF FIX: This logic is now removed. ---
+            # The initial AI turn trigger is now handled in the App.run() method
+            # to prevent a premature turn skip.
+            # --- END OF FIX ---
             
         else:
             print(f"Warning: Scene '{scene_name}' not found.")
@@ -85,25 +70,18 @@ class App:
                 self.theme = json.load(f)
             print(f"Theme '{theme_file}' loaded successfully.")
 
-            # Re-create ALL scenes to apply the new theme
             self.scenes["MAIN_MENU"] = MainMenuScene(self)
             self.scenes["GAME"] = GameScene(self, self.game_instance, self.sounds, self.mod_manager)
             self.scenes["SETTINGS"] = SettingsScene(self)
             
-            # --- START OF FIX ---
-            # After creating the new GameScene, we MUST update the game instance's
-            # reference to point to this new scene object.
             self.game_instance.visualizer = self.scenes["GAME"]
-            # --- END OF FIX ---
 
         except FileNotFoundError:
             print(f"ERROR: Theme file '{theme_file}' not found.")
-            # Revert to a default if loading fails
             default_theme_path = os.path.join(self.root_dir, 'src', 'assets', 'themes', 'ui_theme_dark.json')
             with open(default_theme_path, 'r') as f:
                 self.theme = json.load(f)
 
-    # --- Save/Load Logic Moved Here from GameState ---
     def save_game_action(self):
         if not self.tk_root: return
         filepath = tk.filedialog.asksaveasfilename(
@@ -118,26 +96,45 @@ class App:
             title="Load Game", filetypes=[("Linie 1 Saves", "*.json")]
         )
         if filepath:
+            # Re-create the mod manager to ensure a clean state before loading
+            self.mod_manager = ModManager()
             loaded_game = Game.load_game(filepath, self.game_instance.tile_types, self.mod_manager)
             if loaded_game:
                 self.game_instance = loaded_game
-                # Re-create the game scene with the new game instance
                 self.scenes["GAME"] = GameScene(self, self.game_instance, self.sounds, self.mod_manager)
-                
-                # --- START OF FIX ---
-                # Update the new game instance's reference to point to the new scene
                 self.game_instance.visualizer = self.scenes["GAME"]
-                # --- END OF FIX ---
-                
                 self.go_to_scene("GAME")
+
+                # After loading, if it's an AI's turn, we need to kick-start it.
+                from game_logic.player import AIPlayer
+                active_player = self.game_instance.get_active_player()
+                if isinstance(active_player, AIPlayer) and self.game_instance.actions_taken_this_turn == 0:
+                     active_player.handle_turn_logic(self.game_instance, self.scenes["GAME"], self.sounds)
+
 
     def run(self):
         self.sounds.load_sounds()
         self.sounds.play_music('main_theme')
         
+        # --- START OF FIX: Initial AI Turn Trigger ---
+        # A flag to ensure we only do this once per game instance.
+        initial_ai_turn_triggered = False
+        # --- END OF FIX ---
+        
         while True:
             dt = self.clock.tick(C.FPS) / 1000.0
             events = pygame.event.get()
+
+            # --- START OF FIX: New logic for initial AI turn ---
+            if self.current_scene == self.scenes["GAME"] and not initial_ai_turn_triggered:
+                from game_logic.player import AIPlayer
+                active_player = self.game_instance.get_active_player()
+                # If the very first player of the game is an AI, call their logic directly.
+                if self.game_instance.current_turn == 1 and isinstance(active_player, AIPlayer):
+                    print("First player is an AI, triggering their turn directly.")
+                    active_player.handle_turn_logic(self.game_instance, self.scenes["GAME"], self.sounds)
+                initial_ai_turn_triggered = True # Prevent this block from ever running again
+            # --- END OF FIX ---
             
             for event in events:
                 if event.type == pygame.QUIT:

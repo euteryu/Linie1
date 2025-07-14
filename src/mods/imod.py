@@ -1,13 +1,12 @@
 # imod.py
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Dict, Any, List, Tuple
+from typing import TYPE_CHECKING, Dict, Any, List, Tuple, Optional
 
 if TYPE_CHECKING:
     from game_logic.game import Game
     from game_logic.player import Player, AIPlayer
-    from game_logic.ai_actions import PotentialAction # Add this import
-    # from visualizer import Linie1Visualizer # For UI hooks
+    from game_logic.ai_actions import PotentialAction
     import pygame
 
 class IMod(ABC):
@@ -75,10 +74,20 @@ class IMod(ABC):
         """
         return False # Default behavior: mod does not handle the click
 
-    def get_ai_potential_actions(self, game: 'Game', player: 'AIPlayer') -> List['PotentialAction']:
+    # --- START OF CHANGE ---
+    def plan_ai_turn(self, game: 'Game', player: 'AIPlayer', base_strategy: 'AIStrategy') -> Optional[List['PotentialAction']]:
         """
-        Allows a mod to provide a list of its own special actions for the AI to consider.
-        """
-        return []
+        If implemented, this method completely overrides the AI's default turn planning.
+        It should return a list of PotentialAction objects representing the AI's full turn,
+        or None to let the default (or another mod's) logic proceed.
 
-    # Add other hooks as needed (e.g., on_tile_placed, on_money_changed, on_route_validated)
+        Args:
+            game: The current game instance.
+            player: The AI player whose turn it is.
+            base_strategy: An instance of the AI's default strategy, for reusing its helper methods.
+
+        Returns:
+            A list of PotentialAction objects for the turn, or None.
+        """
+        return None
+    # --- END OF CHANGE ---
