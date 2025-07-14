@@ -48,34 +48,31 @@ class GameScene(Scene):
         self.debug_die_rects: Dict[any, pygame.Rect] = {}
 
     def handle_events(self, events):
+        """
+        Handles events by first passing them to the current game state,
+        and only processing them at the scene level if they are not handled.
+        """
         for event in events:
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                self.scene_manager.go_to_scene("MAIN_MENU")
-                return
-
-            # --- START OF FIX: Simplified and Corrected Turn Logic ---
-            if event.type == C.START_NEXT_TURN_EVENT:
-                # 1. First, confirm the turn of the player who just finished.
-                #    This advances the player index and updates game state.
-                self.game.confirm_turn()
-
-                # 2. After confirmation, get the NEW active player.
-                active_player = self.game.get_active_player()
-
-                # 3. If this new player is an AI and it's their turn to act,
-                #    tell them to start their logic.
-                if isinstance(active_player, AIPlayer) and self.game.actions_taken_this_turn == 0:
-                    active_player.handle_turn_logic(self.game, self, self.sounds)
-                
-                # This event has been fully handled.
-                continue
-            # --- END OF FIX ---
-
-            # Standard UI and game state event handling
+            # 1. Give the active UI and game state the first chance to handle the event.
+            # The ButtonPanel in the UIManager now also returns True if it handles a click.
             if self.ui_manager.handle_event(event, self.game, self.current_state):
                 continue
-            if self.current_state:
-                self.current_state.handle_event(event)
+            if self.current_state and self.current_state.handle_event(event):
+                continue
+
+            # 2. If the event was not handled, check for scene-level keybinds.
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    # This now only triggers if the current state didn't use ESCAPE.
+                    self.scene_manager.go_to_scene("MAIN_MENU")
+                    return
+
+            # 3. Handle game-wide events like turn progression.
+            if event.type == C.START_NEXT_TURN_EVENT:
+                self.game.confirm_turn()
+                active_player = self.game.get_active_player()
+                if isinstance(active_player, AIPlayer) and self.game.actions_taken_this_turn == 0:
+                    active_player.handle_turn_logic(self.game, self, self.sounds)
 
     def update(self, dt: float):
         if self.next_state_constructor:

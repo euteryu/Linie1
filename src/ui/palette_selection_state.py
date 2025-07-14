@@ -39,94 +39,68 @@ class PaletteSelectionState(GameState):
         self.current_capital = current_capital
     # --- END OF CHANGE ---
 
-    def handle_event(self, event):
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-            self.visualizer.return_to_base_state()
-            return
+    def handle_event(self, event) -> bool:
+        """Handles user input for the palette, now returning True if the event is consumed."""
+        # Check for close keys first
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE or event.key == pygame.K_BACKSPACE:
+                self.scene.return_to_base_state()
+                return True # Event was handled
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             mouse_pos = event.pos
+            # Check for close button click
             if self.close_button_rect.collidepoint(mouse_pos):
-                self.visualizer.return_to_base_state()
-                return
+                self.scene.return_to_base_state()
+                return True # Event was handled
+            
+            # Check for item selection
             for index, rect in self.palette_rects.items():
                 if rect.collidepoint(mouse_pos):
                     chosen_item = self.items_to_display[index]
                     
-                    # --- START OF CHANGE: Check affordability before executing callback ---
                     if self.eco_mod and self.current_capital is not None:
                         price = self.eco_mod.get_market_price(self.game, chosen_item)
                         supply = self.game.deck_manager.tile_draw_pile.count(chosen_item)
                         if self.current_capital < price or supply == 0:
-                            self.visualizer.sounds.play('error') # Play an error sound
-                            return # Cannot select this item
-                    # --- END OF CHANGE ---
+                            self.scene.sounds.play('error')
+                            return True # Handled the invalid click
 
                     self.on_select_callback(chosen_item)
-                    return
+                    return True # Handled the valid click
+        
+        return False # Event was not handled by this state
 
     def draw(self, screen):
-        overlay = pygame.Surface((C.SCREEN_WIDTH, C.SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((20, 0, 40, 190)); screen.blit(overlay, (0, 0))
-
+        overlay = pygame.Surface((C.SCREEN_WIDTH, C.SCREEN_HEIGHT), pygame.SRCALPHA); overlay.fill((20, 0, 40, 220)); screen.blit(overlay, (0, 0))
         draw_text(screen, self.title, 100, 50, C.COLOR_WHITE, size=36)
         draw_text(screen, self.message, 100, C.SCREEN_HEIGHT - 50, C.COLOR_WHITE, size=20)
-        
-        close_rect = self.close_button_rect
-        pygame.draw.rect(screen, (200, 50, 50), close_rect)
+        close_rect = self.close_button_rect; pygame.draw.rect(screen, (200, 50, 50), close_rect)
         if close_rect.collidepoint(pygame.mouse.get_pos()): pygame.draw.rect(screen, C.COLOR_WHITE, close_rect, 3)
         else: pygame.draw.rect(screen, C.COLOR_WHITE, close_rect, 1)
-        draw_text(screen, "X", close_rect.centerx, close_rect.centery, C.COLOR_WHITE, size=30, center_x=True, center_y=True)
+        draw_text(screen, "X", close_rect.centerx, close_rect.centery, C.COLOR_WHITE, 30, True, True)
 
         self.palette_rects.clear()
         x, y = 100, 120
-        # --- START OF CHANGE: Adjust layout for more info ---
-        tiles_per_row, tile_size, spacing = 8, C.TILE_SIZE, 10
-        y_spacing = C.TILE_SIZE + 40 # Increased vertical spacing for text
-        # --- END OF CHANGE ---
-
+        tiles_per_row, tile_size, spacing, y_spacing = 8, C.TILE_SIZE, 10, C.TILE_SIZE + 40
         for i, item in enumerate(self.items_to_display):
             rect = pygame.Rect(x, y, tile_size, tile_size)
             self.palette_rects[i] = rect
-            
-            # --- START OF CHANGE: Dynamic coloring and text based on price/supply ---
-            is_affordable = True
-            is_in_stock = True
-            market_price = 0
-
+            is_affordable, is_in_stock, market_price, supply = True, True, 0, 0
             if self.eco_mod:
                 market_price = self.eco_mod.get_market_price(self.game, item)
                 supply = self.game.deck_manager.tile_draw_pile.count(item)
-                if self.current_capital is not None and self.current_capital < market_price:
-                    is_affordable = False
-                if supply == 0:
-                    is_in_stock = False
-
-            item_surf = self.item_surfaces.get(item.name)
-            if item_surf:
+                if self.current_capital is not None and self.current_capital < market_price: is_affordable = False
+                if supply == 0: is_in_stock = False
+            if item_surf := self.item_surfaces.get(item.name):
                 tile_image = item_surf.copy()
-                # Grey out the tile if it cannot be purchased
-                if not is_affordable or not is_in_stock:
-                    tile_image.set_alpha(80)
+                if not is_affordable or not is_in_stock: tile_image.set_alpha(80)
                 screen.blit(tile_image, rect.topleft)
-
-            if rect.collidepoint(pygame.mouse.get_pos()) and is_affordable and is_in_stock:
-                pygame.draw.rect(screen, C.COLOR_HIGHLIGHT, rect, 3)
-            else:
-                pygame.draw.rect(screen, C.COLOR_BLACK, rect, 1)
-
-            # Display price and supply info below the tile
+            if rect.collidepoint(pygame.mouse.get_pos()) and is_affordable and is_in_stock: pygame.draw.rect(screen, C.COLOR_HIGHLIGHT, rect, 3)
+            else: pygame.draw.rect(screen, C.COLOR_BLACK, rect, 1)
             price_color = C.COLOR_WHITE if is_affordable else (255, 80, 80)
             supply_color = C.COLOR_WHITE if is_in_stock else (255, 80, 80)
-
-            price_text = f"${market_price}"
-            supply_text = f"Supply: {supply}"
-            
-            draw_text(screen, price_text, rect.centerx, rect.bottom + 15, price_color, size=18, center_x=True)
-            draw_text(screen, supply_text, rect.centerx, rect.bottom + 30, supply_color, size=14, center_x=True)
-            # --- END OF CHANGE ---
-                
+            draw_text(screen, f"${market_price}", rect.centerx, rect.bottom + 15, price_color, 18, True)
+            draw_text(screen, f"Supply: {supply}", rect.centerx, rect.bottom + 30, supply_color, 14, True)
             x += tile_size + spacing
-            if (i + 1) % tiles_per_row == 0:
-                x = 100
-                y += y_spacing
+            if (i + 1) % tiles_per_row == 0: x, y = 100, y + y_spacing

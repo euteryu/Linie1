@@ -14,11 +14,14 @@ from game_logic.player import AIPlayer, HumanPlayer
 from game_logic.enums import GamePhase, PlayerState, Direction
 from game_logic.commands import CombinedActionCommand
 
+from common.rendering_utils import get_font, draw_text
+
 from mods.economic_mod.economic_commands import AuctionTileCommand, PlaceBidCommand
 
 if TYPE_CHECKING:
     from game_logic.game import Game
     from game_logic.tile import TileType
+    from scenes.game_scene import GameScene
 
 class GameState:
     """Abstract base class for different game phases/states."""
@@ -30,8 +33,12 @@ class GameState:
         # --- END OF FIX ---
         self.is_transient_state: bool = False
 
-    def handle_event(self, event):
-        raise NotImplementedError
+    def handle_event(self, event) -> bool:
+        """
+        Handles a Pygame event.
+        Returns True if the event was handled by this state, False otherwise.
+        """
+        return False # Default implementation handles nothing.
 
     def update(self, dt):
         pass

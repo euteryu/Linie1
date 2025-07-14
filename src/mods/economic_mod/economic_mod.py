@@ -3,6 +3,8 @@ import pygame
 from typing import TYPE_CHECKING, List, Dict, Any, Optional
 from collections import Counter
 
+from tkinter import simpledialog, messagebox
+
 # Since this is a new mod, it needs its own imports
 from common.rendering_utils import draw_text
 from ..imod import IMod
@@ -11,11 +13,13 @@ from .economic_commands import BribeOfficialCommand, PriorityRequisitionCommand
 from common import constants as C # Import base constants
 from game_logic.ai_actions import PotentialAction
 from game_logic.enums import PlayerState
-from .economic_commands import PriorityRequisitionCommand, SellToScrapyardCommand, FulfillPermitCommand
 
 from ui.palette_selection_state import PaletteSelectionState
 from . import constants_economic as CE
 from .headline_manager import HeadlineManager
+
+from .economic_commands import PriorityRequisitionCommand, SellToScrapyardCommand, FulfillPermitCommand, AuctionTileCommand, PlaceBidCommand
+from states.game_states import AuctionHouseState
 
 if TYPE_CHECKING:
     from game_logic.game import Game
@@ -171,34 +175,24 @@ class EconomicMod(IMod):
         return False
 
     def _handle_auction_selection(self, game, player):
-        """Opens a palette for the player to choose which tile to auction."""
         scene = game.visualizer
-        
+        player_mod_data = player.components.get(self.mod_id, {})
         def on_tile_to_auction_selected(tile_to_auction: 'TileType'):
-            # Now prompt for the minimum bid
             try:
                 bid_str = simpledialog.askstring("Set Minimum Bid", f"Enter minimum bid for {tile_to_auction.name}:", parent=scene.tk_root)
-                if not bid_str: return
+                if not bid_str: scene.return_to_base_state(); return
                 min_bid = int(bid_str)
-                if min_bid <= 0: return
-
+                if min_bid <= 0: messagebox.showerror("Error", "Minimum bid must be a positive number."); scene.return_to_base_state(); return
                 command = AuctionTileCommand(game, player, self.mod_id, tile_to_auction, min_bid)
-                if not game.command_history.execute_command(command):
-                    messagebox.showerror("Error", "Could not auction tile.")
+                if not game.command_history.execute_command(command): messagebox.showerror("Error", "Could not auction tile.")
                 scene.return_to_base_state()
             except (ValueError, TypeError):
-                messagebox.showerror("Error", "Invalid input.")
+                messagebox.showerror("Error", "Invalid input. Please enter a number.")
                 scene.return_to_base_state()
 
-        # Request a state change to the palette UI
+        economic_mod = game.mod_manager.available_mods[self.mod_id]
         scene.request_state_change(
-            lambda v: PaletteSelectionState(
-                scene=v,
-                title="Select Tile to Auction",
-                items=player.hand, # Show only tiles in the player's hand
-                item_surfaces=scene.tile_surfaces,
-                on_select_callback=on_tile_to_auction_selected
-            )
+            lambda v: PaletteSelectionState(scene=v, title="Select Tile from Your Hand to Auction", items=player.hand, item_surfaces=scene.tile_surfaces, on_select_callback=on_tile_to_auction_selected, economic_mod_instance=economic_mod, current_capital=player_mod_data.get('capital', 0))
         )
 
 
