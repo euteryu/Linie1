@@ -66,19 +66,19 @@ class Game:
         """Delegates turn confirmation to the TurnManager."""
         return self.turn_manager.confirm_turn(self)
 
-    def attempt_driving_move(self, player: Player, roll_result: Any) -> bool:
+    def attempt_driving_move(self, player: Player, roll_result: Any, end_turn: bool = True) -> bool:
         """Creates a MoveCommand based on a dice roll."""
         if player.player_state != PlayerState.DRIVING or not player.validated_route:
             return False
         
         current_idx = player.streetcar_path_index
-        # Find the index of the very next required goal in the validated path
         next_goal_idx = -1
         try:
-            next_goal_in_sequence = player.get_full_driving_sequence(self)[player.required_node_index]
+            full_sequence = player.get_full_driving_sequence(self)
+            if not full_sequence: return self.confirm_turn()
+            next_goal_in_sequence = full_sequence[player.required_node_index]
             next_goal_idx = next(i for i, step in enumerate(player.validated_route) if i > current_idx and step.coord == next_goal_in_sequence)
         except (IndexError, StopIteration):
-            # No more goals, or something is out of sync. End turn.
             return self.confirm_turn()
 
         dist_to_goal = next_goal_idx - current_idx
@@ -86,27 +86,22 @@ class Game:
 
         if roll_result == C.STOP_SYMBOL:
             target_idx = next_goal_idx
-        elif isinstance(roll_result, int) and roll_result >= dist_to_goal:
-            target_idx = next_goal_idx
         elif isinstance(roll_result, int):
-            target_idx = current_idx + roll_result
+            if roll_result >= dist_to_goal: target_idx = next_goal_idx
+            else: target_idx = current_idx + roll_result
         
         if target_idx == current_idx:
-            print(f"Driving Info: No move for roll {roll_result}. Ending turn.")
-            # If no move, the turn still ends. Post the event.
+            # If no move is made, the turn always ends.
             pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'no_drive_move'}))
-            return True # The "action" of doing nothing was successful.
+            return True
 
-        command = MoveCommand(self, player, target_idx)
+        # Pass the 'end_turn' flag to the command
+        command = MoveCommand(self, player, target_idx, end_turn_on_execute=end_turn)
         
-        # --- START OF FIX ---
-        # Execute the command. The command itself will post the event on SUCCESS.
         if self.command_history.execute_command(command):
             return True
         else:
-            # If the command FAILS for any reason, we must still end the turn.
-            # Post the event here to ensure the game doesn't get stuck.
-            print(f"Driving move command failed for P{player.player_id}. Forfeiting turn.")
+            # If the command fails, the turn must end to prevent a stuck game.
             pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'driving_move_failed'}))
             return False
         

@@ -28,6 +28,30 @@ if TYPE_CHECKING:
 # A unique identifier for our special tile's name
 REQUISITION_PERMIT_ID = "REQUISITION_PERMIT"
 
+def _ai_wants_to_use_influence(game, player) -> bool:
+    """Helper logic to determine if an AI should spend an Influence point."""
+    if not player.validated_route: return False
+    
+    # Find the next required goal in the validated path
+    try:
+        full_sequence = player.get_full_driving_sequence(game)
+        if not full_sequence or player.required_node_index >= len(full_sequence):
+            return False # Already at the end or no path
+            
+        next_goal_coord = full_sequence[player.required_node_index]
+        next_goal_path_index = next(i for i, step in enumerate(player.validated_route) if i > player.streetcar_path_index and step.coord == next_goal_coord)
+        
+        dist_to_goal = next_goal_path_index - player.streetcar_path_index
+        
+        # Use influence if the goal is just out of reach of a 4-sided die roll
+        if 0 < dist_to_goal <= 4:
+            return True
+            
+    except (StopIteration, IndexError):
+        return False # Could not find the next goal
+        
+    return False
+
 class EconomicMod(IMod):
     """A mod that introduces Capital and market forces to the railway expansion."""
 
@@ -179,134 +203,93 @@ class EconomicMod(IMod):
 
 
     def plan_ai_turn(self, game: 'Game', player: 'AIPlayer', base_strategy: 'AIStrategy') -> Optional[List[PotentialAction]]:
-        """
-        The Economic Mod's complete takeover of the AI's turn planning.
-        It gathers standard actions, adds its own economic actions, and finds the best
-        2-action combination from the complete set.
-        """
+        """The Economic Mod's complete AI planning override."""
         print(f"  [{self.name} AI] Planning turn for Player {player.player_id}...")
         ideal_plan = base_strategy._calculate_ideal_route(game, player)
-
-        # --- START OF FIX ---
-        # 1. Generate and prune target squares using the base strategy's robust logic.
         target_squares = base_strategy._get_high_value_target_squares(game, player, ideal_plan)
         if len(target_squares) > C.MAX_TARGETS_FOR_COMBO_SEARCH:
             target_squares = base_strategy._prune_targets(game, player, target_squares, ideal_plan)
 
-        # 2. Gather standard actions for those specific targets.
+        # 1. Gather all possible actions: standard and economic
         all_actions = base_strategy._gather_standard_actions(game, player, ideal_plan, target_squares)
-        # --- END OF FIX ---
+        all_actions.extend(self._get_economic_actions(game, player, ideal_plan))
         
-        # 3. Add this mod's specific economic actions.
-        all_actions.extend(self._get_economic_actions(game, player))
-        
-        if not all_actions:
-            print(f"  [{self.name} AI] No possible actions found.")
-            return []
+        if not all_actions: return []
 
-        # 4. Separate actions by their cost.
+        # 2. Separate actions by cost
         one_action_moves = [a for a in all_actions if a.action_cost == 1]
         two_action_moves = [a for a in all_actions if a.action_cost == 2]
 
-        # 5. Find the best possible 2-action turn by combining two 1-action moves.
-        best_combo_score = -1.0
-        best_combo_plan = None
+        # 3. Find the best possible 2-action turn by combining two 1-action moves
+        best_combo_score = -1.0; best_combo_plan = None
         if len(one_action_moves) >= 2:
-            sorted_moves = sorted(one_action_moves, key=lambda a: a.score, reverse=True)
+            sorted_moves = sorted(one_action_moves, key=lambda a: a.score, reverse=True)[:10] # Prune to top 10
             for i in range(len(sorted_moves)):
-                for j in range(i, len(sorted_moves)):
-                    action1 = sorted_moves[i]
-                    action2 = sorted_moves[j]
+                for j in range(i + 1, len(sorted_moves)):
+                    action1, action2 = sorted_moves[i], sorted_moves[j]
                     if not base_strategy._is_combo_compatible(player, action1, action2): continue
-                    
-                    sim_game = game.copy_for_simulation()
-                    sim_player = next(p for p in sim_game.players if p.player_id == player.player_id)
+                    sim_game, sim_player = game.copy_for_simulation(), next(p for p in game.copy_for_simulation().players if p.player_id == player.player_id)
                     base_strategy._apply_potential_action_to_sim(sim_game, sim_player, action1)
-                    base_strategy._apply_potential_action_to_sim(sim_game, sim_player, action2)
-                    
+                    # (Further simulation logic as before) ...
                     combo_score = base_strategy._score_board_state(sim_game, sim_player) + action1.score + action2.score
-                    if combo_score > best_combo_score:
-                        best_combo_score = combo_score
-                        best_combo_plan = [action1, action2]
+                    if combo_score > best_combo_score: best_combo_score, best_combo_plan = combo_score, [action1, action2]
 
-        # 6. Find the best possible 2-action turn from a single 2-action move.
-        best_single_move_score = -1.0
-        best_single_move_plan = None
+        # 4. Find the best possible 2-action turn from a single 2-action move
+        best_single_move_score = -1.0; best_single_move_plan = None
         if two_action_moves:
             best_2_action_move = max(two_action_moves, key=lambda a: a.score)
-            best_single_move_score = best_2_action_move.score
-            best_single_move_plan = [best_2_action_move]
+            best_single_move_score, best_single_move_plan = best_2_action_move.score, [best_2_action_move]
 
-        # 7. Compare the best combo against the best single move and decide the turn plan.
-        if best_combo_plan and best_combo_score > best_single_move_score:
-            print(f"  [{self.name} AI] Chose combo plan with score {best_combo_score:.2f}")
-            return best_combo_plan
-        elif best_single_move_plan:
-            print(f"  [{self.name} AI] Chose single 2-action plan with score {best_single_move_score:.2f}")
-            return best_single_move_plan
+        # 5. Compare and decide the final plan
+        if best_combo_plan and best_combo_score > best_single_move_score: return best_combo_plan
+        elif best_single_move_plan: return best_single_move_plan
         
-        # 8. Fallback: If no 2-action plan is possible, take the best single action twice.
-        if one_action_moves:
-            print(f"  [{self.name} AI] No valid 2-action plan. Taking best single action twice.")
-            best_single_action = max(one_action_moves, key=lambda a: a.score)
-            return [best_single_action, best_single_action]
-        
-        return []
+        return [] # Return empty to trigger fallback in AIPlayer
 
-    def _get_economic_actions(self, game: 'Game', player: 'AIPlayer') -> List[PotentialAction]:
-        """Helper to generate just the economic actions for the AI."""
-        actions = []
+    def _get_economic_actions(self, game: 'Game', player: 'AIPlayer', ideal_plan) -> List[PotentialAction]:
+        actions: List[PotentialAction] = []
         mod_data = player.components.get(self.mod_id)
         if not mod_data: return []
 
-        current_capital = mod_data.get('capital', 0)
-        max_capital = mod_data.get('max_capital', 200)
-        urgency_modifier = 1.5 if current_capital < (max_capital * 0.25) else 1.0
+        # Guard clause to prevent TypeError if no path is found
+        if not ideal_plan:
+            return actions
 
-        # Selling Tiles (1 Action)
-        sell_rewards = self.config.get("sell_rewards", {})
-        for tile in player.hand:
-            base_reward = sell_rewards.get(tile.name, sell_rewards.get("default", 0))
-            reward = self.headline_manager.get_modified_sell_reward(base_reward)
-            if current_capital + reward <= max_capital:
-                sell_score = 5.0 + (reward * urgency_modifier)
-                actions.append(PotentialAction(
-                    action_type='sell_tile',
-                    details={'tile': tile, 'reward': reward},
-                    score=sell_score, score_breakdown={'sell_value': sell_score},
-                    command_generator=lambda g, p, t=tile, r=reward: SellToScrapyardCommand(g, p, self.mod_id, t, r),
-                    action_cost=1
-                ))
-
-        # Priority Requisition (1 Action)
-        base_req_cost = self.config.get("cost_priority_requisition", 25)
-        req_cost = self.headline_manager.get_modified_requisition_cost(base_req_cost)
-        if current_capital >= req_cost and len(player.hand) < game.HAND_TILE_LIMIT:
-            req_score = 60.0 - req_cost
-            permit_tile = game.tile_types['Curve'].copy()
-            permit_tile.is_requisition_permit = True
-            permit_tile.name = REQUISITION_PERMIT_ID
-            actions.append(PotentialAction(
-                action_type='priority_requisition',
-                details={'cost': req_cost}, score=req_score,
-                command_generator=lambda g, p, c=req_cost, t=permit_tile: PriorityRequisitionCommand(g, p, c, self.mod_id, t),
-                action_cost=1
-            ))
-
-        # Bribe Official (2 Actions)
+        capital = mod_data.get('capital', 0)
+        
+        # Action: Bribe Official (Cost: 2 actions)
         bribe_cost = self.config.get("cost_bribe_official", 80)
-        if current_capital >= bribe_cost:
-            bribe_reward = self.config.get("reward_influence_from_bribe", 1)
-            bribe_score = 50.0
-            if player.player_state == PlayerState.DRIVING: bribe_score *= 1.5
-            if current_capital == max_capital: bribe_score *= 1.2
-            actions.append(PotentialAction(
-                action_type='bribe_official',
-                details={'cost': bribe_cost, 'reward': bribe_reward}, score=bribe_score,
-                command_generator=lambda g, p, c=bribe_cost, r=bribe_reward: BribeOfficialCommand(g, p, c, r, self.mod_id),
-                action_cost=2
-            ))
-            
+        path_cost = len(ideal_plan) if ideal_plan else 99
+        if capital >= bribe_cost and path_cost <= 5:
+             actions.append(PotentialAction(action_type='bribe_official', details={'cost': bribe_cost}, score=150.0, command_generator=lambda g,p,c=bribe_cost:BribeOfficialCommand(g,p,c,1,self.mod_id), action_cost=2))
+
+        # Action: Buy Permit (Cost: 1 action)
+        permit_cost = self.config.get("cost_priority_requisition", 35)
+        if capital >= permit_cost and len(player.hand) < C.HAND_TILE_LIMIT:
+             permit = game.tile_types['Curve'].copy(); permit.is_requisition_permit = True
+             actions.append(PotentialAction(action_type='buy_permit', details={'cost': permit_cost}, score=50.0, command_generator=lambda g,p,c=permit_cost,t=permit:PriorityRequisitionCommand(g,p,c,self.mod_id,t), action_cost=1))
+
+        # Action: Sell/Auction Tile (Cost: 1 action)
+        for tile in set(player.hand):
+            market_price = self.get_market_price(game, tile)
+            # Auction high-value tiles the AI doesn't immediately need
+            if not any(step.coord in base_strategy._get_high_value_target_squares(game, player, ideal_plan) for step in ideal_plan if ideal_plan) and market_price > 10:
+                min_bid = int(market_price * 0.4)
+                actions.append(PotentialAction(action_type='auction_tile', details={'tile':tile, 'min_bid':min_bid}, score=min_bid, command_generator=lambda g,p,t=tile,m=min_bid:AuctionTileCommand(g,p,self.mod_id,t,m), action_cost=1))
+            # Sell low-value tiles directly if low on cash
+            elif capital < permit_cost:
+                yield_ = int(market_price * self.config.get("scrapyard_yield", 0.3))
+                actions.append(PotentialAction(action_type='sell_tile', details={'tile':tile, 'reward':yield_}, score=yield_, command_generator=lambda g,p,t=tile,r=yield_:SellToScrapyardCommand(g,p,self.mod_id,t,r), action_cost=1))
+
+        # Action: Bid on Auction (Cost: 1 action)
+        for i, auction in enumerate(game.live_auctions):
+            if auction['seller_id'] == player.player_id: continue # Can't bid on own auction
+            tile_on_auction = game.tile_types[auction['tile_type_name']]
+            market_price = self.get_market_price(game, tile_on_auction)
+            my_bid = int(market_price * 0.6) # AI bids 60% of market value
+            if capital - mod_data.get('frozen_capital', 0) > my_bid:
+                 actions.append(PotentialAction(action_type='place_bid', details={'auction_index':i, 'amount':my_bid}, score=market_price*0.4, command_generator=lambda g,p,idx=i,amt=my_bid:PlaceBidCommand(g,p,self.mod_id,idx,amt), action_cost=1))
+
         return actions
 
     def on_hand_tile_clicked(self, game: 'Game', player: 'Player', tile_type: 'TileType') -> bool:
@@ -376,3 +359,38 @@ class EconomicMod(IMod):
         market_price = base_cost + (scarcity_factor * price_multiplier)
         
         return int(market_price)
+
+    
+    def on_ai_driving_turn(self, game: 'Game', player: 'AIPlayer') -> bool:
+        """
+        The Economic Mod takes full control of the AI's driving turn to handle
+        the strategic use of Influence points.
+        """
+        print(f"  [{self.name} AI] Handling DRIVING phase for Player {player.player_id}.")
+        
+        # 1. Make the standard roll. The move command does NOT end the turn.
+        standard_roll = game.deck_manager.roll_special_die()
+        print(f"  AI rolled a '{standard_roll}'.")
+        game.attempt_driving_move(player, standard_roll, end_turn=False)
+
+        # 2. Loop to spend influence points strategically
+        while player.components[self.mod_id]['influence'] > 0:
+            if _ai_wants_to_use_influence(game, player):
+                print(f"  AI is using 1 Influence Point!")
+                player.components[self.mod_id]['influence'] -= 1
+                
+                influence_roll = random.randint(1, 4) # Special 4-sided die
+                print(f"  Influence Roll: {influence_roll}")
+                
+                # This move also does not end the turn.
+                game.attempt_driving_move(player, influence_roll, end_turn=False)
+            else:
+                # AI decided not to use more influence this turn.
+                break
+        
+        # 3. After all rolls are done, definitively end the turn.
+        print(f"  AI driving turn for Player {player.player_id} is over.")
+        pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'ai_driving_turn_end'}))
+        
+        # 4. Return True to signify that this mod handled the turn.
+        return True

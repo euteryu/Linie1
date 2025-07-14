@@ -91,3 +91,11 @@ class IMod(ABC):
         """
         return None
     # --- END OF CHANGE ---
+
+    def on_ai_driving_turn(self, game: 'Game', player: 'AIPlayer') -> bool:
+        """
+        If implemented, this method completely overrides the AI's default driving turn.
+        It is responsible for rolling dice and ending the turn.
+        Return True if the mod handled the turn, False to allow default logic.
+        """
+        return False

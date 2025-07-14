@@ -161,48 +161,43 @@ class ExchangeTileCommand(Command):
         return True
 
 class MoveCommand(Command):
-    def __init__(self, game: 'Game', player: Player, target_path_index: int):
+    def __init__(self, game: 'Game', player: Player, target_path_index: int, end_turn_on_execute: bool = True):
         super().__init__(game)
         self.player = player
         self.target_path_index = target_path_index
+        self.end_turn_on_execute = end_turn_on_execute # Store the new flag
         self._original_path_index: int = 0
         self._original_node_index: int = 0
         self._was_game_over = False
 
     def execute(self) -> bool:
-        print(f"Executing Move: P{self.player.player_id} to path index {self.target_path_index}")
         self._original_path_index = self.player.streetcar_path_index
         self._original_node_index = self.player.required_node_index
         self._was_game_over = self.game.game_phase == GamePhase.GAME_OVER
 
-        # --- START OF FIX ---
-        # The logic from the old game.move_streetcar() is now here.
         if not self.player.validated_route or not (0 <= self.target_path_index < len(self.player.validated_route)):
-            return False # Invalid move index
+            return False
         
         self.player.streetcar_path_index = self.target_path_index
         
-        # Check if the new step is a goal node to update progress
         new_step = self.player.validated_route[self.target_path_index]
         if new_step.is_goal_node:
-            # Find the corresponding index in the full driving sequence to update progress
             full_sequence = self.player.get_full_driving_sequence(self.game)
             if full_sequence and new_step.coord in full_sequence:
                 goal_index_in_sequence = full_sequence.index(new_step.coord)
-                # The required_node_index should be one MORE than the index of the goal just reached.
                 if self.player.required_node_index <= goal_index_in_sequence:
                     self.player.required_node_index = goal_index_in_sequence + 1
-                    print(f"  -> Reached required node {new_step.coord}. Advancing sequence index to {self.player.required_node_index}.")
-        # --- END OF FIX ---
         
         win = self.game.rule_engine.check_win_condition(self.game, self.player)
-        self.game.actions_taken_this_turn = self.game.MAX_PLAYER_ACTIONS
         
-        print(f"--> Move Execute SUCCESS. Landed at {self.player.streetcar_position}. Win: {win}")
-
-        # Post the event instead of directly confirming the turn.
-        if self.game.game_phase != GamePhase.GAME_OVER:
-            pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'driving_move'}))
+        # --- START OF CHANGE: Only end the turn if the flag is set ---
+        # The first action of a turn (or any human action) will end the turn.
+        # AI influence moves will set this to False.
+        if self.end_turn_on_execute:
+            self.game.actions_taken_this_turn = self.game.MAX_PLAYER_ACTIONS
+            if self.game.game_phase != GamePhase.GAME_OVER:
+                pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'driving_move'}))
+        # --- END OF CHANGE ---
         
         return True
 

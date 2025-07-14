@@ -148,11 +148,21 @@ class AIPlayer(Player):
                 if sounds: sounds.play('eliminated')
                 game.eliminate_player(self)
                 pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'ai_forfeit'}))
+        
         elif self.player_state == PlayerState.DRIVING:
-            print(f"--- AI Player {self.player_id} is in DRIVING phase. Rolling die... ---")
-            if visualizer:
-                visualizer.force_redraw("AI Rolling...")
-                pygame.time.delay(C.AI_MOVE_DELAY_MS)
-            roll_result = game.deck_manager.roll_special_die()
-            print(f"  AI Player {self.player_id} rolled a '{roll_result}'.")
-            game.attempt_driving_move(self, roll_result)
+            print(f"--- AI Player {self.player_id} is in DRIVING phase. ---")
+            
+            # 1. Check if an active mod wants to handle the driving turn.
+            was_handled_by_mod = game.mod_manager.on_ai_driving_turn(game, self)
+
+            # 2. If no mod took over, execute the default base-game driving logic.
+            if not was_handled_by_mod:
+                print("  No mod override for driving. Performing standard roll.")
+                if visualizer:
+                    visualizer.force_redraw("AI Rolling...")
+                    pygame.time.delay(C.AI_MOVE_DELAY_MS)
+
+                # The standard roll and move. The command will correctly end the turn.
+                roll_result = game.deck_manager.roll_special_die()
+                print(f"  AI rolled a '{roll_result}'.")
+                game.attempt_driving_move(self, roll_result, end_turn=True)

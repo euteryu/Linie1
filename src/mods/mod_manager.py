@@ -159,3 +159,14 @@ class ModManager:
         for mod in self.available_mods.values():
             mod.is_active = False
         self.active_mod_ids.clear()
+
+    def on_ai_driving_turn(self, game: 'Game', player: 'AIPlayer') -> bool:
+        """
+        Polls active mods to see if one wants to override the AI's driving turn.
+        The first mod to handle it takes precedence.
+        """
+        for mod in self.get_active_mods():
+            if mod.on_ai_driving_turn(game, player):
+                # The mod has taken full control of the driving turn.
+                return True
+        return False
