@@ -23,19 +23,26 @@ class SoundManager:
             'dice_roll': os.path.join(assets_path, 'driving', 'dice_roll.mp3'),
             'train_move': os.path.join(assets_path, 'driving', 'train_move.mp3'),
             'eliminated': os.path.join(assets_path, 'condition', 'eliminated.mp3'),
+            'auction_new_item': os.path.join(assets_path, 'auctionhouse', 'auction_new_item.wav'),
         }
         self.music_paths = {
             'main_theme': os.path.join(assets_path, 'music', 'background_theme.wav')
         }
 
     def load_sounds(self):
-        """Load all defined sound effects into memory."""
+        """Load all defined sound effects into memory gracefully."""
+        if not pygame.mixer: return # Do nothing if mixer failed to init
+
         for name, path in self.sound_paths.items():
             if os.path.exists(path):
-                self.sounds[name] = pygame.mixer.Sound(path)
+                try:
+                    self.sounds[name] = pygame.mixer.Sound(path)
+                except pygame.error as e:
+                    print(f"WARNING: Failed to load sound '{name}' at '{path}'. Error: {e}")
+                    self.sounds[name] = None # Set to None to avoid future errors
             else:
-                print(f"Sound file not found: {path}")
-                self.sounds[name] = None # Handle missing files gracefully
+                print(f"WARNING: Sound file not found for '{name}': {path}")
+                self.sounds[name] = None
 
     def play(self, name, loops=0):
         """Play a loaded sound effect by its name."""

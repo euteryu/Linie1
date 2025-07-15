@@ -28,9 +28,8 @@ class Game:
         if not 1 <= len(player_types) <= 6: raise ValueError("Total players must be 1-6.")
         self.rule_engine = RuleEngine(); self.turn_manager = TurnManager(); self.deck_manager = DeckManager(self); self.pathfinder: Pathfinder = BFSPathfinder(); self.mod_manager = mod_manager; self.visualizer: Optional['GameScene'] = None; self.command_history = CommandHistory()
         self.num_players = len(player_types); self.difficulty = difficulty.lower(); self.players: List[Player] = []; self.tile_types = {name: TileType(name=name, **details) for name, details in C.TILE_DEFINITIONS.items()}; self.board = Board(); self.active_player_index: int = 0; self.game_phase: GamePhase = GamePhase.SETUP; self.current_turn: int = 0; self.winner: Optional[Player] = None; self.actions_taken_this_turn: int = 0; self.turn_start_history_index: int = -1
-        # --- START OF CHANGE: Add auction tracking ---
         self.live_auctions: List[Dict[str, Any]] = []
-        # --- END OF CHANGE ---
+        self.rail_foundation_capital: int = 0
         self.MAX_PLAYER_ACTIONS = C.MAX_PLAYER_ACTIONS; self.HAND_TILE_LIMIT = C.HAND_TILE_LIMIT
         from .ai_strategy import HardStrategy, GreedySequentialStrategy
         for i, p_type in enumerate(player_types):
@@ -251,50 +250,59 @@ class Game:
     
     def resolve_auctions_for_player(self, player: Player):
         """
-        Resolves all auctions listed by the given player that are due to end this turn.
-        This is called at the start of the player's turn.
+        Resolves auctions, now enforcing the capital cap and donating excess to the Rail Foundation.
         """
-        # We iterate backwards so we can safely remove items
+        eco_mod = self.mod_manager.available_mods.get('economic_mod')
+        if not eco_mod: return
+
         for i in range(len(self.live_auctions) - 1, -1, -1):
             auction = self.live_auctions[i]
             if auction['seller_id'] == player.player_id and auction['turn_of_resolution'] <= self.current_turn:
                 seller = self.players[auction['seller_id']]
+                seller_mod_data = seller.components.get('economic_mod')
+                if not seller_mod_data: continue
+
                 tile_type = self.tile_types[auction['tile_type_name']]
+                payout = 0
                 
-                # Case 1: No bids were placed
+                # Case 1: No bids
                 if not auction['bids']:
-                    eco_mod = self.mod_manager.available_mods['economic_mod']
                     market_price = eco_mod.get_market_price(self, tile_type)
                     scrapyard_yield = eco_mod.config.get("scrapyard_yield", 0.3)
                     payout = int(market_price * scrapyard_yield)
-                    
-                    seller.components['economic_mod']['capital'] += payout
-                    # Permanently remove tile from the game's total supply
                     self.deck_manager.initial_tile_counts[tile_type.name] -= 1
-                    
-                    # Notify seller
-                    message = f"Auction for {tile_type.name} received no bids. Sold to scrapyard for ${payout}."
-                    print(message) # In a real UI, this would be a pop-up
+                    print(f"Auction for {tile_type.name} received no bids. Defaulting to scrapyard for ${payout}.")
                 
-                # Case 2: Bids exist, find the winner
+                # Case 2: Bids exist
                 else:
                     winner_bid = max(auction['bids'], key=lambda b: b['amount'])
                     winner = self.players[winner_bid['bidder_id']]
-                    winning_price = winner_bid['amount']
+                    payout = winner_bid['amount']
 
-                    # Process transaction
-                    winner.components['economic_mod']['capital'] -= winning_price
+                    if len(winner.hand) >= self.HAND_TILE_LIMIT:
+                        winner.mailbox.append(tile_type)
+                        print(f"  Winner P{winner.player_id}'s hand is full. Tile sent to mailbox.")
+                    else:
+                        winner.hand.append(tile_type)
+
+                    winner.components['economic_mod']['capital'] -= payout
                     winner.hand.append(tile_type)
-                    seller.components['economic_mod']['capital'] += winning_price
-
-                    # Unfreeze capital for all bidders
+                    
                     for bid in auction['bids']:
-                        bidder = self.players[bid['bidder_id']]
-                        bidder.components['economic_mod']['frozen_capital'] -= bid['amount']
+                        self.players[bid['bidder_id']].components['economic_mod']['frozen_capital'] -= bid['amount']
+                    print(f"Auction for {tile_type.name} won by P{winner.player_id} for ${payout}.")
 
-                    # Notify involved parties
-                    print(f"Auction for {tile_type.name} won by P{winner.player_id} for ${winning_price}.")
+                # --- START OF CHANGE: Enforce capital cap and donate excess ---
+                current_capital = seller_mod_data.get('capital', 0)
+                max_capital = seller_mod_data.get('max_capital', 200)
                 
-                # Remove the auction from the live list
+                if current_capital + payout > max_capital:
+                    excess = (current_capital + payout) - max_capital
+                    self.rail_foundation_capital += excess
+                    seller_mod_data['capital'] = max_capital
+                    print(f"  Player {seller.player_id} reached max capital. ${excess} donated to the Rail Foundation.")
+                else:
+                    seller_mod_data['capital'] += payout
+                # --- END OF CHANGE ---
+                
                 self.live_auctions.pop(i)
-    # --- END OF CHANGE ---

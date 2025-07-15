@@ -70,8 +70,8 @@ class TileType:
 class PlacedTile:
     def __init__(self, tile_type: TileType, orientation: int = 0, is_terminal: bool = False):
         self.tile_type = tile_type
-        if orientation % 90 != 0:
-            raise ValueError(f"Orientation must be multiple of 90, got {orientation}")
+        # if orientation % 90 != 0:
+        #     raise ValueError(f"Orientation must be multiple of 90, got {orientation}")
         self.orientation = orientation % 360
         self.has_stop_sign: bool = False
         self.is_terminal: bool = is_terminal

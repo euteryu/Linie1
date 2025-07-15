@@ -1,6 +1,6 @@
 # mods/economic_mod/economic_mod.py
 import pygame
-from typing import TYPE_CHECKING, List, Dict, Any, Optional
+from typing import TYPE_CHECKING, List, Dict, Any, Optional, Set, Tuple
 from collections import Counter
 
 from tkinter import simpledialog, messagebox
@@ -69,9 +69,9 @@ class EconomicMod(IMod):
                 'max_capital': max_capital,
                 'sell_mode_active': False,
                 'influence': 0,
-                # --- START OF CHANGE: Initialize frozen capital tracker ---
-                'frozen_capital': 0
-                # --- END OF CHANGE ---
+                'frozen_capital': 0,
+                'consecutive_auctions': 0,
+                'auction_action_taken_this_turn': False
             }
         self.headline_manager = HeadlineManager()
         self.headline_manager.event_trigger_threshold = 2
@@ -85,11 +85,21 @@ class EconomicMod(IMod):
             pass
 
     def on_player_turn_end(self, game: 'Game', player: 'Player'):
-        """Players regenerate Capital at the end of their turn."""
+        """Players regenerate Capital and the auction streak is checked."""
         if self.mod_id in player.components:
-            capital_pool = player.components[self.mod_id]
+            mod_data = player.components[self.mod_id]
+            # Capital regen
             regen = self.config.get("capital_regen_per_turn", 5)
-            capital_pool['capital'] = min(capital_pool['max_capital'], capital_pool['capital'] + regen)
+            mod_data['capital'] = min(mod_data['max_capital'], mod_data['capital'] + regen)
+
+            # --- START OF CHANGE: Reset auction counter if no auction was made ---
+            if not mod_data.get('auction_action_taken_this_turn', False):
+                if mod_data['consecutive_auctions'] > 0:
+                    print(f"  Player {player.player_id}'s auction streak has been reset.")
+                mod_data['consecutive_auctions'] = 0
+            # Reset the temporary flag for the next turn
+            mod_data['auction_action_taken_this_turn'] = False
+            # --- END OF CHANGE ---
 
 
     def on_draw_ui_panel(self, screen: Any, visualizer: 'GameScene', current_game_state_name: str):
@@ -167,8 +177,9 @@ class EconomicMod(IMod):
             return True
 
         elif button_name == "auction_a_tile":
-            # This requires another transient state to select the tile from hand.
-            # We will implement this as a variation of the PaletteSelectionState.
+            if player.components[self.mod_id].get('consecutive_auctions', 0) >= 3:
+                messagebox.showwarning("Rule Limit", "You have auctioned tiles for 3 consecutive turns and cannot auction again this turn.")
+                return True # Handled by showing a message
             self._handle_auction_selection(game, player)
             return True
 
@@ -184,7 +195,13 @@ class EconomicMod(IMod):
                 min_bid = int(bid_str)
                 if min_bid <= 0: messagebox.showerror("Error", "Minimum bid must be a positive number."); scene.return_to_base_state(); return
                 command = AuctionTileCommand(game, player, self.mod_id, tile_to_auction, min_bid)
-                if not game.command_history.execute_command(command): messagebox.showerror("Error", "Could not auction tile.")
+                if game.command_history.execute_command(command):
+                    # --- START OF CHANGE: Increment counter on successful auction ---
+                    player.components[self.mod_id]['consecutive_auctions'] += 1
+                    player.components[self.mod_id]['auction_action_taken_this_turn'] = True
+                    # --- END OF CHANGE ---
+                else:
+                    messagebox.showerror("Error", "Could not auction tile.")
                 scene.return_to_base_state()
             except (ValueError, TypeError):
                 messagebox.showerror("Error", "Invalid input. Please enter a number.")
@@ -197,92 +214,173 @@ class EconomicMod(IMod):
 
 
     def plan_ai_turn(self, game: 'Game', player: 'AIPlayer', base_strategy: 'AIStrategy') -> Optional[List[PotentialAction]]:
-        """The Economic Mod's complete AI planning override."""
+        """
+        The Economic Mod's AI brain, now with a clear hierarchy of priorities.
+        It will always prefer to build its route over purely economic moves.
+        """
         print(f"  [{self.name} AI] Planning turn for Player {player.player_id}...")
         ideal_plan = base_strategy._calculate_ideal_route(game, player)
         target_squares = base_strategy._get_high_value_target_squares(game, player, ideal_plan)
         if len(target_squares) > C.MAX_TARGETS_FOR_COMBO_SEARCH:
             target_squares = base_strategy._prune_targets(game, player, target_squares, ideal_plan)
 
-        # 1. Gather all possible actions: standard and economic
-        all_actions = base_strategy._gather_standard_actions(game, player, ideal_plan, target_squares)
-        all_actions.extend(self._get_economic_actions(game, player, ideal_plan))
+        # 1. Gather all possible actions, separated by type
+        placements = base_strategy._gather_standard_actions(game, player, ideal_plan, target_squares)
+        economics = self._get_economic_actions(game, player, ideal_plan, target_squares, base_strategy)
+
+        # 2. Decision Hierarchy: Find the best plan based on clear priorities.
+        best_plan = None
         
-        if not all_actions: return []
+        # PRIORITY 1: The best plan is two standard placements.
+        if len(placements) >= 2:
+            best_plan = self._find_best_combo(placements, placements, base_strategy, game, player)
 
-        # 2. Separate actions by cost
-        one_action_moves = [a for a in all_actions if a.action_cost == 1]
-        two_action_moves = [a for a in all_actions if a.action_cost == 2]
-
-        # 3. Find the best possible 2-action turn by combining two 1-action moves
-        best_combo_score = -1.0; best_combo_plan = None
-        if len(one_action_moves) >= 2:
-            sorted_moves = sorted(one_action_moves, key=lambda a: a.score, reverse=True)[:10] # Prune to top 10
-            for i in range(len(sorted_moves)):
-                for j in range(i + 1, len(sorted_moves)):
-                    action1, action2 = sorted_moves[i], sorted_moves[j]
-                    if not base_strategy._is_combo_compatible(player, action1, action2): continue
-                    sim_game, sim_player = game.copy_for_simulation(), next(p for p in game.copy_for_simulation().players if p.player_id == player.player_id)
-                    base_strategy._apply_potential_action_to_sim(sim_game, sim_player, action1)
-                    # (Further simulation logic as before) ...
-                    combo_score = base_strategy._score_board_state(sim_game, sim_player) + action1.score + action2.score
-                    if combo_score > best_combo_score: best_combo_score, best_combo_plan = combo_score, [action1, action2]
-
-        # 4. Find the best possible 2-action turn from a single 2-action move
-        best_single_move_score = -1.0; best_single_move_plan = None
-        if two_action_moves:
-            best_2_action_move = max(two_action_moves, key=lambda a: a.score)
-            best_single_move_score, best_single_move_plan = best_2_action_move.score, [best_2_action_move]
-
-        # 5. Compare and decide the final plan
-        if best_combo_plan and best_combo_score > best_single_move_score: return best_combo_plan
-        elif best_single_move_plan: return best_single_move_plan
+        # PRIORITY 2: If a 2-placement plan isn't possible, try a 1-placement + 1-economic plan.
+        if placements and economics:
+            mixed_plan = self._find_best_combo(placements, economics, base_strategy, game, player)
+            # Only accept this mixed plan if it's better than the current best plan (if any)
+            if not best_plan or (mixed_plan and mixed_plan[0].score + mixed_plan[1].score > best_plan[0].score + best_plan[1].score):
+                best_plan = mixed_plan
         
-        return [] # Return empty to trigger fallback in AIPlayer
+        # PRIORITY 3: Only if no placements are possible, consider a purely economic turn.
+        if not placements and len(economics) >= 2:
+            print(f"  [{self.name} AI] No good placements found. Considering purely economic actions.")
+            best_plan = self._find_best_combo(economics, economics, base_strategy, game, player)
 
-    def _get_economic_actions(self, game: 'Game', player: 'AIPlayer', ideal_plan) -> List[PotentialAction]:
+        # Also consider single, high-value 2-action moves like Bribing
+        two_action_economics = [a for a in economics if a.action_cost == 2]
+        if two_action_economics:
+            best_2_action_move = max(two_action_economics, key=lambda a: a.score)
+            # Compare with the best combo plan found so far
+            current_best_score = best_plan[0].score + best_plan[1].score if best_plan else -1
+            if best_2_action_move.score > current_best_score:
+                best_plan = [best_2_action_move]
+
+        if best_plan:
+             print(f"  [{self.name} AI] Chose plan with score {sum(a.score for a in best_plan):.2f}")
+             return best_plan
+
+        return [] # Returning empty will trigger the robust fallback in AIPlayer
+
+    def _find_best_combo(self, list_a, list_b, base_strategy, game, player):
+        """Helper to find the best 2-action combo from two lists of actions."""
+        best_combo_score = -1.0
+        best_combo_plan = None
+        
+        # Ensure we don't check the same pair twice if lists are the same
+        is_same_list = (list_a is list_b)
+
+        for i, action1 in enumerate(list_a):
+            # If lists are the same, start inner loop from i+1 to avoid duplicates and identical pairs
+            start_j = i + 1 if is_same_list else 0
+            for j in range(start_j, len(list_b)):
+                action2 = list_b[j]
+
+                if not base_strategy._is_combo_compatible(player, action1, action2): continue
+                
+                sim_game = game.copy_for_simulation()
+                sim_player = next(p for p in sim_game.players if p.player_id == player.player_id)
+                base_strategy._apply_potential_action_to_sim(sim_game, sim_player, action1)
+                base_strategy._apply_potential_action_to_sim(sim_game, sim_player, action2)
+
+                # The score is a combination of the resulting board state and the inherent action scores
+                combo_score = base_strategy._score_board_state(sim_game, sim_player) + action1.score + action2.score
+                if combo_score > best_combo_score:
+                    best_combo_score = combo_score
+                    best_combo_plan = [action1, action2]
+        return best_combo_plan
+
+    def _get_economic_actions(self, game: 'Game', player: 'AIPlayer', ideal_plan: Optional[List['RouteStep']], target_squares: Set[Tuple[int, int]], base_strategy: 'AIStrategy') -> List[PotentialAction]:
+        """
+        Generates a list of all possible economic actions with intelligent, context-aware scoring.
+        """
         actions: List[PotentialAction] = []
         mod_data = player.components.get(self.mod_id)
-        if not mod_data: return []
-
-        # Guard clause to prevent TypeError if no path is found
-        if not ideal_plan:
-            return actions
+        if not mod_data:
+            return []
 
         capital = mod_data.get('capital', 0)
-        
-        # Action: Bribe Official (Cost: 2 actions)
-        bribe_cost = self.config.get("cost_bribe_official", 80)
-        path_cost = len(ideal_plan) if ideal_plan else 99
-        if capital >= bribe_cost and path_cost <= 5:
-             actions.append(PotentialAction(action_type='bribe_official', details={'cost': bribe_cost}, score=150.0, command_generator=lambda g,p,c=bribe_cost:BribeOfficialCommand(g,p,c,1,self.mod_id), action_cost=2))
-
-        # Action: Buy Permit (Cost: 1 action)
+        max_capital = self.config.get('max_capital', 200)
         permit_cost = self.config.get("cost_priority_requisition", 35)
-        if capital >= permit_cost and len(player.hand) < C.HAND_TILE_LIMIT:
-             permit = game.tile_types['Curve'].copy(); permit.is_requisition_permit = True
-             actions.append(PotentialAction(action_type='buy_permit', details={'cost': permit_cost}, score=50.0, command_generator=lambda g,p,c=permit_cost,t=permit:PriorityRequisitionCommand(g,p,c,self.mod_id,t), action_cost=1))
 
-        # Action: Sell/Auction Tile (Cost: 1 action)
+        # --- HEURISTIC 1: Capital Urgency Modifier ---
+        # The AI is more desperate for cash if it can't afford a permit.
+        capital_modifier = 4.0 if capital < permit_cost * 1.5 else 1.0
+
+        # --- HEURISTIC 2: Valuate Selling & Auctioning (with capital cap check) ---
         for tile in set(player.hand):
+            # A tile is "useless" if it has no valid placements on key squares.
+            sim_player_useless_check = player.copy()
+            sim_player_useless_check.hand = [tile]
+            is_useless = not base_strategy._gather_standard_actions(game, sim_player_useless_check, ideal_plan, target_squares)
+            useless_modifier = 4.0 if is_useless else 1.0
+            
             market_price = self.get_market_price(game, tile)
-            # Auction high-value tiles the AI doesn't immediately need
-            if not any(step.coord in base_strategy._get_high_value_target_squares(game, player, ideal_plan) for step in ideal_plan if ideal_plan) and market_price > 10:
-                min_bid = int(market_price * 0.4)
-                actions.append(PotentialAction(action_type='auction_tile', details={'tile':tile, 'min_bid':min_bid}, score=min_bid, command_generator=lambda g,p,t=tile,m=min_bid:AuctionTileCommand(g,p,self.mod_id,t,m), action_cost=1))
-            # Sell low-value tiles directly if low on cash
-            elif capital < permit_cost:
-                yield_ = int(market_price * self.config.get("scrapyard_yield", 0.3))
-                actions.append(PotentialAction(action_type='sell_tile', details={'tile':tile, 'reward':yield_}, score=yield_, command_generator=lambda g,p,t=tile,r=yield_:SellToScrapyardCommand(g,p,self.mod_id,t,r), action_cost=1))
+            
+            # ACTION: Sell to Scrapyard
+            scrapyard_yield = int(market_price * self.config.get("scrapyard_yield", 0.7))
+            if capital + scrapyard_yield <= max_capital:  # Check capital limit BEFORE generating the action
+                sell_score = scrapyard_yield * capital_modifier * useless_modifier
+                actions.append(PotentialAction(action_type='sell_tile', details={'tile': tile, 'reward': scrapyard_yield}, score=sell_score, command_generator=lambda g,p,t=tile,r=scrapyard_yield:SellToScrapyardCommand(g,p,self.mod_id,t,r), action_cost=1))
 
-        # Action: Bid on Auction (Cost: 1 action)
+            # ACTION: Auction a Tile (with spam prevention)
+            if mod_data.get('consecutive_auctions', 0) < 3:
+                min_bid = int(market_price * self.config.get("auction_min_bid_yield", 0.6))
+                auction_score = min_bid * capital_modifier * useless_modifier
+                actions.append(PotentialAction(action_type='auction_tile', details={'tile': tile, 'min_bid': min_bid}, score=auction_score, command_generator=lambda g,p,t=tile,m=min_bid:AuctionTileCommand(g,p,self.mod_id,t,m), action_cost=1))
+        
+        # --- HEURISTIC 3: Valuate Buying a Permit (Opportunity Cost) ---
+        if capital >= permit_cost and len(player.hand) < C.HAND_TILE_LIMIT:
+            best_potential_gain = 0
+            for tile_type in set(game.deck_manager.tile_draw_pile):
+                tile_market_price = self.get_market_price(game, tile_type)
+                total_cost = permit_cost + tile_market_price
+                if capital >= total_cost:
+                    sim_player_permit = player.copy()
+                    sim_player_permit.hand.append(tile_type)
+                    possible_placements = base_strategy._gather_standard_actions(game, sim_player_permit, ideal_plan, target_squares)
+                    if possible_placements:
+                        best_placement_score = max(p.score for p in possible_placements)
+                        net_gain = best_placement_score - total_cost
+                        if net_gain > best_potential_gain:
+                            best_potential_gain = net_gain
+            
+            if best_potential_gain > 0:
+                permit = game.tile_types['Curve'].copy(); permit.is_requisition_permit = True
+                actions.append(PotentialAction(action_type='buy_permit', details={'cost': permit_cost}, score=best_potential_gain, command_generator=lambda g,p,c=permit_cost,t=permit:PriorityRequisitionCommand(g,p,c,self.mod_id,t), action_cost=1))
+
+        # --- HEURISTIC 4: Valuate Bidding on an Auction (Strategic Value) ---
         for i, auction in enumerate(game.live_auctions):
-            if auction['seller_id'] == player.player_id: continue # Can't bid on own auction
+            if auction['seller_id'] == player.player_id: continue
+            
             tile_on_auction = game.tile_types[auction['tile_type_name']]
+            
+            # Check if the AI has a use for this tile
+            sim_player_bid_check = player.copy(); sim_player_bid_check.hand.append(tile_on_auction)
+            if not base_strategy._gather_standard_actions(game, sim_player_bid_check, ideal_plan, target_squares):
+                continue
+
             market_price = self.get_market_price(game, tile_on_auction)
-            my_bid = int(market_price * 0.6) # AI bids 60% of market value
-            if capital - mod_data.get('frozen_capital', 0) > my_bid:
-                 actions.append(PotentialAction(action_type='place_bid', details={'auction_index':i, 'amount':my_bid}, score=market_price*0.4, command_generator=lambda g,p,idx=i,amt=my_bid:PlaceBidCommand(g,p,self.mod_id,idx,amt), action_cost=1))
+            cost_via_permit = permit_cost + market_price
+            current_high_bid = max([b['amount'] for b in auction['bids']], default=auction['min_bid'])
+            
+            if cost_via_permit > current_high_bid: # Only bid if it's a good deal
+                savings = cost_via_permit - current_high_bid
+                my_bid = current_high_bid + int(savings * 0.7)
+                available_capital = capital - mod_data.get('frozen_capital', 0)
+                if available_capital >= my_bid:
+                    bid_score = savings  # The score IS the money saved
+                    actions.append(PotentialAction(action_type='place_bid', details={'auction_index':i, 'amount':my_bid}, score=bid_score, command_generator=lambda g,p,idx=i,amt=my_bid:PlaceBidCommand(g,p,self.mod_id,idx,amt), action_cost=1))
+
+        # --- HEURISTIC 5: Valuate Bribing for Influence ---
+        bribe_cost = self.config.get("cost_bribe_official", 80)
+        available_capital = capital - mod_data.get('frozen_capital', 0)
+        if available_capital >= bribe_cost:
+            path_cost = len(ideal_plan) if ideal_plan else 99
+            if path_cost <= 5: # Only consider bribing when close to winning
+                bribe_score = (100.0 / (path_cost + 1)) * 3
+                if bribe_score > 30:
+                     actions.append(PotentialAction(action_type='bribe_official', details={'cost': bribe_cost}, score=bribe_score, command_generator=lambda g,p,c=bribe_cost:BribeOfficialCommand(g,p,c,1,self.mod_id), action_cost=2))
 
         return actions
 

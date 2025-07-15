@@ -83,8 +83,12 @@ class AIStrategy(ABC):
                         breakdown['stop_creation'] = 150.0
                         break
         conn_score = sum(10.0 for d in Direction if game.board.get_tile(r + d.value[0], c + d.value[1]))
-        if conn_score > 0: score += conn_score; breakdown['connectivity'] = conn_score
-        if move_type == "exchange": score += 5.0; breakdown['exchange_bonus'] = 5.0
+        if conn_score > 0: 
+            score += conn_score
+            breakdown['connectivity'] = conn_score
+        if move_type == "exchange":
+            score += 15.0 # Was 5.0, now a much more significant bonus
+            breakdown['exchange_bonus'] = 15.0
         return score, breakdown
         
     def _apply_potential_action_to_sim(self, sim_game, sim_player, action: PotentialAction):

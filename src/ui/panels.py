@@ -140,8 +140,9 @@ class ButtonPanel(IUIComponent):
         btn_w, btn_h, btn_s = C.BUTTON_WIDTH, C.BUTTON_HEIGHT, C.BUTTON_SPACING
         btn_y = C.UI_PANEL_Y + C.UI_PANEL_HEIGHT - btn_h - C.BUTTON_MARGIN_Y
         btn_x_start = C.UI_PANEL_X + C.BUTTON_MARGIN_X
-        self.undo_rect = pygame.Rect(btn_x_start + 2 * (btn_w + btn_s), btn_y, btn_w, btn_h)
-        self.redo_rect = pygame.Rect(btn_x_start + 3 * (btn_w + btn_s), btn_y, btn_w, btn_h)
+        self.undo_rect = pygame.Rect(btn_x_start + (btn_w + btn_s), btn_y, btn_w, btn_h)
+        self.redo_rect = pygame.Rect(btn_x_start + 2 * (btn_w + btn_s), btn_y, btn_w, btn_h)
+        self.hint_rect = pygame.Rect(btn_x_start + 3 * (btn_w + btn_s), btn_y, btn_w, btn_h)
         self.debug_rect = pygame.Rect(C.DEBUG_BUTTON_X, C.DEBUG_BUTTON_Y, C.DEBUG_BUTTON_WIDTH, C.DEBUG_BUTTON_HEIGHT)
         heatmap_y = self.redo_rect.y - btn_h - btn_s
         self.heatmap_rect = pygame.Rect(btn_x_start, heatmap_y, btn_w * 2 + btn_s, btn_h)
@@ -149,6 +150,8 @@ class ButtonPanel(IUIComponent):
     def draw(self, game, current_state):
         self._draw_button(self.undo_rect, "Undo(Z)", game.command_history.can_undo())
         self._draw_button(self.redo_rect, "Redo(Y)", game.command_history.can_redo())
+        hint_on = current_state.scene.show_hint_path
+        self._draw_button(self.hint_rect, f"Hint: {'ON' if hint_on else 'OFF'}", True, active_color=self.theme["colors"]["positive"] if hint_on else self.theme["colors"]["accent"])
         debug_mode = current_state.scene.debug_mode
         self._draw_button(self.debug_rect, f"Debug: {'ON' if debug_mode else 'OFF'}", True, active_color=self.theme["colors"]["negative"] if debug_mode else self.theme["colors"]["accent"])
         heatmap_on = current_state.scene.show_ai_heatmap
@@ -159,6 +162,7 @@ class ButtonPanel(IUIComponent):
         mouse_pos = event.pos
         if self.undo_rect.collidepoint(mouse_pos): current_state.undo_action(); return True
         if self.redo_rect.collidepoint(mouse_pos): current_state.redo_action(); return True
+        if self.hint_rect.collidepoint(mouse_pos): current_state.toggle_hint_action(); return True
         if self.debug_rect.collidepoint(mouse_pos): current_state.toggle_debug_action(); return True
         if self.heatmap_rect.collidepoint(mouse_pos): current_state.toggle_heatmap_action(); return True
         return False

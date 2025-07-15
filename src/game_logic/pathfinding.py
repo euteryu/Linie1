@@ -110,7 +110,26 @@ class AStarPathfinder(Pathfinder):
             
             previous_target_node = full_node_sequence[current_state.seq_idx - 1] if current_state.seq_idx > 0 else None
             for successor_state in _get_valid_successors(game, current_state, full_node_sequence, previous_target_node):
-                new_cost = g_scores[current_state] + 1
+                # NEW to prioritise straight tiles
+                move_cost = 1
+                
+                # Calculate the "ideal" direction from the current node to the next goal
+                dy = next_goal_in_sequence[0] - current_pos[0]
+                dx = next_goal_in_sequence[1] - current_pos[1]
+                
+                # If the move's direction deviates from the most direct axis to the goal, penalize it.
+                # This encourages staying on a straight line towards the objective.
+                exit_dir = successor_state.arrival_dir
+                if abs(dx) > abs(dy): # Goal is primarily horizontal
+                    if exit_dir not in (Direction.E if dx > 0 else Direction.W,):
+                        move_cost += 1
+                else: # Goal is primarily vertical
+                    if exit_dir not in (Direction.S if dy > 0 else Direction.N,):
+                        move_cost += 1
+                
+                new_cost = g_scores[current_state] + move_cost
+                # END NEW
+                # new_cost = g_scores[current_state] + 1  # Commented out prev new_cost
                 if new_cost < g_scores.get(successor_state, float('inf')):
                     g_scores[successor_state], came_from[successor_state] = new_cost, current_state
                     f_score = new_cost + self._heuristic_sequential(successor_state.pos, successor_state.seq_idx, full_node_sequence)

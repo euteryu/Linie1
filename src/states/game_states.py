@@ -3,11 +3,11 @@ from __future__ import annotations
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 import pygame
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import simpledialog, messagebox, filedialog
 import copy
 
 # --- FIX: Import from new, correct locations ---
-from game_logic.commands import CombinedActionCommand, StageMoveCommand, UnstageAllCommand
+from game_logic.commands import CombinedActionCommand, StageMoveCommand, UnstageAllCommand, PlaceTileCommand, ExchangeTileCommand
 from common import constants as C
 from common.rendering_utils import get_font
 from game_logic.player import AIPlayer, HumanPlayer
@@ -132,9 +132,33 @@ class GameState:
             self.set_message("AI Heatmap OFF.")
             self.scene.heatmap_data = set()
 
+    def toggle_hint_action(self):
+        """Toggles the display of the ideal route hint."""
+        # The import must be absolute from the project's 'src' root.
+        from game_logic.ai_strategy import HardStrategy 
+        
+        self.scene.show_hint_path = not self.scene.show_hint_path
+        if self.scene.show_hint_path:
+            # Calculate the ideal route for the current player
+            player = self.game.get_active_player()
+            strategy = HardStrategy()
+            ideal_plan = strategy._calculate_ideal_route(self.game, player)
+            if ideal_plan:
+                # Store the coordinates of the path for the visualizer to draw
+                self.scene.hint_path_data = {step.coord for step in ideal_plan}
+                self.set_message("Hint Activated: Showing ideal route.")
+            else:
+                self.set_message("Hint: No valid route could be found.")
+                self.scene.hint_path_data = set()
+        else:
+            self.set_message("Hint Deactivated.")
+            self.scene.hint_path_data = set()
+
     def set_message(self, msg: str):
         if hasattr(self, 'message'): self.message = msg
         else: print(f"State Warning: Cannot set message '{msg}'")
+
+
 
 # --- Laying Track State ---
 class LayingTrackState(GameState):

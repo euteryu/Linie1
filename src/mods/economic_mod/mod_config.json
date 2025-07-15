@@ -10,22 +10,23 @@
     "cost_bribe_official": 80,
     "reward_influence_from_bribe": 1,
 
-    "cost_priority_requisition": 35,
-    "scrapyard_yield": 0.3,
+    "cost_priority_requisition": 25,
+    "scrapyard_yield": 0.6,
+    "auction_min_bid_yield": 0.7,
     "price_multiplier": 20,
 
     "tile_base_cost": {
-        "Straight": 1,
-        "Curve": 1,
-        "StraightLeftCurve": 1,
-        "StraightRightCurve": 1,
-        "DoubleCurveY": 1,
-        "DiagonalCurve": 1,
-        "Tree_JunctionTop": 2,
-        "Tree_JunctionRight": 2,
-        "Tree_Roundabout": 2,
-        "Tree_Crossroad": 2,
-        "Tree_StraightDiagonal1": 2,
-        "Tree_StraightDiagonal2": 2
+        "Straight": 10,
+        "Curve": 10,
+        "StraightLeftCurve": 10,
+        "StraightRightCurve": 10,
+        "DoubleCurveY": 10,
+        "DiagonalCurve": 10,
+        "Tree_JunctionTop": 20,
+        "Tree_JunctionRight": 20,
+        "Tree_Roundabout": 20,
+        "Tree_Crossroad": 20,
+        "Tree_StraightDiagonal1": 20,
+        "Tree_StraightDiagonal2": 20
     }
 }

@@ -1204,3 +1204,93 @@ Example Events to Implementing 3 categories:
 There are also "localised" events that are initiated to specific player(s) by other player(s), rather than global events that apply to all players equally like above 3 categories. These include sabotage, e.g. if player 1 is in driving mode, and player 2 sends a spy engineer over to their company in game narrative, then spy has chance to commit an action directed at player 1 (counting as a valid action for that turn) like "train blown up due to sabotage by unknown actors. if in driving phase train cannot move forward this turn - die roll is skipped." or "50 capital stolen by rogue accountant who absconded to unknown player's company". Player 1 may find out who unknown spy's organisation is if they have built a corporate intelligence division in their train company. Players may use capital to purchase and enhance R&D / intelligence centres, and they would also have a separate UI with a slot per "economic", "intelligence", "research" where they may swap out cards specific to their motivations from a range of cards they may collect / trade throughout game via surprise rewards unlocked for certain activities / bought via capital.
 
 i know these localised events features and UI elements - and related conditionals like building R&D centre / intelligence centre - is a lot to grasp right now, so for now focus on implementing in code just the base core mechanics of headline cards and just focus on economic events from the 3 categories for now. Also where in files to scalably store economic event cards (and associated data like headline news, for how many rounds active, numbers, etc.)?
+
+-------------
+
+2. Recommendations for Rebalancing
+
+You are right that this involves a degree of "finetuning trial-by-error," but it can be a systematic process, not just random guessing. The goal is to make the AI's scoring model better reflect the potential future value of an economic action.
+
+    Recommendation A: Make Capital More Powerful.
+    The quickest way to make economic actions matter is to increase their impact.
+
+        Increase Sell/Auction Yield: Drastically increase the scrapyard_yield in the config (e.g., to 0.6 or 0.7). Make the AI's starting bid percentage higher (e.g., 70% market value). If selling a tile gives the AI half the money it needs for a Permit, it becomes a much more attractive first move.
+
+        Decrease Permit Cost: You already raised it, but consider the opposite. A cheaper cost_priority_requisition (e.g., $20) makes the entire economic engine turn faster and makes accumulating that amount a more viable short-term goal.
+
+    Recommendation B: Implement Advanced Situational Heuristics.
+    This is where the real "intelligence" comes from. We need to teach the AI to ask better questions when it values an action. The _get_economic_actions method should be expanded with scoring logic based on these questions:
+
+        "How broke am I?" (Capital Urgency): If capital < permit_cost, multiply the score of any action that generates money by a large factor (e.g., 4x or 5x). This makes a poor AI desperate to sell.
+
+        "How useless is this tile in my hand?" (Hand Quality): Before scoring a "Sell" or "Auction" action for a tile, the AI should check: "Can I even place this tile anywhere useful?" If the tile has no valid moves on its high-value target squares, the score for getting rid of it should be massively boosted. It's not just selling a tile; it's freeing up a valuable hand slot.
+
+        "What is a Permit really worth?" (Opportunity Cost): This is the most important heuristic. The score for "Buy Permit" should not be a fixed number. It should be:
+        Score = (Best Possible Move Score with a new tile) - (Total cost of getting that tile)
+        The AI would need to do a quick simulation: "If I buy a permit, what's the best tile in the supply I could afford? If I had that tile, what's the best score I could get by placing it? Is that resulting score higher than the best score I can get with the tiles I have now?" This directly ties the investment to its potential payoff.
+
+3. The "Genetic Algorithm" Question: A Pragmatic Approach
+
+You are touching on a very advanced concept. Yes, top-tier game studios use machine learning techniques like genetic algorithms or reinforcement learning to have AIs play against each other millions of times to "evolve" the best set of weights and heuristics.
+
+For a project of this scale, that is massive overkill and incredibly complex to implement.
+
+The pragmatic and effective approach is Systematic Heuristic Tuning:
+
+    Define Clear Heuristics: Write down the strategic questions you want the AI to ask (like the three above).
+
+    Assign Initial Weights: Start with your best guess for the values and multipliers.
+
+    Run High-Speed, All-AI Simulations: Run the game without graphics in a simple loop for, say, 50 turns.
+
+    Log Extensively: Log every decision the AI makes and, crucially, why. Log the score breakdown for the action it chose and the top 2-3 actions it didn't choose.
+
+    Analyze and Tweak: Look at the logs. "Why did the AI sell a Tree tile here? Ah, the 'Capital Urgency' modifier was too high and overrode the 'Hand Quality' logic." Lower the weight for urgency, and re-run the simulation.
+
+This iterative loop of Simulate -> Analyze -> Tweak is the standard, effective way to balance complex AI in game development without diving into a full-blown machine learning Ph.D. It allows you to systematically "teach" your AI the strategic principles you want it to follow
+
+--------
+---------
+
+You've asked the million-dollar question of game design. Here's my advice on how to approach it systematically.
+
+**The Core Problem: Valuing Different Kinds of Actions**
+
+You are exactly right. "Placing a tile" is fundamentally different from "investing in a permit." The AI struggles because it's trying to compare a **certain, immediate** reward with a **potential, future** reward. The key to good AI is to teach it how to correctly price that "potential."
+
+**Recommendation 1: Embrace Asymmetric Valuation**
+
+Do not try to make all actions have perfectly balanced scores. Instead, make the AI's *valuation* of those scores change dramatically based on its situation. The code I provided begins to do this, but you can take it further.
+
+*   **Capital Urgency:** When capital is low, the desire for more capital should outweigh almost everything else. The `capital_modifier` is a good start. You could make it a curve instead of a flat multiplier (e.g., if capital is 10% of max, the modifier is 10x; if 50%, it's 1.5x).
+*   **Hand Urgency:** If the AI has a hand full of "useless" tiles, the score for any action that gets rid of one (Sell, Auction, Place) should get a massive bonus. This simulates the AI trying to "un-brick" its hand to draw better tiles.
+
+**Recommendation 2: Incentivize Auctions Through Exclusivity and Scarcity**
+
+Right now, an auction's only advantage is bypassing the permit fee. We can make it more powerful.
+
+*   **The "One of a Kind" Rule:** Consider this powerful new rule: **Any tile bought via a Permit is a "special order" and does NOT come from the main supply pile.** This means its `initial_supply` does not decrease. However, **tiles sold at auction DO come from a player's hand and thus represent a piece of the finite global supply.**
+*   **The Incentive:** This instantly makes auctions the *only* way to acquire a tile that is completely sold out from the main supply. If there are zero `Tree_Crossroad` tiles left in the draw pile, and a player auctions one, the AI should recognize this as an extremely rare opportunity and be willing to pay a massive premium. The `cost_via_permit` would effectively be infinite, making any bid a "good deal." This directly rewards players for paying attention to the market.
+
+**Recommendation 3: A Systematic Approach to Heuristic Tuning (The "Pragmatic Genetic Algorithm")**
+
+You don't need a true genetic algorithm. You can get 90% of the benefit with a systematic, human-driven approach.
+
+1.  **Isolate the Heuristics:** In the code, clearly define the variables for your multipliers and weights at the top of the `_get_economic_actions` method.
+    *   `CAPITAL_URGENCY_MULTIPLIER = 4.0`
+    *   `USELESS_TILE_MULTIPLIER = 4.0`
+    *   `BIDDING_AGGRESSION_FACTOR = 0.7` (the 70% of savings)
+    *   `BRIBE_URGENCY_THRESHOLD = 5` (the `path_cost` limit)
+
+2.  **Create "AI Personalities":** Create two or three different sets of these values.
+    *   **"The Miser":** Low `BIDDING_AGGRESSION`, high `CAPITAL_URGENCY`. This AI will sell often but rarely bid.
+    *   **"The Tycoon":** High `BIDDING_AGGRESSION`, low `CAPITAL_URGENCY`. This AI will spend freely to acquire what it wants.
+    *   **"The Politician":** High `BRIBE_URGENCY_THRESHOLD` and a high score weight for the bribe action. It will prioritize getting Influence points.
+
+3.  **Run Headless Simulations:** Set up your `main.py` so you can run a game without graphics. Have these different AI personalities play against each other 10-20 times.
+
+4.  **Log Key Metrics:** At the end of each simulated game, log the winner and key stats for each player: final capital, final influence, number of permits bought, number of auctions won, etc.
+
+5.  **Analyze and Iterate:** After a few dozen simulations, you will see clear patterns. "The Tycoon always wins," or "The Miser always goes bankrupt." This gives you concrete data. You can then take the best traits from each "personality" (e.g., the Tycoon's bidding logic combined with the Miser's tendency to sell useless tiles) to create a final, well-balanced master AI.
+
+This systematic approach is how professional game designers balance complex systems. It replaces guesswork with data-driven iteration and will allow you to create an AI that is both challenging and behaves in strategically interesting ways.

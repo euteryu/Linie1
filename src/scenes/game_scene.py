@@ -34,6 +34,9 @@ class GameScene(Scene):
         self.show_ai_heatmap = False
         self.heatmap_data: Set[tuple[int, int]] = set()
 
+        self.show_hint_path = False
+        self.hint_path_data: Set[Tuple[int, int]] = set()
+
         self.current_state: GameState = LayingTrackState(self)
         self.next_state_constructor: Optional[Callable] = None
         self.update_current_state_for_player()
@@ -193,6 +196,7 @@ class GameScene(Scene):
                     self.draw_live_preview(self.current_state.move_in_progress)
 
         self.draw_ai_heatmap()
+        self.draw_hint_path()
 
     def draw_staged_moves(self, staged_moves: List[Dict]):
         """Renders translucent previews of staged moves on the board with validity indicators."""
@@ -265,6 +269,25 @@ class GameScene(Scene):
             screen_x = C.BOARD_X_OFFSET + (c - C.PLAYABLE_COLS[0]) * self.TILE_SIZE
             screen_y = C.BOARD_Y_OFFSET + (r - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE
             rect = pygame.Rect(screen_x, screen_y, self.TILE_SIZE, self.TILE_SIZE)
+            temp_surf = pygame.Surface(rect.size, pygame.SRCALPHA)
+            temp_surf.fill(highlight_color)
+            self.screen.blit(temp_surf, rect.topleft)
+            pygame.draw.rect(self.screen, border_color, rect, 2)
+
+    def draw_hint_path(self):
+        """Draws a highlight over the squares of the ideal hint path."""
+        if not self.show_hint_path or not self.hint_path_data: return
+        
+        highlight_color = (0, 100, 255, 90) # A nice blue for the hint
+        border_color = (100, 150, 255)
+
+        for r, c in self.hint_path_data:
+            if not self.game.board.is_valid_coordinate(r, c): continue
+            
+            screen_x = C.BOARD_X_OFFSET + (c - C.PLAYABLE_COLS[0]) * self.TILE_SIZE
+            screen_y = C.BOARD_Y_OFFSET + (r - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE
+            rect = pygame.Rect(screen_x, screen_y, self.TILE_SIZE, self.TILE_SIZE)
+            
             temp_surf = pygame.Surface(rect.size, pygame.SRCALPHA)
             temp_surf.fill(highlight_color)
             self.screen.blit(temp_surf, rect.topleft)

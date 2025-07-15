@@ -192,8 +192,12 @@ class RuleEngine:
             return has_ns_straight(tile_conns) and entry_direction in [Direction.N, Direction.S]
 
     def can_player_make_any_move(self, game: 'Game', player: 'Player') -> bool:
-        """Performs an exhaustive check to see if a player has any possible legal move."""
+        """
+        Performs an exhaustive check to see if a player has any possible legal move.
+        This now also checks all economic actions available from mods.
+        """
         print(f"--- Performing exhaustive move check for Player {player.player_id}... ---")
+        # Check for standard placement/exchange moves
         for tile in set(player.hand):
             for r in range(game.board.rows):
                 for c in range(game.board.cols):
@@ -204,5 +208,12 @@ class RuleEngine:
                         if self.check_exchange_validity(game, player, tile, o, r, c)[0]:
                             print(f"  (Found possible move: Exchange for {tile.name} at ({r},{c}))")
                             return True
+
+        # Ask the mod manager if any mod provides a valid action for the AI
+        if player.is_ai and game.mod_manager.on_ai_plan_turn(game, player, player.strategy):
+            print("  (Found possible economic moves provided by a mod.)")
+            return True
+        
+
         print("  (No possible moves found for this player.)")
         return False

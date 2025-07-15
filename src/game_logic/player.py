@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Tuple, Optional, NamedTuple, TYPE_CHECKING
 import pygame
 
+import copy
+
 if TYPE_CHECKING:
     from .game import Game
     from ..common.sound_manager import SoundManager
@@ -25,12 +27,11 @@ class RouteStep(NamedTuple):
 
 
 class Player(ABC):
-    # This base class is correct and does not need changes.
-    # ...
     def __init__(self, player_id: int, difficulty_mode: str):
         self.player_id = player_id
         self.difficulty_mode = difficulty_mode
         self.hand: List[TileType] = []
+        self.mailbox: List[TileType] = []
         self.line_card: Optional[LineCard] = None
         self.route_card: Optional[RouteCard] = None
         self.player_state: PlayerState = PlayerState.LAYING_TRACK
@@ -40,8 +41,14 @@ class Player(ABC):
         self.start_terminal_coord: Optional[Tuple[int, int]] = None
         self.validated_route: Optional[List[RouteStep]] = None
 
+    @property
     @abstractmethod
-    def handle_turn_logic(self, game: Game):
+    def is_ai(self) -> bool:
+        """Returns True if the player is an AI, False otherwise."""
+        pass
+
+    @abstractmethod
+    def handle_turn_logic(self, game: Game, visualizer: Optional['GameScene'], sounds: Optional['SoundManager']):
         """The main entry point for a player's turn-based logic."""
         pass
     @property
@@ -59,11 +66,13 @@ class Player(ABC):
         if self.validated_route:
             validated_route_data = [{"coord": s.coord, "is_goal": s.is_goal_node, "arrival_dir": s.arrival_direction.name if s.arrival_direction else None} for s in self.validated_route]
         data = { "player_id": self.player_id, "is_ai": isinstance(self, AIPlayer), "hand": [t.name for t in self.hand], "line_card": self.line_card.line_number if self.line_card else None, "route_card": {"stops": self.route_card.stops, "variant": self.route_card.variant_index} if self.route_card else None, "player_state": self.player_state.name, "streetcar_path_index": self.streetcar_path_index, "required_node_index": self.required_node_index, "start_terminal_coord": self.start_terminal_coord, "validated_route": validated_route_data, }
+        data['mailbox'] = [t.name for t in self.mailbox]
         if isinstance(self, AIPlayer):
             data['strategy'] = 'hard' if isinstance(self.strategy, HardStrategy) else 'easy'
         data['difficulty_mode'] = self.difficulty_mode
         data['components'] = self.components
         return data
+
     @staticmethod
     def from_dict(data: Dict, tile_types: Dict[str, 'TileType']) -> 'Player':
         is_ai = data.get("is_ai", False)
@@ -85,8 +94,10 @@ class Player(ABC):
         player.start_terminal_coord = tuple(start_coord_data) if start_coord_data else None
         if (route_data := data.get("validated_route")):
             player.validated_route = [RouteStep( coord=tuple(s["coord"]), is_goal_node=s["is_goal"], arrival_direction=Direction[s["arrival_dir"]] if s["arrival_dir"] else None ) for s in route_data]
+        player.mailbox = [tile_types[name] for name in data.get("mailbox", [])]
         player.components = data.get('components', {})
         return player
+
     def get_required_stop_coords(self, game: 'Game') -> Optional[List[Tuple[int, int]]]:
         if not self.route_card: return []
         stop_coords = []
@@ -103,9 +114,20 @@ class Player(ABC):
         end_terminal = term2 if self.start_terminal_coord == term1 else term1
         return [self.start_terminal_coord] + stop_coords + [end_terminal]
 
+    def copy(self) -> 'Player':
+        """Creates a copy of the player for simulation. The hand must be deep-copied."""
+        new_player = copy.copy(self)
+        new_player.hand = copy.deepcopy(self.hand)
+        return new_player
+
+
+
 class HumanPlayer(Player):
     def __init__(self, player_id: int, difficulty_mode: str):
         super().__init__(player_id, difficulty_mode)
+    @property
+    def is_ai(self) -> bool:
+        return False
     def handle_turn_logic(self, game, visualizer, sounds):
         pass
 
@@ -115,10 +137,23 @@ class AIPlayer(Player):
         super().__init__(player_id, difficulty_mode)
         self.strategy = strategy
 
+    @property
+    def is_ai(self) -> bool:
+        return True
+
     def handle_turn_logic(self, game: 'Game', visualizer: Optional['GameScene'] = None, sounds: Optional['SoundManager'] = None):
         if game.game_phase == GamePhase.GAME_OVER: return
         if self.player_state == PlayerState.LAYING_TRACK:
             print(f"\n--- AI Player {self.player_id} ({self.strategy.__class__.__name__}) is thinking...")
+
+            # Before any planning, we perform the definitive check to see if the player is stuck.
+            if not game.rule_engine.can_player_make_any_move(game, self):
+                print(f"--- Player {self.player_id} has no more legal moves and is ELIMINATED! ---")
+                if sounds: sounds.play('eliminated')
+                game.eliminate_player(self)
+                pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'ai_eliminated'}))
+                return # Stop processing the turn for this player
+
             final_plan: List[PotentialAction] = []
             mod_plan = game.mod_manager.on_ai_plan_turn(game, self, self.strategy)
             if mod_plan is not None:

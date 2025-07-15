@@ -54,11 +54,12 @@ class App:
             self.current_scene = self.scenes[scene_name]
             print(f"Switching to scene: {scene_name}")
 
-            # --- START OF FIX: This logic is now removed. ---
-            # The initial AI turn trigger is now handled in the App.run() method
-            # to prevent a premature turn skip.
-            # --- END OF FIX ---
-            
+            if scene_name == "GAME":
+                from game_logic.player import AIPlayer
+                active_player = self.game_instance.get_active_player()
+                if isinstance(active_player, AIPlayer) and self.game_instance.actions_taken_this_turn == 0:
+                    print(f"Resuming/Starting AI Player {active_player.player_id}'s turn.")
+                    active_player.handle_turn_logic(self.game_instance, self.scenes["GAME"], self.sounds)
         else:
             print(f"Warning: Scene '{scene_name}' not found.")
 
@@ -68,16 +69,13 @@ class App:
             theme_path = os.path.join(self.root_dir, 'src', 'assets', 'themes', theme_file)
             with open(theme_path, 'r') as f:
                 self.theme = json.load(f)
-            print(f"Theme '{theme_file}' loaded successfully.")
-
+            
             self.scenes["MAIN_MENU"] = MainMenuScene(self)
             self.scenes["GAME"] = GameScene(self, self.game_instance, self.sounds, self.mod_manager)
             self.scenes["SETTINGS"] = SettingsScene(self)
             
             self.game_instance.visualizer = self.scenes["GAME"]
-
         except FileNotFoundError:
-            print(f"ERROR: Theme file '{theme_file}' not found.")
             default_theme_path = os.path.join(self.root_dir, 'src', 'assets', 'themes', 'ui_theme_dark.json')
             with open(default_theme_path, 'r') as f:
                 self.theme = json.load(f)
@@ -96,7 +94,6 @@ class App:
             title="Load Game", filetypes=[("Linie 1 Saves", "*.json")]
         )
         if filepath:
-            # Re-create the mod manager to ensure a clean state before loading
             self.mod_manager = ModManager()
             loaded_game = Game.load_game(filepath, self.game_instance.tile_types, self.mod_manager)
             if loaded_game:
@@ -105,36 +102,29 @@ class App:
                 self.game_instance.visualizer = self.scenes["GAME"]
                 self.go_to_scene("GAME")
 
-                # After loading, if it's an AI's turn, we need to kick-start it.
-                from game_logic.player import AIPlayer
-                active_player = self.game_instance.get_active_player()
-                if isinstance(active_player, AIPlayer) and self.game_instance.actions_taken_this_turn == 0:
-                     active_player.handle_turn_logic(self.game_instance, self.scenes["GAME"], self.sounds)
-
-
+    # --- START OF CHANGE: The run method is the primary fix ---
     def run(self):
         self.sounds.load_sounds()
         self.sounds.play_music('main_theme')
         
-        # --- START OF FIX: Initial AI Turn Trigger ---
-        # A flag to ensure we only do this once per game instance.
+        # This flag must be declared OUTSIDE the loop to maintain its state.
         initial_ai_turn_triggered = False
-        # --- END OF FIX ---
         
         while True:
-            dt = self.clock.tick(C.FPS) / 1000.0
-            events = pygame.event.get()
-
-            # --- START OF FIX: New logic for initial AI turn ---
+            # This check is now safe because the flag has the correct scope.
             if self.current_scene == self.scenes["GAME"] and not initial_ai_turn_triggered:
+                # This logic is only for the very first turn of the game.
+                # Subsequent resumes are handled by go_to_scene.
                 from game_logic.player import AIPlayer
                 active_player = self.game_instance.get_active_player()
-                # If the very first player of the game is an AI, call their logic directly.
                 if self.game_instance.current_turn == 1 and isinstance(active_player, AIPlayer):
                     print("First player is an AI, triggering their turn directly.")
                     active_player.handle_turn_logic(self.game_instance, self.scenes["GAME"], self.sounds)
-                initial_ai_turn_triggered = True # Prevent this block from ever running again
-            # --- END OF FIX ---
+                # Set the flag to true to prevent this block from ever running again
+                initial_ai_turn_triggered = True
+            
+            dt = self.clock.tick(C.FPS) / 1000.0
+            events = pygame.event.get()
             
             for event in events:
                 if event.type == pygame.QUIT:
@@ -146,3 +136,4 @@ class App:
             self.current_scene.draw(self.screen)
             
             pygame.display.flip()
+    # --- END OF CHANGE ---

@@ -280,6 +280,10 @@ class PlaceBidCommand(Command):
         if self.game.actions_taken_this_turn >= self.game.MAX_PLAYER_ACTIONS: return False
         if not (0 <= self.auction_index < len(self.game.live_auctions)): return False
         
+        mod_data = self.player.components.get(self.mod_id)
+        if not mod_data or mod_data.get('consecutive_auctions', 0) >= 3:
+            return False
+
         capital_pool = self.player.components.get(self.mod_id)
         if not capital_pool: return False
         
@@ -290,16 +294,22 @@ class PlaceBidCommand(Command):
         
         # Check if bid is high enough
         current_high_bid = max([b['amount'] for b in auction['bids']], default=auction['min_bid'])
-        if self.bid_amount < current_high_bid: return False
+        # Allow bidding equal to the minimum, but must be greater than existing high bid
+        if self.bid_amount < auction['min_bid'] or (auction['bids'] and self.bid_amount <= current_high_bid):
+            return False
         
-        # Freeze capital
         capital_pool['frozen_capital'] = capital_pool.get('frozen_capital', 0) + self.bid_amount
-        
-        # Place bid
         auction['bids'].append({'bidder_id': self.player.player_id, 'amount': self.bid_amount})
         
         self.game.actions_taken_this_turn += 1
         self._executed = True
+
+        mod_data['consecutive_auctions'] += 1
+        mod_data['auction_action_taken_this_turn'] = True
+        print(f"  Player {self.player.player_id} auction streak is now {mod_data['consecutive_auctions']}.")
+
+        if self.game.visualizer and self.game.visualizer.sounds:
+            self.game.visualizer.sounds.play('auction_new_item')
         return True
 
     def undo(self) -> bool:
@@ -312,8 +322,10 @@ class PlaceBidCommand(Command):
         auction['bids'] = [b for b in auction['bids'] if b['bidder_id'] != self.player.player_id]
         
         self.game.actions_taken_this_turn -= 1
+
+        if mod_data := self.player.components.get(self.mod_id):
+            mod_data['consecutive_auctions'] -= 1
         return True
 
     def get_description(self) -> str:
         return f"Bid ${self.bid_amount} on auction"
-# --- END OF CHANGE ---
