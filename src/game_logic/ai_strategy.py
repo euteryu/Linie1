@@ -26,7 +26,7 @@ class AIStrategy(ABC):
     def _calculate_ideal_route(self, game: 'Game', player: 'Player') -> Optional[List['RouteStep']]:
         """Calculates the theoretical best path for a player."""
         if not player.line_card or not player.route_card: return None
-        stops = player.get_required_stop_coords(game)
+        stops = player.get_hypothetical_stop_coords(game)
         if stops is None: return None
         t1, t2 = game.get_terminal_coords(player.line_card.line_number)
         if not t1 or not t2: return None

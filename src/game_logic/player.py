@@ -100,8 +100,27 @@ class Player(ABC):
 
     def get_required_stop_coords(self, game: 'Game') -> Optional[List[Tuple[int, int]]]:
         """
-        Gets the coordinates of the required buildings from the player's route card.
-        This now correctly looks up the building locations themselves.
+        Gets the coordinates of the ACTUAL, PLACED STOP SIGNS required by the player's
+        route card. This is used for official route validation.
+        Returns None if not all stops have been created yet.
+        """
+        if not self.route_card:
+            return []
+        
+        stop_coords = []
+        for stop_id in self.route_card.stops:
+            # This MUST check the dictionary of activated stop signs.
+            if coord := game.board.building_stop_locations.get(stop_id):
+                stop_coords.append(coord)
+            else:
+                # If any required stop sign doesn't exist, the route is not complete.
+                return None
+        return stop_coords
+
+    def get_hypothetical_stop_coords(self, game: 'Game') -> Optional[List[Tuple[int, int]]]:
+        """
+        Gets the coordinates of the required BUILDINGS from the player's route card.
+        This is used for AI and Hint pathfinding before stops are placed.
         """
         if not self.route_card:
             return []
@@ -111,11 +130,11 @@ class Player(ABC):
             if coord := game.board.building_coords.get(stop_id):
                 stop_coords.append(coord)
             else:
-                print(f"ERROR: Building ID '{stop_id}' from Route Card not found in board constants.")
-                return None
+                return None # The route is impossible to calculate.
         return stop_coords
 
     def get_full_driving_sequence(self, game: 'Game') -> Optional[List[Tuple[int, int]]]:
+        # This function is used AFTER a route is validated, so it should use the official method.
         if not self.line_card or not self.start_terminal_coord: return None
         stop_coords = self.get_required_stop_coords(game)
         if stop_coords is None: return None
@@ -163,18 +182,18 @@ class AIPlayer(Player):
 
     def handle_turn_logic(self, game: 'Game', visualizer: Optional['GameScene'] = None, sounds: Optional['SoundManager'] = None):
         if game.game_phase == GamePhase.GAME_OVER: return
-        if self.player_state == PlayerState.LAYING_TRACK:
-            print(f"\n--- AI Player {self.player_id} ({self.strategy.__class__.__name__}) is thinking...")
 
-            # Before any planning, we perform the definitive check to see if the player is stuck.
+        if self.player_state == PlayerState.LAYING_TRACK:
             if not game.rule_engine.can_player_make_any_move(game, self):
                 print(f"--- Player {self.player_id} has no more legal moves and is ELIMINATED! ---")
                 if sounds: sounds.play('eliminated')
                 game.eliminate_player(self)
                 pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'ai_eliminated'}))
-                return # Stop processing the turn for this player
-
+                return
+            
+            print(f"\n--- AI Player {self.player_id} ({self.strategy.__class__.__name__}) is thinking...")
             final_plan: List[PotentialAction] = []
+            
             mod_plan = game.mod_manager.on_ai_plan_turn(game, self, self.strategy)
             if mod_plan is not None:
                 final_plan = mod_plan
@@ -182,39 +201,40 @@ class AIPlayer(Player):
                 print(f"No mod override for AI planning. Using default strategy: {self.strategy.__class__.__name__}")
                 final_plan = self.strategy.plan_turn(game, self)
             
-            # --- START OF CHANGE: The new fallback logic ---
-            if len(final_plan) < game.MAX_PLAYER_ACTIONS:
-                print("Primary strategy failed to find a 2-action plan. Attempting fallback.")
+            if not final_plan:
+                print("Primary strategy failed to find a plan. Attempting fallback.")
                 fallback_strategy = GreedySequentialStrategy()
                 final_plan = fallback_strategy.plan_turn(game, self)
-            # --- END OF CHANGE ---
 
-            if len(final_plan) >= game.MAX_PLAYER_ACTIONS:
-                print(f"  AI committing its plan...")
+            total_action_cost = sum(action.action_cost for action in final_plan)
+            
+            if total_action_cost >= game.MAX_PLAYER_ACTIONS:
+                print(f"  AI committing its plan with a total cost of {total_action_cost} actions...")
                 if visualizer:
                     visualizer.force_redraw("AI committing moves...")
                     pygame.time.delay(C.AI_MOVE_DELAY_MS)
+                
                 for action in final_plan:
                     command_to_run = action.command_generator(game, self)
                     game.command_history.execute_command(command_to_run)
+                
                 pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'ai_actions_committed'}))
             else:
                 print(f"--- AI Player {self.player_id} could not find any valid moves after fallback. Forfeiting turn. ---")
                 if sounds: sounds.play('eliminated')
                 game.eliminate_player(self)
                 pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'ai_forfeit'}))
-        
+
         elif self.player_state == PlayerState.DRIVING:
             print(f"--- AI Player {self.player_id} is in DRIVING phase. ---")
             
-            # 1. Check if a mod wants to handle driving (like the economic mod with influence)
             was_handled_by_mod = game.mod_manager.on_ai_driving_turn(game, self)
 
-            # 2. If no mod took over, execute default driving logic
             if not was_handled_by_mod:
                 print("  No mod override for driving. Performing standard roll.")
-                if visualizer: visualizer.force_redraw("AI Rolling...")
-                pygame.time.delay(C.AI_MOVE_DELAY_MS)
+                if visualizer:
+                    visualizer.force_redraw("AI Rolling...")
+                    pygame.time.delay(C.AI_MOVE_DELAY_MS)
                 roll_result = game.deck_manager.roll_special_die()
                 print(f"  AI rolled a '{roll_result}'.")
                 game.attempt_driving_move(self, roll_result, end_turn=True)

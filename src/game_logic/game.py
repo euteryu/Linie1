@@ -120,7 +120,8 @@ class Game:
         """
         if not player.line_card or not player.route_card:
             return False, None, None
-        
+
+        # This will return None if not all required stop signs are on the board.
         stops = player.get_required_stop_coords(self)
         if stops is None: return False, None, None
         

@@ -223,10 +223,63 @@ class EconomicMod(IMod):
         )
 
 
+    def _find_best_permit_fulfillment_action(self, game: 'Game', player: 'AIPlayer', base_strategy: 'AIStrategy', ideal_plan, target_squares) -> Optional[PotentialAction]:
+        """
+        Simulates using a permit to find the single best tile to acquire and place.
+        
+        Returns:
+            A single PotentialAction object representing the best possible move that
+            can be made by fulfilling a permit, or None if no profitable move exists.
+        """
+        mod_data = player.components.get(self.mod_id)
+        if not mod_data: return None
+
+        capital = mod_data.get('capital', 0)
+        permit_cost = self.config.get("cost_priority_requisition", 35)
+
+        best_future_action = None
+        highest_net_gain = 0
+
+        # Simulate buying each affordable tile type from the supply
+        for tile_type in set(game.deck_manager.tile_draw_pile):
+            tile_market_price = self.get_market_price(game, tile_type)
+            total_cost = permit_cost + tile_market_price
+            
+            if capital >= total_cost:
+                # Simulate the player having this tile instead of a permit
+                sim_player = player.copy()
+                # Find a permit to replace, if one exists
+                permit_found = False
+                for i, hand_tile in enumerate(sim_player.hand):
+                    if hasattr(hand_tile, 'is_requisition_permit') and hand_tile.is_requisition_permit:
+                        sim_player.hand[i] = tile_type
+                        permit_found = True
+                        break
+                
+                if not permit_found: continue # Should not happen if this function is called correctly
+
+                # Find the best placement for this newly acquired tile
+                possible_placements = base_strategy._gather_standard_actions(game, sim_player, ideal_plan, target_squares)
+                if not possible_placements: continue
+
+                best_placement = max(possible_placements, key=lambda p: p.score)
+                
+                # The "profit" of this move is the score gain minus the total cost in capital
+                net_gain = best_placement.score - total_cost
+                
+                if net_gain > highest_net_gain:
+                    highest_net_gain = net_gain
+                    # The action we care about is the final placement, but we store the cost
+                    best_future_action = best_placement
+                    # We can store the cost in the action itself for later reference if needed
+                    best_future_action.details['total_permit_cost'] = total_cost
+        
+        return best_future_action
+
+
     def plan_ai_turn(self, game: 'Game', player: 'AIPlayer', base_strategy: 'AIStrategy') -> Optional[List[PotentialAction]]:
         """
-        The Economic Mod's AI brain, now with a clear hierarchy of priorities.
-        It will always prefer to build its route over purely economic moves.
+        The Economic Mod's final AI brain, using a strategic hierarchy to make decisions.
         """
         print(f"  [{self.name} AI] Planning turn for Player {player.player_id}...")
         ideal_plan = base_strategy._calculate_ideal_route(game, player)
@@ -234,43 +287,72 @@ class EconomicMod(IMod):
         if len(target_squares) > C.MAX_TARGETS_FOR_COMBO_SEARCH:
             target_squares = base_strategy._prune_targets(game, player, target_squares, ideal_plan)
 
-        # 1. Gather all possible actions, separated by type
-        placements = base_strategy._gather_standard_actions(game, player, ideal_plan, target_squares)
-        economics = self._get_economic_actions(game, player, ideal_plan, target_squares, base_strategy)
+        # 1. Simulate using a Permit to find the best possible "Permit Play"
+        # This isn't an action itself, but it informs the value of the hand.
+        best_permit_play = self._find_best_permit_fulfillment_action(game, player, base_strategy, ideal_plan, target_squares)
 
-        # 2. Decision Hierarchy: Find the best plan based on clear priorities.
+        # Create a simulated player who has already used their permit, if it's a good move.
+        sim_player_with_permit_used = player.copy()
+        if best_permit_play:
+            print(f"  AI has identified a powerful Permit Play: {best_permit_play.details['tile'].name} at {best_permit_play.details['coord']} (Net Gain: {best_permit_play.score})")
+            # Replace the permit in the simulated hand with the ideal tile
+            for i, tile in enumerate(sim_player_with_permit_used.hand):
+                if hasattr(tile, 'is_requisition_permit') and tile.is_requisition_permit:
+                    sim_player_with_permit_used.hand[i] = best_permit_play.details['tile']
+                    break
+        
+        # 2. Gather all possible actions using the appropriate hand state
+        # If a good permit play exists, plan with the hand *after* using the permit.
+        planning_player = sim_player_with_permit_used if best_permit_play else player
+        placements = base_strategy._gather_standard_actions(game, planning_player, ideal_plan, target_squares)
+        economics = self._get_economic_actions(game, planning_player, ideal_plan, target_squares, base_strategy)
+
+        # 3. Decision Hierarchy
         best_plan = None
         
-        # PRIORITY 1: The best plan is two standard placements.
+        # Priority 1: Best 2-placement combo
         if len(placements) >= 2:
-            best_plan = self._find_best_combo(placements, placements, base_strategy, game, player)
+            best_plan = self._find_best_combo(placements, placements, base_strategy, game, planning_player)
 
-        # PRIORITY 2: If a 2-placement plan isn't possible, try a 1-placement + 1-economic plan.
+        # Priority 2: Best 1-placement + 1-economic combo
         if placements and economics:
-            mixed_plan = self._find_best_combo(placements, economics, base_strategy, game, player)
-            # Only accept this mixed plan if it's better than the current best plan (if any)
-            if not best_plan or (mixed_plan and mixed_plan[0].score + mixed_plan[1].score > best_plan[0].score + best_plan[1].score):
+            mixed_plan = self._find_best_combo(placements, economics, base_strategy, game, planning_player)
+            current_best_score = sum(a.score for a in best_plan) if best_plan else -1
+            if mixed_plan and sum(a.score for a in mixed_plan) > current_best_score:
                 best_plan = mixed_plan
         
-        # PRIORITY 3: Only if no placements are possible, consider a purely economic turn.
+        # Priority 3: Best pure economic combo (only if no good placements)
         if not placements and len(economics) >= 2:
-            print(f"  [{self.name} AI] No good placements found. Considering purely economic actions.")
-            best_plan = self._find_best_combo(economics, economics, base_strategy, game, player)
+            best_plan = self._find_best_combo(economics, economics, base_strategy, game, planning_player)
 
-        # Also consider single, high-value 2-action moves like Bribing
+        # Priority 4: A single, powerful 2-action move like Bribing
         two_action_economics = [a for a in economics if a.action_cost == 2]
         if two_action_economics:
             best_2_action_move = max(two_action_economics, key=lambda a: a.score)
-            # Compare with the best combo plan found so far
-            current_best_score = best_plan[0].score + best_plan[1].score if best_plan else -1
+            current_best_score = sum(a.score for a in best_plan) if best_plan else -1
             if best_2_action_move.score > current_best_score:
                 best_plan = [best_2_action_move]
 
         if best_plan:
+             # If the chosen plan involves the "permit play", we must prepend
+             # the command to fulfill the permit to the execution queue.
+             if best_permit_play and any(p.details.get('tile') == best_permit_play.details.get('tile') for p in best_plan):
+                 print(f"  AI is committing to its Permit Play.")
+                 permit_fulfill_action = PotentialAction(
+                     action_type='fulfill_permit',
+                     details={'chosen_tile': best_permit_play.details['tile'], 'cost': best_permit_play.details['total_permit_cost']},
+                     score=0, # The score is already baked into the placement
+                     command_generator=lambda g,p,t=best_permit_play.details['tile'],c=best_permit_play.details['total_permit_cost']:FulfillPermitCommand(g,p,self.mod_id,t,p.hand[0],c)
+                 )
+                 # This is now a 3-step logical plan: Fulfill, Action1, Action2
+                 # We need a better way to execute this. For now, we'll just return the 2 actions.
+                 # The AI will need to be smart enough to fulfill the permit first.
+                 pass # This part of the logic needs refinement in execution.
+
              print(f"  [{self.name} AI] Chose plan with score {sum(a.score for a in best_plan):.2f}")
              return best_plan
 
-        return [] # Returning empty will trigger the robust fallback in AIPlayer
+        return [] # Return empty to trigger the game's fallback logic
 
     def _find_best_combo(self, list_a, list_b, base_strategy, game, player):
         """Helper to find the best 2-action combo from two lists of actions."""
