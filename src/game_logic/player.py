@@ -133,13 +133,23 @@ class Player(ABC):
 
 
 class HumanPlayer(Player):
-    def __init__(self, player_id: int, difficulty_mode: str):
-        super().__init__(player_id, difficulty_mode)
+    def __init__(self, player_id: int, difficulty_mode: str): super().__init__(player_id, difficulty_mode)
+    
+    # --- START OF CHANGE: Implement the driving phase logic ---
+    def handle_turn_logic(self, game: 'Game', visualizer: Optional['GameScene'], sounds: Optional['SoundManager']):
+        """Handles logic for human players, specifically triggering the first roll in the driving phase."""
+        if self.player_state == PlayerState.DRIVING:
+            # For a human, their action is to roll the die, which is handled by the DrivingState UI.
+            # However, we need to prompt them if they want to use influence after their move.
+            # To kick this off, we can just signal that the turn isn't over yet,
+            # and the DrivingState's event handler will take care of the rest.
+            print(f"--- Human Player {self.player_id}'s turn to drive. Waiting for input. ---")
+            pass # The DrivingState handles the key/mouse presses for the roll.
+    # --- END OF CHANGE ---
+    
     @property
     def is_ai(self) -> bool:
         return False
-    def handle_turn_logic(self, game, visualizer, sounds):
-        pass
 
 
 class AIPlayer(Player):

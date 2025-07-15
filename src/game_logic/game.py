@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from .visualizer import Linie1Visualizer
     from .mod_manager import ModManager
     from ..scenes.game_scene import GameScene
+    from ..states.game_states import InfluenceDecisionState
 
 from .enums import PlayerState, GamePhase, Direction
 from .tile import TileType, PlacedTile
@@ -98,6 +99,14 @@ class Game:
         command = MoveCommand(self, player, target_idx, end_turn_on_execute=end_turn)
         
         if self.command_history.execute_command(command):
+            # After a successful move, check if a human player should be prompted to use influence
+            eco_mod = self.mod_manager.available_mods.get('economic_mod')
+            if eco_mod and isinstance(player, HumanPlayer) and player.components[eco_mod.mod_id].get('influence', 0) > 0 and not end_turn:
+                if self.visualizer:
+                    # Instead of ending the turn, switch to the decision state
+                    self.visualizer.request_state_change(InfluenceDecisionState)
+            elif end_turn:
+                 pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'driving_move'}))
             return True
         else:
             # If the command fails, the turn must end to prevent a stuck game.

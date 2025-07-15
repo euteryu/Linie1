@@ -81,10 +81,21 @@ class EconomicMod(IMod):
     def on_draw_ui_panel(self, screen: Any, visualizer: 'GameScene', current_game_state_name: str):
         """Draws the current player's Capital and any active headlines."""
         active_player = visualizer.game.get_active_player()
+        
         if self.mod_id in active_player.components:
             capital_pool = active_player.components[self.mod_id]
-            capital_text = f"Capital: ${capital_pool.get('capital', 0)} / ${capital_pool.get('max_capital', 200)}"
-            draw_text(screen, capital_text, CE.CAPITAL_DISPLAY_X, CE.CAPITAL_DISPLAY_Y, color=(118, 165, 32), size=20)
+            capital_text = f"Capital: ${capital_pool.get('capital', 0)}"
+            # --- START OF CHANGE: Add Influence display ---
+            influence_text = f"Influence: {capital_pool.get('influence', 0)}★"
+            # --- END OF CHANGE ---
+            frozen_text = f" (Frozen: ${capital_pool.get('frozen_capital', 0)})"
+            
+            draw_text(screen, capital_text, CE.CAPITAL_DISPLAY_X, CE.CAPITAL_DISPLAY_Y, color=(255, 215, 0), size=20)
+            if capital_pool.get('frozen_capital', 0) > 0:
+                 draw_text(screen, frozen_text, CE.CAPITAL_DISPLAY_X + 100, CE.CAPITAL_DISPLAY_Y, color=(180, 180, 180), size=16)
+            # --- START OF CHANGE: Draw the Influence text ---
+            draw_text(screen, influence_text, CE.CAPITAL_DISPLAY_X, CE.CAPITAL_DISPLAY_Y + 25, color=(200, 100, 255), size=20)
+            # --- END OF CHANGE ---
 
         if self.headline_manager.active_event:
             event = self.headline_manager.active_event

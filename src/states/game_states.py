@@ -593,3 +593,70 @@ class AuctionHouseState(GameState):
             draw_text(screen, "Place Bid", bid_button_rect.centerx, bid_button_rect.centery, C.COLOR_WHITE, 20, True, True)
             
             y_pos += 80
+
+class InfluenceDecisionState(GameState):
+    """A transient state to ask the player if they want to use an Influence point."""
+    def __init__(self, scene: 'GameScene'):
+        super().__init__(scene)
+        self.is_transient_state = True
+        self.message = "Spend 1 Influence (★) to roll again?"
+        self.yes_rect = pygame.Rect(C.SCREEN_WIDTH // 2 - 110, C.SCREEN_HEIGHT // 2, 100, 50)
+        self.no_rect = pygame.Rect(C.SCREEN_WIDTH // 2 + 10, C.SCREEN_HEIGHT // 2, 100, 50)
+
+    def handle_event(self, event) -> bool:
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_y:
+                self._use_influence()
+                return True
+            elif event.key == pygame.K_n:
+                self._end_turn()
+                return True
+        
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.yes_rect.collidepoint(event.pos):
+                self._use_influence()
+                return True
+            elif self.no_rect.collidepoint(event.pos):
+                self._end_turn()
+                return True
+        return False
+
+    def _use_influence(self):
+        """Handles the logic for spending influence and re-rolling."""
+        player = self.game.get_active_player()
+        eco_mod = self.game.mod_manager.available_mods.get('economic_mod')
+        if eco_mod and player.components[eco_mod.mod_id]['influence'] > 0:
+            player.components[eco_mod.mod_id]['influence'] -= 1
+            
+            influence_roll = random.randint(1, 4)
+            print(f"  Player {player.player_id} used Influence and rolled a {influence_roll}.")
+            
+            # Make the move, but crucially, DO NOT end the turn.
+            self.game.attempt_driving_move(player, influence_roll, end_turn=False)
+            
+            # After the move, return to the base driving state. If they still have influence,
+            # the game will trigger this decision state again.
+            self.scene.return_to_base_state() 
+        else:
+            self._end_turn()
+
+    def _end_turn(self):
+        """Ends the current player's turn."""
+        print("  Player chose not to use Influence. Ending turn.")
+        pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'driving_turn_end'}))
+        self.scene.return_to_base_state()
+
+    def draw(self, screen):
+        # Dimming overlay
+        overlay = pygame.Surface((C.SCREEN_WIDTH, C.SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((20, 0, 40, 190)); screen.blit(overlay, (0, 0))
+        
+        # Message
+        draw_text(screen, self.message, C.SCREEN_WIDTH // 2, C.SCREEN_HEIGHT // 2 - 50, C.COLOR_WHITE, 30, True, True)
+        
+        # Buttons
+        pygame.draw.rect(screen, (0, 150, 0), self.yes_rect, border_radius=8)
+        draw_text(screen, "[Y] Yes", self.yes_rect.centerx, self.yes_rect.centery, C.COLOR_WHITE, 24, True, True)
+        pygame.draw.rect(screen, (150, 0, 0), self.no_rect, border_radius=8)
+        draw_text(screen, "[N] No", self.no_rect.centerx, self.no_rect.centery, C.COLOR_WHITE, 24, True, True)
+# --- END OF CHANGE ---
