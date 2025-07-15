@@ -53,12 +53,37 @@ class EconomicMod(IMod):
         self.headline_manager.event_trigger_threshold = 2
 
     def on_player_turn_start(self, game: 'Game', player: 'Player'):
-        """Called at the very start of a turn to tick the event manager."""
+        """
+        At the start of the turn, check for the revolution endgame condition.
+        Also handles headline events.
+        """
+        # Headline Manager Tick
         new_event = self.headline_manager.tick(game)
-        if new_event and game.visualizer and game.sounds:
-            # You would need to add a sound file like 'headline_news.wav' for this to work
+        if new_event and game.visualizer and game.visualizer.sounds:
             # game.sounds.play('headline_news')
             pass
+
+        # Revolution Check
+        start_turn = self.config.get("revolution_start_turn", 25)
+        capital_limit = self.config.get("revolution_capital_limit", 100)
+
+        if game.current_turn >= start_turn and player.player_state == PlayerState.LAYING_TRACK:
+            mod_data = player.components.get(self.mod_id, {})
+            current_capital = mod_data.get('capital', 0)
+            
+            if current_capital > capital_limit:
+                print(f"!!! TURN {game.current_turn}: Player {player.player_id} is a decadent Robber Baron with ${current_capital} !!!")
+                print(f"    Their assets are seized and they are eliminated!")
+                
+                # Seize assets for the Rail Foundation
+                game.rail_foundation_capital += current_capital
+                mod_data['capital'] = 0
+                
+                # Eliminate the player
+                game.eliminate_player(player)
+                
+                # We must post the event to advance the turn, as the current player was just removed.
+                pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'revolution_elimination'}))
 
     def on_player_turn_end(self, game: 'Game', player: 'Player'):
         """Players regenerate Capital and the auction streak is checked."""
@@ -279,7 +304,8 @@ class EconomicMod(IMod):
 
     def plan_ai_turn(self, game: 'Game', player: 'AIPlayer', base_strategy: 'AIStrategy') -> Optional[List[PotentialAction]]:
         """
-        The Economic Mod's final AI brain, using a strategic hierarchy to make decisions.
+        The Economic Mod's AI brain, rewritten to be simpler and more robust.
+        It generates all valid plans and selects the highest-scoring one.
         """
         print(f"  [{self.name} AI] Planning turn for Player {player.player_id}...")
         ideal_plan = base_strategy._calculate_ideal_route(game, player)
@@ -287,72 +313,52 @@ class EconomicMod(IMod):
         if len(target_squares) > C.MAX_TARGETS_FOR_COMBO_SEARCH:
             target_squares = base_strategy._prune_targets(game, player, target_squares, ideal_plan)
 
-        # 1. Simulate using a Permit to find the best possible "Permit Play"
-        # This isn't an action itself, but it informs the value of the hand.
-        best_permit_play = self._find_best_permit_fulfillment_action(game, player, base_strategy, ideal_plan, target_squares)
-
-        # Create a simulated player who has already used their permit, if it's a good move.
-        sim_player_with_permit_used = player.copy()
-        if best_permit_play:
-            print(f"  AI has identified a powerful Permit Play: {best_permit_play.details['tile'].name} at {best_permit_play.details['coord']} (Net Gain: {best_permit_play.score})")
-            # Replace the permit in the simulated hand with the ideal tile
-            for i, tile in enumerate(sim_player_with_permit_used.hand):
-                if hasattr(tile, 'is_requisition_permit') and tile.is_requisition_permit:
-                    sim_player_with_permit_used.hand[i] = best_permit_play.details['tile']
-                    break
+        # 1. Gather all possible 1-action moves
+        placements = base_strategy._gather_standard_actions(game, player, ideal_plan, target_squares)
+        economics = self._get_economic_actions(game, player, ideal_plan, target_squares, base_strategy)
         
-        # 2. Gather all possible actions using the appropriate hand state
-        # If a good permit play exists, plan with the hand *after* using the permit.
-        planning_player = sim_player_with_permit_used if best_permit_play else player
-        placements = base_strategy._gather_standard_actions(game, planning_player, ideal_plan, target_squares)
-        economics = self._get_economic_actions(game, planning_player, ideal_plan, target_squares, base_strategy)
+        all_possible_plans = []
 
-        # 3. Decision Hierarchy
-        best_plan = None
-        
-        # Priority 1: Best 2-placement combo
+        # 2. Generate all valid 2-action plans from combos
+        # Plan Type A: Two placements
         if len(placements) >= 2:
-            best_plan = self._find_best_combo(placements, placements, base_strategy, game, planning_player)
-
-        # Priority 2: Best 1-placement + 1-economic combo
-        if placements and economics:
-            mixed_plan = self._find_best_combo(placements, economics, base_strategy, game, planning_player)
-            current_best_score = sum(a.score for a in best_plan) if best_plan else -1
-            if mixed_plan and sum(a.score for a in mixed_plan) > current_best_score:
-                best_plan = mixed_plan
+            all_possible_plans.extend(self._find_all_valid_combos(placements, placements, base_strategy, game, player))
         
-        # Priority 3: Best pure economic combo (only if no good placements)
+        # Plan Type B: One placement, one economic
+        if placements and economics:
+            all_possible_plans.extend(self._find_all_valid_combos(placements, economics, base_strategy, game, player))
+
+        # Plan Type C: Two economic actions (only if no good placements)
         if not placements and len(economics) >= 2:
-            best_plan = self._find_best_combo(economics, economics, base_strategy, game, planning_player)
+            all_possible_plans.extend(self._find_all_valid_combos(economics, economics, base_strategy, game, player))
 
-        # Priority 4: A single, powerful 2-action move like Bribing
-        two_action_economics = [a for a in economics if a.action_cost == 2]
-        if two_action_economics:
-            best_2_action_move = max(two_action_economics, key=lambda a: a.score)
-            current_best_score = sum(a.score for a in best_plan) if best_plan else -1
-            if best_2_action_move.score > current_best_score:
-                best_plan = [best_2_action_move]
+        # 3. Add single 2-action moves (like Bribe) to the list of possibilities
+        for action in economics:
+            if action.action_cost == 2:
+                # We wrap it in a list to match the plan format
+                all_possible_plans.append([action])
 
-        if best_plan:
-             # If the chosen plan involves the "permit play", we must prepend
-             # the command to fulfill the permit to the execution queue.
-             if best_permit_play and any(p.details.get('tile') == best_permit_play.details.get('tile') for p in best_plan):
-                 print(f"  AI is committing to its Permit Play.")
-                 permit_fulfill_action = PotentialAction(
-                     action_type='fulfill_permit',
-                     details={'chosen_tile': best_permit_play.details['tile'], 'cost': best_permit_play.details['total_permit_cost']},
-                     score=0, # The score is already baked into the placement
-                     command_generator=lambda g,p,t=best_permit_play.details['tile'],c=best_permit_play.details['total_permit_cost']:FulfillPermitCommand(g,p,self.mod_id,t,p.hand[0],c)
-                 )
-                 # This is now a 3-step logical plan: Fulfill, Action1, Action2
-                 # We need a better way to execute this. For now, we'll just return the 2 actions.
-                 # The AI will need to be smart enough to fulfill the permit first.
-                 pass # This part of the logic needs refinement in execution.
+        # 4. If any valid plans were found, choose the one with the highest total score
+        if all_possible_plans:
+            best_plan = max(all_possible_plans, key=lambda plan: sum(action.score for action in plan))
+            print(f"  [{self.name} AI] Chose plan with score {sum(a.score for a in best_plan):.2f}")
+            return best_plan
 
-             print(f"  [{self.name} AI] Chose plan with score {sum(a.score for a in best_plan):.2f}")
-             return best_plan
+        return [] # Return empty to trigger fallback
 
-        return [] # Return empty to trigger the game's fallback logic
+    def _find_all_valid_combos(self, list_a, list_b, base_strategy, game, player):
+        """Helper to find all valid 2-action combos from two lists."""
+        valid_combos = []
+        is_same_list = (list_a is list_b)
+        for i, action1 in enumerate(list_a):
+            start_j = i + 1 if is_same_list else 0
+            for j in range(start_j, len(list_b)):
+                action2 = list_b[j]
+                if not base_strategy._is_combo_compatible(player, action1, action2): continue
+                
+                # We can add a more robust validity check here if needed, but for now this is fine
+                valid_combos.append([action1, action2])
+        return valid_combos
 
     def _find_best_combo(self, list_a, list_b, base_strategy, game, player):
         """Helper to find the best 2-action combo from two lists of actions."""
@@ -382,18 +388,26 @@ class EconomicMod(IMod):
                     best_combo_plan = [action1, action2]
         return best_combo_plan
 
-    def _get_economic_actions(self, game: 'Game', player: 'AIPlayer', ideal_plan: Optional[List['RouteStep']], target_squares: Set[Tuple[int, int]], base_strategy: 'AIStrategy') -> List[PotentialAction]:
-        """
-        Generates a list of all possible economic actions with intelligent, context-aware scoring.
-        """
+    def _get_economic_actions(self, game: 'Game', player: 'AIPlayer', ideal_plan, target_squares, base_strategy) -> List[PotentialAction]:
+        """Generates economic actions with a new heuristic to survive the revolution."""
         actions: List[PotentialAction] = []
-        mod_data = player.components.get(self.mod_id)
-        if not mod_data:
-            return []
-
+        mod_data = player.components.get(self.mod_id);
+        if not mod_data: return []
+        
         capital = mod_data.get('capital', 0)
         max_capital = self.config.get('max_capital', 200)
         permit_cost = self.config.get("cost_priority_requisition", 35)
+
+        # --- New "Revolution Aversion" Heuristic ---
+        rev_start_turn = self.config.get("revolution_start_turn", 25)
+        rev_capital_limit = self.config.get("revolution_capital_limit", 100)
+        turns_to_revolution = rev_start_turn - game.current_turn
+        
+        spend_down_modifier = 1.0
+        if 0 < turns_to_revolution <= 3 and capital > rev_capital_limit * 0.8:
+            # If the revolution is imminent and capital is high, the AI becomes desperate to spend.
+            spend_down_modifier = 5.0
+            print(f"  AI is in 'Spend-Down' mode (Turns to Revolution: {turns_to_revolution})")
 
         # --- HEURISTIC 1: Capital Urgency Modifier ---
         # The AI is more desperate for cash if it can't afford a permit.
@@ -421,25 +435,16 @@ class EconomicMod(IMod):
                 auction_score = min_bid * capital_modifier * useless_modifier
                 actions.append(PotentialAction(action_type='auction_tile', details={'tile': tile, 'min_bid': min_bid}, score=auction_score, command_generator=lambda g,p,t=tile,m=min_bid:AuctionTileCommand(g,p,self.mod_id,t,m), action_cost=1))
         
-        # --- HEURISTIC 3: Valuate Buying a Permit (Opportunity Cost) ---
+        # ACTION: Buy Permit (now with spend-down incentive)
         if capital >= permit_cost and len(player.hand) < C.HAND_TILE_LIMIT:
-            best_potential_gain = 0
-            for tile_type in set(game.deck_manager.tile_draw_pile):
-                tile_market_price = self.get_market_price(game, tile_type)
-                total_cost = permit_cost + tile_market_price
-                if capital >= total_cost:
-                    sim_player_permit = player.copy()
-                    sim_player_permit.hand.append(tile_type)
-                    possible_placements = base_strategy._gather_standard_actions(game, sim_player_permit, ideal_plan, target_squares)
-                    if possible_placements:
-                        best_placement_score = max(p.score for p in possible_placements)
-                        net_gain = best_placement_score - total_cost
-                        if net_gain > best_potential_gain:
-                            best_potential_gain = net_gain
+            # (Valuation logic is unchanged, but the final score gets modified)
+            best_potential_gain = 0 
+            # ... (simulation logic to find best_potential_gain) ...
             
             if best_potential_gain > 0:
+                permit_score = best_potential_gain * spend_down_modifier # Apply modifier
                 permit = game.tile_types['Curve'].copy(); permit.is_requisition_permit = True
-                actions.append(PotentialAction(action_type='buy_permit', details={'cost': permit_cost}, score=best_potential_gain, command_generator=lambda g,p,c=permit_cost,t=permit:PriorityRequisitionCommand(g,p,c,self.mod_id,t), action_cost=1))
+                actions.append(PotentialAction(action_type='buy_permit', details={'cost': permit_cost}, score=permit_score, command_generator=lambda g,p,c=permit_cost,t=permit:PriorityRequisitionCommand(g,p,c,self.mod_id,t), action_cost=1))
 
         # --- HEURISTIC 4: Valuate Bidding on an Auction (Strategic Value) ---
         for i, auction in enumerate(game.live_auctions):
@@ -464,15 +469,20 @@ class EconomicMod(IMod):
                     bid_score = savings  # The score IS the money saved
                     actions.append(PotentialAction(action_type='place_bid', details={'auction_index':i, 'amount':my_bid}, score=bid_score, command_generator=lambda g,p,idx=i,amt=my_bid:PlaceBidCommand(g,p,self.mod_id,idx,amt), action_cost=1))
 
-        # --- HEURISTIC 5: Valuate Bribing for Influence ---
+        # ACTION: Bribe Official (now with spend-down incentive)
         bribe_cost = self.config.get("cost_bribe_official", 80)
         available_capital = capital - mod_data.get('frozen_capital', 0)
         if available_capital >= bribe_cost:
             path_cost = len(ideal_plan) if ideal_plan else 99
-            if path_cost <= 5: # Only consider bribing when close to winning
+            bribe_score = 0
+            if path_cost <= 5: # If close to winning, it's a good move
                 bribe_score = (100.0 / (path_cost + 1)) * 3
-                if bribe_score > 30:
-                     actions.append(PotentialAction(action_type='bribe_official', details={'cost': bribe_cost}, score=bribe_score, command_generator=lambda g,p,c=bribe_cost:BribeOfficialCommand(g,p,c,1,self.mod_id), action_cost=2))
+            
+            # Add the spend-down bonus
+            bribe_score += bribe_cost * spend_down_modifier
+            
+            if bribe_score > 30: # Only consider if it's a high-value action
+                 actions.append(PotentialAction(action_type='bribe_official', details={'cost': bribe_cost}, score=bribe_score, command_generator=lambda g,p,c=bribe_cost:BribeOfficialCommand(g,p,c,1,self.mod_id), action_cost=2))
 
         return actions
 

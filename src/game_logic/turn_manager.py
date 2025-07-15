@@ -64,9 +64,19 @@ class TurnManager:
         next_p = game.get_active_player()
         print(f"\n--- Starting Turn {game.current_turn} for Player {next_p.player_id} ({next_p.player_state.name}) ---")
 
+        game.mod_manager.on_player_turn_start(game, next_p)
+
+        # If the player was eliminated by the hook, their state will be updated.
+        if next_p.player_state == PlayerState.ELIMINATED:
+            # The elimination itself would have posted a next turn event, so we can just stop.
+            return True
+
         if next_p.player_state == PlayerState.LAYING_TRACK:
             is_complete, start, path = game.check_player_route_completion(next_p)
-            if is_complete and start and path: game.handle_route_completion(next_p, start, path)
+            if is_complete and start and path:
+                game.handle_route_completion(next_p, start, path)
         
-        if isinstance(next_p, AIPlayer): pygame.event.post(pygame.event.Event(START_NEXT_TURN_EVENT))
+        if next_p.is_ai: # Use the property here to be safe
+             pygame.event.post(pygame.event.Event(START_NEXT_TURN_EVENT))
+
         return True

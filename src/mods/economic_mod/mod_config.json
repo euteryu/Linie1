@@ -4,17 +4,19 @@
     "description": "Introduces Capital and market forces to the railway expansion.",
     "class_name": "EconomicMod",
     "main_module": "economic_mod",
+
+    "revolution_start_turn": 25,
+    "revolution_capital_limit": 100,
+
     "starting_capital": 50,
     "max_capital": 200,
     "capital_regen_per_turn": 5,
     "cost_bribe_official": 80,
     "reward_influence_from_bribe": 1,
-
-    "cost_priority_requisition": 25,
-    "scrapyard_yield": 0.6,
-    "auction_min_bid_yield": 0.7,
+    "cost_priority_requisition": 35,
+    "scrapyard_yield": 0.7,
+    "auction_min_bid_yield": 0.6,
     "price_multiplier": 20,
-
     "tile_base_cost": {
         "Straight": 10,
         "Curve": 10,
