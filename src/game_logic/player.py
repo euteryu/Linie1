@@ -99,12 +99,22 @@ class Player(ABC):
         return player
 
     def get_required_stop_coords(self, game: 'Game') -> Optional[List[Tuple[int, int]]]:
-        if not self.route_card: return []
+        """
+        Gets the coordinates of the required buildings from the player's route card.
+        This now correctly looks up the building locations themselves.
+        """
+        if not self.route_card:
+            return []
+        
         stop_coords = []
         for stop_id in self.route_card.stops:
-            if (coord := game.board.building_stop_locations.get(stop_id)) is None: return None
-            stop_coords.append(coord)
+            if coord := game.board.building_coords.get(stop_id):
+                stop_coords.append(coord)
+            else:
+                print(f"ERROR: Building ID '{stop_id}' from Route Card not found in board constants.")
+                return None
         return stop_coords
+
     def get_full_driving_sequence(self, game: 'Game') -> Optional[List[Tuple[int, int]]]:
         if not self.line_card or not self.start_terminal_coord: return None
         stop_coords = self.get_required_stop_coords(game)
@@ -187,17 +197,29 @@ class AIPlayer(Player):
         elif self.player_state == PlayerState.DRIVING:
             print(f"--- AI Player {self.player_id} is in DRIVING phase. ---")
             
-            # 1. Check if an active mod wants to handle the driving turn.
+            # 1. Check if a mod wants to handle driving (like the economic mod with influence)
             was_handled_by_mod = game.mod_manager.on_ai_driving_turn(game, self)
 
-            # 2. If no mod took over, execute the default base-game driving logic.
+            # 2. If no mod took over, execute default driving logic
             if not was_handled_by_mod:
                 print("  No mod override for driving. Performing standard roll.")
-                if visualizer:
-                    visualizer.force_redraw("AI Rolling...")
-                    pygame.time.delay(C.AI_MOVE_DELAY_MS)
-
-                # The standard roll and move. The command will correctly end the turn.
+                if visualizer: visualizer.force_redraw("AI Rolling...")
+                pygame.time.delay(C.AI_MOVE_DELAY_MS)
                 roll_result = game.deck_manager.roll_special_die()
                 print(f"  AI rolled a '{roll_result}'.")
                 game.attempt_driving_move(self, roll_result, end_turn=True)
+
+
+# HELPERS
+def _ai_wants_to_use_influence(game: 'Game', player: 'AIPlayer') -> bool:
+    """Helper logic to determine if an AI should spend an Influence point."""
+    if not player.validated_route: return False
+    try:
+        full_sequence = player.get_full_driving_sequence(game)
+        if not full_sequence or player.required_node_index >= len(full_sequence): return False
+        next_goal_coord = full_sequence[player.required_node_index]
+        next_goal_path_index = next(i for i, step in enumerate(player.validated_route) if i > player.streetcar_path_index and step.coord == next_goal_coord)
+        dist_to_goal = next_goal_path_index - player.streetcar_path_index
+        if 0 < dist_to_goal <= 4: return True
+    except (StopIteration, IndexError): return False
+    return False

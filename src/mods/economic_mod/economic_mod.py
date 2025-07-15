@@ -32,30 +32,6 @@ if TYPE_CHECKING:
 # A unique identifier for our special tile's name
 REQUISITION_PERMIT_ID = "REQUISITION_PERMIT"
 
-def _ai_wants_to_use_influence(game, player) -> bool:
-    """Helper logic to determine if an AI should spend an Influence point."""
-    if not player.validated_route: return False
-    
-    # Find the next required goal in the validated path
-    try:
-        full_sequence = player.get_full_driving_sequence(game)
-        if not full_sequence or player.required_node_index >= len(full_sequence):
-            return False # Already at the end or no path
-            
-        next_goal_coord = full_sequence[player.required_node_index]
-        next_goal_path_index = next(i for i, step in enumerate(player.validated_route) if i > player.streetcar_path_index and step.coord == next_goal_coord)
-        
-        dist_to_goal = next_goal_path_index - player.streetcar_path_index
-        
-        # Use influence if the goal is just out of reach of a 4-sided die roll
-        if 0 < dist_to_goal <= 4:
-            return True
-            
-    except (StopIteration, IndexError):
-        return False # Could not find the next goal
-        
-    return False
-
 class EconomicMod(IMod):
     """A mod that introduces Capital and market forces to the railway expansion."""
 
@@ -156,6 +132,22 @@ class EconomicMod(IMod):
                 "callback_name": "open_auction_house"
             })
 
+            # Button 5: Bribe Politician
+            y_pos4 = y_pos3 + CE.BUTTON_HEIGHT + CE.BUTTON_SPACING * 3
+            buttons.append({
+                "text": "Open Auction House", 
+                "rect": pygame.Rect(CE.BUTTON_X, y_pos4, CE.BUTTON_WIDTH, CE.BUTTON_HEIGHT), 
+                "callback_name": "open_auction_house"
+            })
+            
+            bribe_cost = self.config.get("cost_bribe_official", 80)
+            y_pos5 = y_pos4 + CE.BUTTON_HEIGHT + CE.BUTTON_SPACING
+            buttons.append({
+                "text": f"Bribe Official (${bribe_cost})", 
+                "rect": pygame.Rect(CE.BUTTON_X, y_pos5, CE.BUTTON_WIDTH, CE.BUTTON_HEIGHT), 
+                "callback_name": "bribe_official"
+            })
+
         return buttons
 
     def handle_ui_button_click(self, game: 'Game', player: 'Player', button_name: str) -> bool:
@@ -181,6 +173,13 @@ class EconomicMod(IMod):
                 messagebox.showwarning("Rule Limit", "You have auctioned tiles for 3 consecutive turns and cannot auction again this turn.")
                 return True # Handled by showing a message
             self._handle_auction_selection(game, player)
+            return True
+
+        elif button_name == "bribe_official":
+            bribe_cost = self.config.get("cost_bribe_official", 80)
+            command = BribeOfficialCommand(game, player, bribe_cost, 1, self.mod_id)
+            if not game.command_history.execute_command(command):
+                 messagebox.showerror("Error", "Could not execute bribe. Check your available Capital.")
             return True
 
         return False

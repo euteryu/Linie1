@@ -59,12 +59,13 @@ class PaletteSelectionState(GameState):
                 if rect.collidepoint(mouse_pos):
                     chosen_item = self.items_to_display[index]
                     
-                    if self.eco_mod and self.current_capital is not None:
+                    # We can check this by seeing if a 'current_capital' value was passed.
+                    # The auction selection does not pass this, so this check will be skipped.
+                    if self.current_capital is not None and self.eco_mod:
                         price = self.eco_mod.get_market_price(self.game, chosen_item)
                         supply = self.game.deck_manager.tile_draw_pile.count(chosen_item)
                         if self.current_capital < price or supply == 0:
-                            self.scene.sounds.play('error')
-                            return True # Handled the invalid click
+                            self.scene.sounds.play('error'); return True
 
                     self.on_select_callback(chosen_item)
                     return True # Handled the valid click
@@ -98,7 +99,9 @@ class PaletteSelectionState(GameState):
                 screen.blit(tile_image, rect.topleft)
             if rect.collidepoint(pygame.mouse.get_pos()) and is_affordable and is_in_stock: pygame.draw.rect(screen, C.COLOR_HIGHLIGHT, rect, 3)
             else: pygame.draw.rect(screen, C.COLOR_BLACK, rect, 1)
-            price_color = C.COLOR_WHITE if is_affordable else (255, 80, 80)
+            price_color = C.COLOR_WHITE
+            if self.current_capital is not None and not is_affordable:
+                price_color = (255, 80, 80)
             supply_color = C.COLOR_WHITE if is_in_stock else (255, 80, 80)
             draw_text(screen, f"${market_price}", rect.centerx, rect.bottom + 15, price_color, 18, True)
             draw_text(screen, f"Supply: {supply}", rect.centerx, rect.bottom + 30, supply_color, 14, True)
