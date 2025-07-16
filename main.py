@@ -29,8 +29,8 @@ if __name__ == '__main__':
         # player_types = ['ai', 'ai', 'human', 'human']
         # player_types = ['ai', 'ai', 'ai']
         # player_types = ['ai', 'ai', 'ai', 'ai']
-        player_types = ['ai', 'ai', 'ai', 'ai', 'ai']
-        # player_types = ['ai', 'ai', 'ai', 'ai', 'ai', 'ai']
+        # player_types = ['ai', 'ai', 'ai', 'ai', 'ai']
+        player_types = ['ai', 'ai', 'ai', 'ai', 'ai', 'ai']
 
         game_difficulty = 'normal'
         # game_difficulty = 'king'

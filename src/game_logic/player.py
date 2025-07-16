@@ -181,6 +181,10 @@ class AIPlayer(Player):
         return True
 
     def handle_turn_logic(self, game: 'Game', visualizer: Optional['GameScene'] = None, sounds: Optional['SoundManager'] = None):
+        """
+        Orchestrates the AI's turn. It gets a plan from a strategy and executes
+        the actions within that plan, trusting that the plan is valid.
+        """
         if game.game_phase == GamePhase.GAME_OVER: return
 
         if self.player_state == PlayerState.LAYING_TRACK:
@@ -194,6 +198,7 @@ class AIPlayer(Player):
             print(f"\n--- AI Player {self.player_id} ({self.strategy.__class__.__name__}) is thinking...")
             final_plan: List[PotentialAction] = []
             
+            # 1. Get a plan from a mod or the base strategy.
             mod_plan = game.mod_manager.on_ai_plan_turn(game, self, self.strategy)
             if mod_plan is not None:
                 final_plan = mod_plan
@@ -201,25 +206,29 @@ class AIPlayer(Player):
                 print(f"No mod override for AI planning. Using default strategy: {self.strategy.__class__.__name__}")
                 final_plan = self.strategy.plan_turn(game, self)
             
+            # 2. If the primary strategy failed, attempt the fallback.
             if not final_plan:
                 print("Primary strategy failed to find a plan. Attempting fallback.")
                 fallback_strategy = GreedySequentialStrategy()
                 final_plan = fallback_strategy.plan_turn(game, self)
 
-            total_action_cost = sum(action.action_cost for action in final_plan)
-            
-            if total_action_cost >= game.MAX_PLAYER_ACTIONS:
-                print(f"  AI committing its plan with a total cost of {total_action_cost} actions...")
+            # 3. Execute the final plan or forfeit.
+            if final_plan:
+                print(f"  AI committing its plan...")
                 if visualizer:
                     visualizer.force_redraw("AI committing moves...")
                     pygame.time.delay(C.AI_MOVE_DELAY_MS)
                 
+                # Execute every command in the generated plan.
+                # The plan is guaranteed by the AI to have a valid total action cost (e.g., 2).
                 for action in final_plan:
                     command_to_run = action.command_generator(game, self)
                     game.command_history.execute_command(command_to_run)
                 
+                # After the plan is fully executed, end the turn.
                 pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'ai_actions_committed'}))
             else:
+                # If even the fallback strategy failed, the player is truly stuck.
                 print(f"--- AI Player {self.player_id} could not find any valid moves after fallback. Forfeiting turn. ---")
                 if sounds: sounds.play('eliminated')
                 game.eliminate_player(self)

@@ -5,7 +5,7 @@
     "class_name": "EconomicMod",
     "main_module": "economic_mod",
 
-    "revolution_start_turn": 25,
+    "revolution_start_turn": 30,
     "revolution_capital_limit": 100,
 
     "starting_capital": 50,

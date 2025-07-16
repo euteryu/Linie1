@@ -3,6 +3,10 @@ import pygame
 from typing import TYPE_CHECKING, List, Dict, Any, Optional, Set, Tuple
 from collections import Counter
 
+import random
+
+from game_logic.player import _ai_wants_to_use_influence
+
 from tkinter import simpledialog, messagebox
 
 # Since this is a new mod, it needs its own imports
@@ -304,8 +308,8 @@ class EconomicMod(IMod):
 
     def plan_ai_turn(self, game: 'Game', player: 'AIPlayer', base_strategy: 'AIStrategy') -> Optional[List[PotentialAction]]:
         """
-        The Economic Mod's AI brain, rewritten to be simpler and more robust.
-        It generates all valid plans and selects the highest-scoring one.
+        The Economic Mod's AI brain, rewritten to correctly evaluate all possible
+        2-action-cost turns and inherit scoring from the base strategy.
         """
         print(f"  [{self.name} AI] Planning turn for Player {player.player_id}...")
         ideal_plan = base_strategy._calculate_ideal_route(game, player)
@@ -313,35 +317,52 @@ class EconomicMod(IMod):
         if len(target_squares) > C.MAX_TARGETS_FOR_COMBO_SEARCH:
             target_squares = base_strategy._prune_targets(game, player, target_squares, ideal_plan)
 
-        # 1. Gather all possible 1-action moves
+        # 1. Gather all possible 1-action moves. Crucially, the placement scoring
+        #    now comes directly from the base strategy, including the +5000 stop bonus.
         placements = base_strategy._gather_standard_actions(game, player, ideal_plan, target_squares)
         economics = self._get_economic_actions(game, player, ideal_plan, target_squares, base_strategy)
-        
-        all_possible_plans = []
+        one_action_moves = placements + economics
 
-        # 2. Generate all valid 2-action plans from combos
-        # Plan Type A: Two placements
-        if len(placements) >= 2:
-            all_possible_plans.extend(self._find_all_valid_combos(placements, placements, base_strategy, game, player))
-        
-        # Plan Type B: One placement, one economic
-        if placements and economics:
-            all_possible_plans.extend(self._find_all_valid_combos(placements, economics, base_strategy, game, player))
+        # This list will hold every valid 2-action plan the AI can make.
+        all_possible_turns: List[List[PotentialAction]] = []
 
-        # Plan Type C: Two economic actions (only if no good placements)
-        if not placements and len(economics) >= 2:
-            all_possible_plans.extend(self._find_all_valid_combos(economics, economics, base_strategy, game, player))
+        # 2. Generate all valid 2-action combo plans
+        if len(one_action_moves) >= 2:
+            sorted_moves = sorted(one_action_moves, key=lambda a: a.score, reverse=True)[:15]
+            for i in range(len(sorted_moves)):
+                for j in range(i + 1, len(sorted_moves)):
+                    action1, action2 = sorted_moves[i], sorted_moves[j]
+                    if base_strategy._is_combo_compatible(player, action1, action2):
+                        all_possible_turns.append([action1, action2])
 
-        # 3. Add single 2-action moves (like Bribe) to the list of possibilities
+        # 3. Add all single 2-action moves (like Bribe) to the list of possibilities
         for action in economics:
             if action.action_cost == 2:
-                # We wrap it in a list to match the plan format
-                all_possible_plans.append([action])
+                all_possible_turns.append([action])
 
-        # 4. If any valid plans were found, choose the one with the highest total score
-        if all_possible_plans:
-            best_plan = max(all_possible_plans, key=lambda plan: sum(action.score for action in plan))
-            print(f"  [{self.name} AI] Chose plan with score {sum(a.score for a in best_plan):.2f}")
+        # 4. If no valid plans were found, there's nothing to do.
+        if not all_possible_turns:
+            return []
+
+        # 5. Score every valid plan and choose the best one.
+        best_plan = None
+        best_score = -1.0
+
+        for plan in all_possible_turns:
+            sim_game = game.copy_for_simulation()
+            sim_player = next(p for p in sim_game.players if p.player_id == player.player_id)
+            for action in plan:
+                base_strategy._apply_potential_action_to_sim(sim_game, sim_player, action)
+            
+            # The score is the quality of the final board state plus the actions' inherent scores.
+            current_plan_score = base_strategy._score_board_state(sim_game, sim_player) + sum(a.score for a in plan)
+
+            if current_plan_score > best_score:
+                best_score = current_plan_score
+                best_plan = plan
+
+        if best_plan:
+            print(f"  [{self.name} AI] Chose plan with final score {best_score:.2f}")
             return best_plan
 
         return [] # Return empty to trigger fallback
