@@ -5,7 +5,16 @@ import copy
 # If constants are needed, import them: from constants import ...
 
 class TileType:
-    def __init__(self, name: str, connections: List[List[str]], is_swappable: bool):
+    def __init__(self, name: str, connections: List[List[str]], is_swappable: bool, **kwargs):
+        """
+        Initializes a TileType.
+        
+        Args:
+            name (str): The unique name of the tile (e.g., "Straight").
+            connections (List[List[str]]): Defines the track connections.
+            is_swappable (bool): Whether the tile can be exchanged once placed.
+            **kwargs: Catches any other keyword arguments (like asset_coords) and ignores them.
+        """
         self.name = name
         self.connections_base = self._process_connections(connections)
         self.is_swappable = is_swappable

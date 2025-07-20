@@ -26,7 +26,8 @@ class SoundManager:
             'auction_new_item': os.path.join(assets_path, 'auctionhouse', 'auction_new_item.wav'),
         }
         self.music_paths = {
-            'main_theme': os.path.join(assets_path, 'music', 'background_theme.wav')
+            'main_theme': os.path.join(assets_path, 'music', 'background_theme.wav'),
+            'intro_theme': os.path.join(assets_path, 'music', 'intro_audio.wav')
         }
 
     def load_sounds(self):

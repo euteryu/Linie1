@@ -4,8 +4,10 @@ from scenes.scene import Scene
 from ui.components import Button, Slider
 
 class SettingsScene(Scene):
-    def __init__(self, scene_manager):
+    def __init__(self, scene_manager, asset_manager):
         super().__init__(scene_manager)
+        # We now accept asset_manager
+        self.asset_manager = asset_manager
         self.theme = scene_manager.theme
         self.font_header = pygame.font.Font(self.theme["font"]["main"], self.theme["font"]["header_size"])
         
@@ -32,7 +34,7 @@ class SettingsScene(Scene):
     def on_theme_change(self, theme_name):
         self.scene_manager.load_theme(f"ui_theme_{theme_name.lower()}.json")
         # Re-initialize scene to apply new theme immediately
-        self.scene_manager.scenes["SETTINGS"] = SettingsScene(self.scene_manager)
+        self.scene_manager.scenes["SETTINGS"] = SettingsScene(self.scene_manager, self.asset_manager)
         self.scene_manager.current_scene = self.scene_manager.scenes["SETTINGS"]
 
     def handle_events(self, events):

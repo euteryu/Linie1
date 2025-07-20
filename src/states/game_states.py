@@ -132,6 +132,12 @@ class GameState:
             self.set_message("AI Heatmap OFF.")
             self.scene.heatmap_data = set()
 
+    def toggle_strategy_view_action(self):
+        """Toggles the main board rendering between strategic and artistic views."""
+        self.scene.strategy_view_active = not self.scene.strategy_view_active
+        mode = "Strategy" if self.scene.strategy_view_active else "Artistic"
+        self.set_message(f"View mode switched to: {mode}")
+
     def toggle_hint_action(self):
         """Toggles the display of the ideal route hint."""
         # The import must be absolute from the project's 'src' root.

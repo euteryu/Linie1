@@ -6,6 +6,8 @@ import json
 import tkinter as tk
 
 # Import your scenes
+from common.asset_manager import AssetManager
+from scenes.intro_scene import IntroScene
 from scenes.main_menu_scene import MainMenuScene
 from scenes.game_scene import GameScene
 from scenes.settings_scene import SettingsScene
@@ -24,42 +26,71 @@ class App:
         
         self.root_dir = root_dir
 
+        # 0. Load the theme dictionary. This MUST happen before scenes are created.
         theme_path = os.path.join(self.root_dir, 'src', 'assets', 'themes', 'ui_theme_dark.json')
         with open(theme_path, 'r') as f:
             self.theme = json.load(f)
-            
-        self.sounds = SoundManager(root_dir)
+
+        # 1. Initialize core managers first.
+        self.asset_manager = AssetManager(self.root_dir)
+        self.sounds = SoundManager(self.root_dir)
         self.mod_manager = mod_manager
+        
+        # Game-wide settings are stored here
+        self.settings = {
+            'cutscenes_enabled': True
+        }
+
+        # 2. Load assets. This needs the TILE_DEFINITIONS which are part of the game logic constants.
+        self.asset_manager.load_all_assets(C.TILE_DEFINITIONS) 
+            
+        # 3. Create the main game instance. This MUST happen before creating the GameScene.
         self.game_instance = Game(player_types, difficulty, mod_manager)
         
+        # 4. Initialize Tkinter for file dialogs.
         try:
             self.tk_root = tk.Tk()
             self.tk_root.withdraw()
         except Exception as e:
-            print(f"Warning: Tkinter could not be initialized. File dialogs will be disabled. Error: {e}")
             self.tk_root = None
 
+        # 5. Now that all required objects exist, create the scenes.
         self.scenes = {
-            "MAIN_MENU": MainMenuScene(self),
-            "GAME": GameScene(self, self.game_instance, self.sounds, self.mod_manager),
-            "SETTINGS": SettingsScene(self)
+            "INTRO": IntroScene(self, self.asset_manager),
+            "MAIN_MENU": MainMenuScene(self, self.asset_manager),
+            "GAME": GameScene(self, self.game_instance, self.sounds, self.mod_manager, self.asset_manager),
+            "SETTINGS": SettingsScene(self, self.asset_manager)
         }
-        self.current_scene = self.scenes["MAIN_MENU"]
-
+        
+        # 6. Set the starting scene.
+        self.current_scene = self.scenes["INTRO"]
+        
+        # 7. Finally, link the game instance to its visualizer (the GameScene).
         self.game_instance.visualizer = self.scenes["GAME"]
 
     def go_to_scene(self, scene_name: str):
-        """Switches the active scene and handles any on-enter logic."""
+        """
+        Switches the active scene and handles any on-enter logic, such as
+        starting music or triggering AI turns.
+        """
         if scene_name in self.scenes:
             self.current_scene = self.scenes[scene_name]
             print(f"Switching to scene: {scene_name}")
 
-            if scene_name == "GAME":
+            # --- Scene-specific "on enter" logic goes here ---
+
+            # If we are entering the MAIN_MENU, start the main theme music.
+            if scene_name == "MAIN_MENU":
+                self.sounds.play_music('main_theme')
+
+            # If we are entering the GAME scene, check if an AI needs to be activated.
+            elif scene_name == "GAME":
                 from game_logic.player import AIPlayer
                 active_player = self.game_instance.get_active_player()
                 if isinstance(active_player, AIPlayer) and self.game_instance.actions_taken_this_turn == 0:
                     print(f"Resuming/Starting AI Player {active_player.player_id}'s turn.")
                     active_player.handle_turn_logic(self.game_instance, self.scenes["GAME"], self.sounds)
+            
         else:
             print(f"Warning: Scene '{scene_name}' not found.")
 
@@ -70,9 +101,9 @@ class App:
             with open(theme_path, 'r') as f:
                 self.theme = json.load(f)
             
-            self.scenes["MAIN_MENU"] = MainMenuScene(self)
-            self.scenes["GAME"] = GameScene(self, self.game_instance, self.sounds, self.mod_manager)
-            self.scenes["SETTINGS"] = SettingsScene(self)
+            self.scenes["MAIN_MENU"] = MainMenuScene(self, self.asset_manager)
+            self.scenes["GAME"] = GameScene(self, self.game_instance, self.sounds, self.mod_manager, self.asset_manager)
+            self.scenes["SETTINGS"] = SettingsScene(self, self.asset_manager)
             
             self.game_instance.visualizer = self.scenes["GAME"]
         except FileNotFoundError:
@@ -105,7 +136,7 @@ class App:
     # --- START OF CHANGE: The run method is the primary fix ---
     def run(self):
         self.sounds.load_sounds()
-        self.sounds.play_music('main_theme')
+        # self.sounds.play_music('main_theme')  # Main Menu should be responsible for starting main theme
         
         # This flag must be declared OUTSIDE the loop to maintain its state.
         initial_ai_turn_triggered = False

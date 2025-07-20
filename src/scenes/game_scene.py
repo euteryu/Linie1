@@ -19,31 +19,42 @@ from common.rendering_utils import create_tile_surface, get_font
 import common.constants as C
 
 class GameScene(Scene):
-    def __init__(self, scene_manager, game_instance, sounds, mod_manager):
+    def __init__(self, scene_manager, game_instance, sounds, mod_manager, asset_manager):
         super().__init__(scene_manager)
-        self.theme = scene_manager.theme # Get theme from the manager
+        self.theme = scene_manager.theme
         self.game = game_instance
         self.sounds = sounds
-        self.mod_manager = mod_manager
+        self.mod_manager = mod_manager # Now correctly assigned
+        self.asset_manager = asset_manager # The new asset manager
         
-        # --- All __init__ logic from your old visualizer.py ---
         self.screen = scene_manager.screen
         self.tk_root = scene_manager.tk_root
         self.TILE_SIZE = C.TILE_SIZE
         self.debug_mode = C.DEBUG_MODE
+        
+        # View Toggles
         self.show_ai_heatmap = False
-        self.heatmap_data: Set[tuple[int, int]] = set()
-
         self.show_hint_path = False
+        self.strategy_view_active = True # Default to the clear strategic view
+        
+        # Data for overlays
+        self.heatmap_data: Set[tuple[int, int]] = set()
         self.hint_path_data: Set[Tuple[int, int]] = set()
 
         self.current_state: GameState = LayingTrackState(self)
         self.next_state_constructor: Optional[Callable] = None
         self.update_current_state_for_player()
         
+        # Tile Surfaces for different views
+        # self.tile_surfaces now correctly refers to the line-drawn strategy view surfaces.
         self.tile_surfaces = {name: create_tile_surface(ttype, self.TILE_SIZE) for name, ttype in self.game.tile_types.items()}
+        # self.pretty_tile_surfaces holds the new, high-quality assets.
+        self.pretty_tile_surfaces = self.asset_manager.images['tiles']
+        
+        # The UI Manager should always use the clear, strategic surfaces for its panels.
         self.ui_manager = UIManager(self.screen, self.tile_surfaces, self.mod_manager, self.theme)
         
+        # Debugging assets
         self.debug_tile_types: List[TileType] = list(self.game.tile_types.values())
         self.debug_tile_surfaces = {ttype.name: create_tile_surface(ttype, C.DEBUG_TILE_SIZE) for ttype in self.debug_tile_types}
         self.debug_die_surfaces = self._create_debug_die_surfaces()
@@ -99,10 +110,9 @@ class GameScene(Scene):
 
     def draw_board(self):
         """
-        Draws the grid, tiles, buildings, terminals, and player streetcars.
+        Draws the grid and tiles, choosing between the strategic view (lines)
+        and the artistic view (assets) based on the toggle.
         """
-        # --- START OF FIX ---
-        # Replace all instances of 'screen' with 'self.screen'
         for r in range(C.GRID_ROWS):
             for c in range(C.GRID_COLS):
                 rect = pygame.Rect(
@@ -125,11 +135,17 @@ class GameScene(Scene):
                 pygame.draw.rect(self.screen, grid_color, rect, 1)
 
                 if placed_tile:
-                    tile_surf = self.tile_surfaces.get(placed_tile.tile_type.name)
+                    tile_surf = None
+                    # Choose which set of surfaces to use based on the view toggle
+                    if self.strategy_view_active:
+                        tile_surf = self.tile_surfaces.get(placed_tile.tile_type.name)
+                    else:
+                        # For pretty view, we need to scale the high-res asset down to fit the tile size
+                        raw_asset = self.pretty_tile_surfaces.get(placed_tile.tile_type.name)
+                        if raw_asset:
+                            tile_surf = pygame.transform.scale(raw_asset, (self.TILE_SIZE, self.TILE_SIZE))
+                    
                     if tile_surf:
-                        # Re-color the track to match the new theme
-                        # This is an advanced step, for now we assume original track color is fine
-                        # To do this properly, you would have a create_tile_surface that accepts a color
                         rotated_surf = pygame.transform.rotate(tile_surf, -placed_tile.orientation)
                         self.screen.blit(rotated_surf, rotated_surf.get_rect(center=rect.center))
 

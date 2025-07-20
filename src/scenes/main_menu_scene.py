@@ -5,8 +5,10 @@ from scenes.scene import Scene
 from ui.components import Button # We'll create this component later
 
 class MainMenuScene(Scene):
-    def __init__(self, scene_manager):
+    def __init__(self, scene_manager, asset_manager):
         super().__init__(scene_manager)
+        # We now accept asset_manager, future UI elements can use it.
+        self.asset_manager = asset_manager
         self.theme = scene_manager.theme
         self.font_title = pygame.font.Font(self.theme["font"]["main"], self.theme["font"]["title_size"])
         
@@ -21,6 +23,8 @@ class MainMenuScene(Scene):
             button_rect = pygame.Rect(0, 0, 300, 60)
             button_rect.center = (center_x, 260 + i * 80)
             self.buttons.append(Button(text, button_rect, self.theme, self.on_button_click))
+
+        # self.scene_manager.sounds.play_music('main_theme')
 
     def on_button_click(self, button_text):
         if button_text == "Play Game":

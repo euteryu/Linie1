@@ -17,7 +17,29 @@ GRID_ROWS: int = 14; GRID_COLS: int = 14
 PLAYABLE_ROWS: Tuple[int, int] = (1, 12); PLAYABLE_COLS: Tuple[int, int] = (1, 12)
 # --- Game Rules & Data ---
 BUILDING_COORDS: Dict[str, Tuple[int, int]] = { 'A': (8, 12), 'B': (11, 9), 'C': (12, 5), 'D': (8, 2), 'E': (5, 1), 'F': (2, 4), 'G': (1, 8), 'H': (4, 11),'I': (6, 9), 'K': (9, 7), 'L': (7, 4), 'M': (4, 6) }
-TILE_DEFINITIONS: Dict[str, Dict[str, Any]] = { "Straight": {"connections": [['N', 'S']], "is_swappable": True}, "Curve": {"connections": [['N', 'E']], "is_swappable": True}, "StraightLeftCurve": {"connections": [['N', 'S'], ['S', 'W']], "is_swappable": True}, "StraightRightCurve": {"connections": [['N', 'S'], ['S', 'E']], "is_swappable": True}, "DoubleCurveY": {"connections": [['N', 'W'], ['N', 'E']], "is_swappable": True}, "DiagonalCurve": {"connections": [['S', 'W'], ['N', 'E']], "is_swappable": True}, "Tree_JunctionTop": {"connections": [['E', 'W'], ['W', 'N'], ['N', 'E']], "is_swappable": False}, "Tree_JunctionRight": {"connections": [['E', 'W'], ['N', 'E'], ['S', 'E']], "is_swappable": False}, "Tree_Roundabout": {"connections": [['W', 'N'], ['N', 'E'], ['E', 'S'], ['S', 'W']], "is_swappable": False}, "Tree_Crossroad": {"connections": [['N', 'S'], ['E', 'W']], "is_swappable": False}, "Tree_StraightDiagonal1": {"connections": [['N', 'S'], ['S', 'W'], ['N', 'E']], "is_swappable": False}, "Tree_StraightDiagonal2": {"connections": [['N', 'S'], ['N', 'W'], ['S', 'E']], "is_swappable": False}, }
+# TILE_DEFINITIONS: Dict[str, Dict[str, Any]] = { "Straight": {"connections": [['N', 'S']], "is_swappable": True}, "Curve": {"connections": [['N', 'E']], "is_swappable": True}, "StraightLeftCurve": {"connections": [['N', 'S'], ['S', 'W']], "is_swappable": True}, "StraightRightCurve": {"connections": [['N', 'S'], ['S', 'E']], "is_swappable": True}, "DoubleCurveY": {"connections": [['N', 'W'], ['N', 'E']], "is_swappable": True}, "DiagonalCurve": {"connections": [['S', 'W'], ['N', 'E']], "is_swappable": True}, "Tree_JunctionTop": {"connections": [['E', 'W'], ['W', 'N'], ['N', 'E']], "is_swappable": False}, "Tree_JunctionRight": {"connections": [['E', 'W'], ['N', 'E'], ['S', 'E']], "is_swappable": False}, "Tree_Roundabout": {"connections": [['W', 'N'], ['N', 'E'], ['E', 'S'], ['S', 'W']], "is_swappable": False}, "Tree_Crossroad": {"connections": [['N', 'S'], ['E', 'W']], "is_swappable": False}, "Tree_StraightDiagonal1": {"connections": [['N', 'S'], ['S', 'W'], ['N', 'E']], "is_swappable": False}, "Tree_StraightDiagonal2": {"connections": [['N', 'S'], ['N', 'W'], ['S', 'E']], "is_swappable": False}, }
+TILE_DEFINITIONS: Dict[str, Dict[str, Any]] = {
+    # This dictionary now perfectly matches the tilemap we just created.
+    # The AssetManager will use these coordinates to slice the image.
+    
+    # --- Row 1 ---
+    "Straight": {"connections": [['N', 'S']], "is_swappable": True, "asset_coords": (0, 0), "asset_size": (256, 256)},
+    "Curve": {"connections": [['N', 'E']], "is_swappable": True, "asset_coords": (256, 0), "asset_size": (256, 256)},
+    "StraightLeftCurve": {"connections": [['N', 'S'], ['S', 'W']], "is_swappable": True, "asset_coords": (512, 0), "asset_size": (256, 256)},
+    "StraightRightCurve": {"connections": [['N', 'S'], ['S', 'E']], "is_swappable": True, "asset_coords": (768, 0), "asset_size": (256, 256)},
+    
+    # --- Row 2 ---
+    "DoubleCurveY": {"connections": [['N', 'W'], ['N', 'E']], "is_swappable": True, "asset_coords": (0, 256), "asset_size": (256, 256)},
+    "DiagonalCurve": {"connections": [['S', 'W'], ['N', 'E']], "is_swappable": True, "asset_coords": (256, 256), "asset_size": (256, 256)},
+    "Tree_JunctionTop": {"connections": [['E', 'W'], ['W', 'N'], ['N', 'E']], "is_swappable": False, "asset_coords": (512, 256), "asset_size": (256, 256)},
+    "Tree_JunctionRight": {"connections": [['E', 'W'], ['N', 'E'], ['S', 'E']], "is_swappable": False, "asset_coords": (768, 256), "asset_size": (256, 256)},
+    
+    # --- Row 3 ---
+    "Tree_Roundabout": {"connections": [['W', 'N'], ['N', 'E'], ['E', 'S'], ['S', 'W']], "is_swappable": False, "asset_coords": (0, 512), "asset_size": (256, 256)},
+    "Tree_Crossroad": {"connections": [['N', 'S'], ['E', 'W']], "is_swappable": False, "asset_coords": (256, 512), "asset_size": (256, 256)},
+    "Tree_StraightDiagonal1": {"connections": [['N', 'S'], ['S', 'W'], ['N', 'E']], "is_swappable": False, "asset_coords": (512, 512), "asset_size": (256, 256)},
+    "Tree_StraightDiagonal2": {"connections": [['N', 'S'], ['N', 'W'], ['S', 'E']], "is_swappable": False, "asset_coords": (768, 512), "asset_size": (256, 256)},
+}
 TILE_COUNTS_BASE: Dict[str, int] = { "Straight": 21 * TILE_RUN_OUT_PREVENTION_SCALE_FACTOR, "Curve": 20 * TILE_RUN_OUT_PREVENTION_SCALE_FACTOR, "StraightLeftCurve": 10 * TILE_RUN_OUT_PREVENTION_SCALE_FACTOR, "StraightRightCurve": 10 * TILE_RUN_OUT_PREVENTION_SCALE_FACTOR, "DoubleCurveY": 10 * TILE_RUN_OUT_PREVENTION_SCALE_FACTOR, "DiagonalCurve": 6 * TILE_RUN_OUT_PREVENTION_SCALE_FACTOR, "Tree_JunctionTop": 6 * TILE_RUN_OUT_PREVENTION_SCALE_FACTOR, "Tree_JunctionRight": 6 * TILE_RUN_OUT_PREVENTION_SCALE_FACTOR, "Tree_Roundabout": 4 * TILE_RUN_OUT_PREVENTION_SCALE_FACTOR, "Tree_Crossroad": 4 * TILE_RUN_OUT_PREVENTION_SCALE_FACTOR, "Tree_StraightDiagonal1": 2 * TILE_RUN_OUT_PREVENTION_SCALE_FACTOR, "Tree_StraightDiagonal2": 2 * TILE_RUN_OUT_PREVENTION_SCALE_FACTOR, }
 TILE_COUNTS_5_PLUS_ADD: Dict[str, int] = {"Straight": 15, "Curve": 10,}
 STARTING_HAND_TILES: Dict[str, int] = {"Straight": 3, "Curve": 2,}
