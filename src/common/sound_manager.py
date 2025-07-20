@@ -26,7 +26,7 @@ class SoundManager:
             'auction_new_item': os.path.join(assets_path, 'auctionhouse', 'auction_new_item.wav'),
         }
         self.music_paths = {
-            'main_theme': os.path.join(assets_path, 'music', 'background_theme.wav'),
+            'main_theme': os.path.join(assets_path, 'music', 'background_theme.mp3'),
             'intro_theme': os.path.join(assets_path, 'music', 'intro_audio.wav')
         }
 
@@ -64,6 +64,12 @@ class SoundManager:
             pygame.mixer.music.play(loops)
         else:
             print(f"Music file not found: {music_file}")
+
+    def stop_music(self):
+        """Stops any currently playing music."""
+        if not pygame.mixer: return
+        pygame.mixer.music.stop()
+        self.music_path = "" # Clear the path so the next track can start fresh
             
     def set_music_volume(self, volume: float):
         """Sets the music volume. Volume should be between 0.0 and 1.0."""

@@ -40,6 +40,7 @@ class App:
         self.settings = {
             'cutscenes_enabled': True
         }
+        self.main_theme_playing = False
 
         # 2. Load assets. This needs the TILE_DEFINITIONS which are part of the game logic constants.
         self.asset_manager.load_all_assets(C.TILE_DEFINITIONS) 
@@ -79,9 +80,11 @@ class App:
 
             # --- Scene-specific "on enter" logic goes here ---
 
-            # If we are entering the MAIN_MENU, start the main theme music.
+            # If we are entering the MAIN_MENU for the first time, start the main theme.
             if scene_name == "MAIN_MENU":
-                self.sounds.play_music('main_theme')
+                if not self.main_theme_playing:
+                    self.sounds.play_music('main_theme') # This will loop by default
+                    self.main_theme_playing = True
 
             # If we are entering the GAME scene, check if an AI needs to be activated.
             elif scene_name == "GAME":

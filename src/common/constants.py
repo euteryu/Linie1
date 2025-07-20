@@ -47,6 +47,18 @@ ROUTE_CARD_VARIANTS: List[Dict[str, Dict[int, List[str]]]] = [ { "1-4": { 1: ['A
 TERMINAL_DATA: Dict[int, Tuple[Tuple[Tuple[int, int], int], Tuple[Tuple[int, int], int]]] = { 1: ( (((6, 0), 90), ((7, 0), 0)), (((2, 13), 180), ((3, 13), 270)) ), 2: ( (((10, 0), 90), ((11, 0), 0)), (((6, 13), 180), ((7, 13), 270)) ), 3: ( (((2, 0), 90), ((3, 0), 0)), (((10, 13), 180), ((11, 13), 270)) ), 4: ( (((0, 6), 90), ((0, 7), 180)), (((13, 10), 0), ((13, 11), 270)) ), 5: ( (((0, 2), 90), ((0, 3), 180)), (((13, 6), 0), ((13, 7), 270)) ), 6: ( (((0, 10), 90), ((0, 11), 180)), (((13, 2), 0), ((13, 3), 270)) ) }
 TERMINAL_COORDS: Dict[int, Tuple[Tuple[int,int], Tuple[int,int]]] = { line: (data[0][0][0], data[1][0][0]) for line, data in TERMINAL_DATA.items() }
 
+# Maps the Line Number to its asset's (x, y) coordinate on train_sprites.png
+TRAIN_ASSETS: Dict[int, Tuple[int, int]] = {
+    # Assuming a horizontal strip of 256x256 pixel assets
+    1: (0, 0),    # Line 1's train is at the far left
+    2: (256, 0),  # Line 2's train is to its right
+    3: (512, 0),
+    4: (768, 0),
+    5: (1024, 0),
+    6: (1280, 0)
+}
+TRAIN_ASSET_SIZE: Tuple[int, int] = (256, 256)
+
 ## TEST CONFIG #1: STRAIGHT VERTICAL LINE
 # # --- Grid Dimensions ---
 # GRID_ROWS: int = 5; GRID_COLS: int = 6

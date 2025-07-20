@@ -8,22 +8,27 @@ class UIManager:
     Manages all the individual UI components (panels) for the in-game screen.
     It delegates drawing and event handling to the appropriate components.
     """
-    def __init__(self, screen, tile_surfaces, mod_manager, theme):
+    def __init__(self, screen, strategy_tile_surfaces, pretty_tile_surfaces, mod_manager, theme):
         """
         Initializes the UI Manager.
-
+        
         Args:
             screen: The main pygame screen surface.
-            tile_surfaces: A dictionary of pre-rendered tile surfaces from the Visualizer.
+            strategy_tile_surfaces: A dictionary of the line-drawn tile surfaces.
+            pretty_tile_surfaces: A dictionary of the high-res asset tile surfaces.
             mod_manager: The game's mod manager instance.
         """
-        hand_tile_surfaces = {name: pygame.transform.scale(surf, (C.HAND_TILE_SIZE, C.HAND_TILE_SIZE)) 
-                              for name, surf in tile_surfaces.items()}
+        # Scale down both sets of surfaces for the hand panel
+        scaled_strategy_surfaces = {name: pygame.transform.scale(surf, (C.HAND_TILE_SIZE, C.HAND_TILE_SIZE)) 
+                                    for name, surf in strategy_tile_surfaces.items()}
+        scaled_pretty_surfaces = {name: pygame.transform.scale(surf, (C.HAND_TILE_SIZE, C.HAND_TILE_SIZE)) 
+                                  for name, surf in pretty_tile_surfaces.items()}
 
         self.components = [
             GameInfoPanel(screen, theme),
             PlayerInfoPanel(screen, theme),
-            HandPanel(screen, hand_tile_surfaces, theme),
+            # Pass both dictionaries to the HandPanel
+            HandPanel(screen, scaled_strategy_surfaces, scaled_pretty_surfaces, theme),
             MessagePanel(screen, theme),
             ButtonPanel(screen, theme),
             ModPanel(screen, theme),

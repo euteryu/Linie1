@@ -46,13 +46,9 @@ class GameScene(Scene):
         self.update_current_state_for_player()
         
         # Tile Surfaces for different views
-        # self.tile_surfaces now correctly refers to the line-drawn strategy view surfaces.
         self.tile_surfaces = {name: create_tile_surface(ttype, self.TILE_SIZE) for name, ttype in self.game.tile_types.items()}
-        # self.pretty_tile_surfaces holds the new, high-quality assets.
         self.pretty_tile_surfaces = self.asset_manager.images['tiles']
-        
-        # The UI Manager should always use the clear, strategic surfaces for its panels.
-        self.ui_manager = UIManager(self.screen, self.tile_surfaces, self.mod_manager, self.theme)
+        self.ui_manager = UIManager(self.screen, self.tile_surfaces, self.pretty_tile_surfaces, self.mod_manager, self.theme)
         
         # Debugging assets
         self.debug_tile_types: List[TileType] = list(self.game.tile_types.values())
@@ -108,11 +104,15 @@ class GameScene(Scene):
         self.ui_manager.draw(self.game, self.current_state)
         self.current_state.draw(screen)
 
+          
     def draw_board(self):
         """
-        Draws the grid and tiles, choosing between the strategic view (lines)
-        and the artistic view (assets) based on the toggle.
+        Draws the grid, tiles, buildings, and streetcars. This version includes:
+        - A toggle between "Strategy" (lines) and "Artistic" (assets) views.
+        - Correctly rendering the player's LINE NUMBER in Strategy View.
+        - Correctly rotating the train asset to match the direction of travel in Artistic View.
         """
+        # --- Drawing the grid, tiles, buildings, terminals, etc. ---
         for r in range(C.GRID_ROWS):
             for c in range(C.GRID_COLS):
                 rect = pygame.Rect(
@@ -122,25 +122,19 @@ class GameScene(Scene):
                 )
                 placed_tile = self.game.board.get_tile(r, c)
                 is_playable = self.game.board.is_playable_coordinate(r, c)
-                is_terminal = placed_tile is not None and placed_tile.is_terminal
                 
-                # Use theme colors
                 bg_color = self.theme["colors"]["board_bg"] if is_playable else self.theme["colors"]["background"]
                 grid_color = self.theme["colors"]["grid_lines"]
-                
-                if is_terminal: # Terminals can have a slightly different look if desired
+                if placed_tile and placed_tile.is_terminal:
                     bg_color = self.theme["colors"]["panel_border"]
-
                 pygame.draw.rect(self.screen, bg_color, rect)
                 pygame.draw.rect(self.screen, grid_color, rect, 1)
 
                 if placed_tile:
                     tile_surf = None
-                    # Choose which set of surfaces to use based on the view toggle
                     if self.strategy_view_active:
                         tile_surf = self.tile_surfaces.get(placed_tile.tile_type.name)
                     else:
-                        # For pretty view, we need to scale the high-res asset down to fit the tile size
                         raw_asset = self.pretty_tile_surfaces.get(placed_tile.tile_type.name)
                         if raw_asset:
                             tile_surf = pygame.transform.scale(raw_asset, (self.TILE_SIZE, self.TILE_SIZE))
@@ -169,38 +163,68 @@ class GameScene(Scene):
         for line_num, entrances in C.TERMINAL_DATA.items():
             try:
                 for entrance_pair in entrances:
-                    cell1_coord = entrance_pair[0][0]
-                    cell2_coord = entrance_pair[1][0]
-                    rect1_x = C.BOARD_X_OFFSET + (cell1_coord[1] - C.PLAYABLE_COLS[0]) * self.TILE_SIZE
-                    rect1_y = C.BOARD_Y_OFFSET + (cell1_coord[0] - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE
-                    rect2_x = C.BOARD_X_OFFSET + (cell2_coord[1] - C.PLAYABLE_COLS[0]) * self.TILE_SIZE
-                    rect2_y = C.BOARD_Y_OFFSET + (cell2_coord[0] - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE
-                    center_x = (rect1_x + rect2_x + self.TILE_SIZE) // 2
-                    center_y = (rect1_y + rect2_y + self.TILE_SIZE) // 2
-                    
+                    cell1_coord, cell2_coord = entrance_pair[0][0], entrance_pair[1][0]
+                    rect1_x, rect1_y = C.BOARD_X_OFFSET + (cell1_coord[1] - C.PLAYABLE_COLS[0]) * self.TILE_SIZE, C.BOARD_Y_OFFSET + (cell1_coord[0] - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE
+                    rect2_x, rect2_y = C.BOARD_X_OFFSET + (cell2_coord[1] - C.PLAYABLE_COLS[0]) * self.TILE_SIZE, C.BOARD_Y_OFFSET + (cell2_coord[0] - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE
+                    center_x, center_y = (rect1_x + rect2_x + self.TILE_SIZE) // 2, (rect1_y + rect2_y + self.TILE_SIZE) // 2
                     term_surf = terminal_font.render(str(line_num), True, self.theme["colors"]["text_light"])
                     term_rect = term_surf.get_rect(center=(center_x, center_y))
                     bg_rect = term_rect.inflate(6, 4)
-                    
                     pygame.draw.rect(self.screen, self.theme["colors"]["background"], bg_rect, border_radius=3)
                     self.screen.blit(term_surf, term_rect)
-            except Exception as e:
-                 print(f"Error processing TERMINAL_DATA for Line {line_num}: {e}")
+            except Exception: pass
 
+        # --- Drawing the players' streetcars ---
         for player in self.game.players:
             if player.player_state == PlayerState.DRIVING and player.streetcar_position:
                  r, c = player.streetcar_position
-                 if self.game.board.is_valid_coordinate(r, c):
+                 if self.game.board.is_valid_coordinate(r, c) and player.line_card:
                      screen_x = C.BOARD_X_OFFSET + (c - C.PLAYABLE_COLS[0]) * self.TILE_SIZE + C.TILE_SIZE // 2
-                     screen_y = C.BOARD_Y_OFFSET + (r - C.PLAYABLE_ROWS[0]) * C.TILE_SIZE + C.TILE_SIZE // 2
-                     tram_radius = C.TILE_SIZE // 3
-                     p_color = C.PLAYER_COLORS[player.player_id % len(C.PLAYER_COLORS)]
-                     pygame.draw.circle(self.screen, p_color, (screen_x, screen_y), tram_radius)
-                     pygame.draw.circle(self.screen, self.theme["colors"]["background"], (screen_x, screen_y), tram_radius, 2)
-                     id_font = get_font(int(tram_radius * 1.5))
-                     id_surf = id_font.render(str(player.player_id), True, self.theme["colors"]["text_light"])
-                     self.screen.blit(id_surf, id_surf.get_rect(center=(screen_x, screen_y)))
-        # --- END OF FIX ---
+                     screen_y = C.BOARD_Y_OFFSET + (r - C.PLAYABLE_ROWS[0]) * self.TILE_SIZE + C.TILE_SIZE // 2
+                     line_num = player.line_card.line_number
+                     
+                     if self.strategy_view_active:
+                         tram_radius = C.TILE_SIZE // 3
+                         p_color = C.PLAYER_COLORS[player.player_id % len(C.PLAYER_COLORS)]
+                         pygame.draw.circle(self.screen, p_color, (screen_x, screen_y), tram_radius)
+                         pygame.draw.circle(self.screen, self.theme["colors"]["background"], (screen_x, screen_y), tram_radius, 2)
+                         id_font = get_font(int(tram_radius * 1.5))
+                         id_surf = id_font.render(str(line_num), True, self.theme["colors"]["text_light"])
+                         self.screen.blit(id_surf, id_surf.get_rect(center=(screen_x, screen_y)))
+                     else:
+                         # --- START OF CHANGE: Implement Train Orientation Logic ---
+                         train_asset = self.asset_manager.images['trains'].get(line_num)
+                         if train_asset:
+                             # Determine the correct orientation angle
+                             angle = 0
+                             direction = player.arrival_direction
+
+                             # If it's the start of the path, arrival_direction is None.
+                             # We must calculate the direction to the *next* tile.
+                             if direction is None and player.validated_route and len(player.validated_route) > 1:
+                                 next_pos = player.validated_route[1].coord
+                                 dr, dc = next_pos[0] - r, next_pos[1] - c
+                                 if (dr, dc) == (-1, 0): direction = Direction.N
+                                 elif (dr, dc) == (1, 0): direction = Direction.S
+                                 elif (dr, dc) == (0, 1): direction = Direction.E
+                                 elif (dr, dc) == (0, -1): direction = Direction.W
+                             
+                             # Map the final direction to a rotation angle
+                             # (Assets face North by default)
+                             if direction == Direction.E: angle = -90
+                             elif direction == Direction.S: angle = 180
+                             elif direction == Direction.W: angle = 90
+                             
+                             train_size = int(self.TILE_SIZE * 0.8)
+                             scaled_train = pygame.transform.scale(train_asset, (train_size, train_size))
+                             rotated_train = pygame.transform.rotate(scaled_train, angle)
+                             
+                             # Get the rect of the new, rotated surface and center it
+                             train_rect = rotated_train.get_rect(center=(screen_x, screen_y))
+                             self.screen.blit(rotated_train, train_rect.topleft)
+                         # --- END OF CHANGE ---
+
+    
 
     def draw_overlays(self):
         """Draws all dynamic elements on top of the board, like highlights and previews."""

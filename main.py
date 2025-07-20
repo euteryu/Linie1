@@ -20,7 +20,7 @@ if __name__ == '__main__':
 
         # 2. Activate desired mods.
         # mod_manager.activate_mod("magic_system")
-        mod_manager.activate_mod("economic_mod")
+        # mod_manager.activate_mod("economic_mod")
 
         # 3. Define game configuration
         # player_types = ['human', 'ai']

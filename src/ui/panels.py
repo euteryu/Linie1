@@ -55,9 +55,10 @@ class PlayerInfoPanel(IUIComponent):
 
 class HandPanel(IUIComponent):
     """Displays the player's hand of tiles."""
-    def __init__(self, screen, hand_tile_surfaces, theme):
+    def __init__(self, screen, strategy_surfaces, pretty_surfaces, theme):
         super().__init__(screen)
-        self.hand_tile_surfaces = hand_tile_surfaces
+        self.strategy_surfaces = strategy_surfaces
+        self.pretty_surfaces = pretty_surfaces
         self.theme = theme
         self.current_hand_rects = {}
 
@@ -81,10 +82,19 @@ class HandPanel(IUIComponent):
             rect = pygame.Rect(C.HAND_AREA_X, y_pos, C.HAND_TILE_SIZE, C.HAND_TILE_SIZE)
             self.current_hand_rects[i] = rect
 
-            pygame.draw.rect(self.screen, self.theme["colors"]["text_light"], rect) # Use white as background for tracks
-            hand_surf = self.hand_tile_surfaces.get(tile_type.name)
+            # Determine which set of surfaces to use
+            active_surfaces = self.strategy_surfaces if current_state.scene.strategy_view_active else self.pretty_surfaces
+            
+            # Draw the background for the tile
+            if current_state.scene.strategy_view_active:
+                pygame.draw.rect(self.screen, self.theme["colors"]["text_light"], rect) # White bg for strategy view
+            else:
+                pygame.draw.rect(self.screen, self.theme["colors"]["panel_bg"], rect) # Panel bg for pretty view
+            
+            hand_surf = active_surfaces.get(tile_type.name)
             if hand_surf:
                 self.screen.blit(hand_surf, rect.topleft)
+
             pygame.draw.rect(self.screen, self.theme["colors"]["panel_border"], rect, 1)
 
             if i in staged_hand_indices:

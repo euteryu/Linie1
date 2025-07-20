@@ -18,10 +18,10 @@ class IntroScene(Scene):
         self.asset_manager = asset_manager
         self.ended = False
 
-        # Stop any currently playing music (like the main theme if returning to the menu)
-        # self.scene_manager.sounds.stop_music()
-        # Play the dedicated intro audio
-        self.scene_manager.sounds.play_music('intro_theme', loops=0) # Play only once
+        # 1. Stop any music that might be playing (e.g., if returning to menu).
+        self.scene_manager.sounds.stop_music()
+        # 2. Play the intro's dedicated theme once.
+        self.scene_manager.sounds.play_music('intro_theme', loops=0)
 
         try:
             video_path = os.path.join(self.asset_manager.assets_path, 'videos', 'intro.mp4')
@@ -55,10 +55,9 @@ class IntroScene(Scene):
         """Cleans up and transitions to the main menu."""
         if not self.ended:
             self.ended = True
-            # --- START OF CHANGE: Release the video capture object ---
+            self.scene_manager.sounds.stop_music()
             if hasattr(self, 'cap'):
                 self.cap.release()
-            # --- END OF CHANGE ---
             self.scene_manager.go_to_scene("MAIN_MENU")
 
     def handle_events(self, events):

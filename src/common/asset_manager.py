@@ -2,6 +2,7 @@
 import pygame
 import os
 from typing import Dict, Any, Tuple, Optional, List
+from common import constants as C
 
 class AssetManager:
     """
@@ -17,11 +18,12 @@ class AssetManager:
         """
         self.root_dir = root_dir
         self.assets_path = os.path.join(self.root_dir, 'src', 'assets')
-        
-        # Dictionaries to hold the loaded assets
+
         self.images: Dict[str, Any] = {
-            'tiles': {} # Will store {'Straight': <Surface>, ...}
+            'tiles': {},
+            'trains': {} # This key was missing
         }
+        
         self.fonts: Dict[str, pygame.font.Font] = {}
         self.sounds: Dict[str, pygame.mixer.Sound] = {}
 
@@ -66,6 +68,25 @@ class AssetManager:
             print(f"!!! CRITICAL ERROR: Could not load tilemap.png. Error: {e}")
         except FileNotFoundError:
             print(f"!!! CRITICAL ERROR: Asset file not found at '{tilemap_path}'.")
+
+        # --- 2. Load and Slice the Train Sprites ---
+        try:
+            train_sheet_path = os.path.join(self.assets_path, 'images', 'train_sprites.png')
+            train_sheet_image = pygame.image.load(train_sheet_path).convert_alpha()
+
+            # The constants are now correctly imported and accessible
+            for line_num, coords in C.TRAIN_ASSETS.items():
+                rect = pygame.Rect(coords[0], coords[1], C.TRAIN_ASSET_SIZE[0], C.TRAIN_ASSET_SIZE[1])
+                train_surface = train_sheet_image.subsurface(rect)
+                self.images['trains'][line_num] = train_surface
+            
+            print(f"    - Successfully loaded and sliced {len(self.images['trains'])} trains.")
+
+        except FileNotFoundError:
+            print(f"!!! WARNING: Asset file not found at '{train_sheet_path}'. Train sprites will not be available.")
+        except (pygame.error, KeyError, AttributeError) as e:
+            # Catch multiple potential errors for clearer debugging
+            print(f"!!! WARNING: Could not load or slice train_sprites.png. Error: {e}")
             
         # --- 2. Future Asset Loading ---
         # When you have a TV screen asset, you would add its loading logic here:
