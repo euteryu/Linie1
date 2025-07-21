@@ -9,17 +9,41 @@ class Level:
     from a .json file.
     """
     def __init__(self, filepath: str):
+        """
+        Initializes and loads the Level object.
+        RAISES FileNotFoundError if the level file cannot be found or parsed.
+        """
         self.filepath = filepath
         self.level_name: str = "Unknown"
         self.author: str = "Unknown"
-        self.grid_rows: int = 14
-        self.grid_cols: int = 14
-        self.playable_rows: Tuple[int, int] = (1, 12)
-        self.playable_cols: Tuple[int, int] = (1, 12)
+        self.grid_rows: int = 0
+        self.grid_cols: int = 0
+        self.playable_rows: Tuple[int, int] = (0, 0)
+        self.playable_cols: Tuple[int, int] = (0, 0)
         self.building_coords: Dict[str, Tuple[int, int]] = {}
         self.terminal_data: Dict[str, Any] = {}
 
-        self.load()
+        print(f"--- Loading level data from: {self.filepath} ---")
+        try:
+            with open(self.filepath, 'r') as f:
+                data = json.load(f)
+
+            self.level_name = data["level_name"]
+            self.author = data["author"]
+            self.grid_rows = data["grid_rows"]
+            self.grid_cols = data["grid_cols"]
+            self.playable_rows = tuple(data["playable_rows"])
+            self.playable_cols = tuple(data["playable_cols"])
+            self.building_coords = {k: tuple(v) for k, v in data["building_coords"].items()}
+            self.terminal_data = data["terminal_data"]
+            
+            print(f"--- Level '{self.level_name}' loaded successfully. ---")
+
+        except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+            # If the file is missing, invalid JSON, or missing a key,
+            # print an error and re-raise the exception to signal failure.
+            print(f"!!! CRITICAL ERROR: Could not load level file '{self.filepath}'. Reason: {e}")
+            raise  # This is the crucial change
 
     def load(self):
         """Parses the .json file and populates the level data."""

@@ -4,6 +4,7 @@ import pygame
 import sys
 import json
 import tkinter as tk
+from tkinter import messagebox
 
 from scenes.level_selection_scene import LevelSelectionScene
 from levels.level import Level
@@ -77,39 +78,31 @@ class App:
     def start_new_game(self, level_filename: str):
         """
         Creates a brand new Game and GameScene with the specified level file,
-        then switches to the game.
+        now with robust error handling.
         """
         try:
-            # 1. Load the selected level data
+            # 1. Attempt to load the selected level data. This may fail.
             level_path = os.path.join(self.root_dir, 'src', 'levels', level_filename)
             level_data = Level(level_path)
 
-            # --- START OF CHANGE: Reconstruct the player_types list ---
-            # 2. Get the configuration from the old game instance
-            from game_logic.player import AIPlayer # Import for isinstance check
-            
-            # Create a new list of strings ('human' or 'ai') from the existing player objects
+            # 2. If loading succeeds, create the new game instances.
+            from game_logic.player import AIPlayer
             player_types = ['ai' if isinstance(p, AIPlayer) else 'human' for p in self.game_instance.players]
             difficulty = self.game_instance.difficulty
             
-            # 3. Create new game and scene instances using the correct data types
             new_game = Game(player_types, difficulty, self.mod_manager, level_data)
-            # --- END OF CHANGE ---
-            
             new_game_scene = GameScene(self, new_game, self.sounds, self.mod_manager, self.asset_manager)
             
-            # 4. Replace the old instances in the App
+            # 3. Replace the old instances and switch to the game.
             self.game_instance = new_game
             self.scenes['GAME'] = new_game_scene
-            
-            # 5. Switch to the new game
             self.go_to_scene('GAME')
 
         except Exception as e:
+            # 4. If loading fails for any reason, show an error and return to the menu.
             print(f"!!! ERROR starting new game with level '{level_filename}': {e}")
-            import traceback
-            traceback.print_exc()
-            self.go_to_scene('MAIN_MENU')
+            messagebox.showerror("Level Load Error", f"Failed to load level file:\n{level_filename}\n\nReason: {e}")
+            self.go_to_scene('LEVEL_SELECTION')
 
     def launch_level_editor(self):
         """Launches the level editor as a separate process."""
