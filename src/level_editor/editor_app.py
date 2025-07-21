@@ -56,30 +56,57 @@ class EditorApp:
 
           
     def handle_events(self):
-        """Handles all user input."""
+        """Handles all user input, now correctly passing mouse position."""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
             
+            sidebar_result = self.sidebar.handle_event(event)
+            
+            if sidebar_result == "ui_focus":
+                continue # The sidebar is typing or scrolling, don't interact with the grid.
+            elif sidebar_result == "Save": self.save_level()
+            elif sidebar_result == "Load": self.load_level()
+            elif sidebar_result == "Export": self.export_level()
+
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_r:
                     self.current_orientation = (self.current_orientation + 90) % 360
             
-            # --- START OF CHANGE: The sidebar now handles all its own events ---
-            # Pass the event to the sidebar to handle clicks, scroll wheel, and dragging
-            click_result = self.sidebar.handle_event(event)
+            if event.type == pygame.MOUSEWHEEL:
+                self.sidebar.handle_event(event) # Pass the whole event for simplicity
 
-            if click_result == "Save": self.save_level()
-            elif click_result == "Load": self.load_level()
-            elif click_result == "Export": self.export_level()
-            # --- END OF CHANGE ---
-
-            # Handle grid clicks only if the sidebar didn't consume the event
+            # --- START OF CHANGE: Correct the logic for mouse clicks ---
+            # We handle the sidebar event first, and only if it doesn't consume the click
+            # do we process it as a grid click.
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if not self.sidebar.rect.collidepoint(event.pos):
+                click_result = self.sidebar.handle_event(event)
+
+                if click_result == "stamp":
+                    # A stamp was selected, which is all we need to do.
+                    pass 
+                elif click_result == "Save":
+                    self.save_level()
+                elif click_result == "Load":
+                    self.load_level()
+                elif click_result == "Export":
+                    self.export_level()
+                elif click_result == "Mute Music":
+                    self.sounds.toggle_mute()
+                elif click_result == "Search":
+                    self.search_for_stamp()
+                elif click_result is None:
+                    # If the sidebar didn't handle the click, it must be for the grid.
+                    # We can safely get the mouse position from the event here.
+                    mouse_pos = event.pos
                     selected_stamp = self.sidebar.get_selected_stamp()
                     if selected_stamp:
-                        self.grid.handle_click(event.pos, selected_stamp, self.current_orientation)
+                        self.grid.handle_click(mouse_pos, selected_stamp, self.current_orientation)
+            
+            # Pass other mouse events to the sidebar for things like scrollbar dragging
+            elif event.type == pygame.MOUSEBUTTONUP or event.type == pygame.MOUSEMOTION:
+                self.sidebar.handle_event(event)
+            # --- END OF CHANGE ---
 
     def update(self):
         """Update logic (not needed for Phase 1)."""
@@ -89,7 +116,7 @@ class EditorApp:
         """Draws all components to the screen."""
         self.screen.fill((20, 20, 30))
         self.grid.draw(self.screen)
-        self.sidebar.draw(self.screen)
+        self.sidebar.draw(self.screen, self.sounds)
         self._draw_mouse_preview()
         pygame.display.flip()
 
@@ -179,69 +206,43 @@ class EditorApp:
 
     def export_level(self):
         """
-        Validates the grid data, correctly groups terminal pairs, and exports
-        to a game-ready .json file.
+        Exports the current grid data to a game-ready .json file,
+        now without the extra name/author prompts.
         """
         grid_data = self.grid.get_grid_data()
         
-        # 1. Transform raw grid data
+        # 1. Transform and validate the data (this logic is correct from last time)
         building_coords = {}
-        # This list will store tuples of: (line_num, (r, c), orientation)
+        terminals_by_line = {i: [] for i in range(1, 7)}
         raw_terminals: List[Tuple[int, Tuple[int, int], int]] = []
-        
         for r, row_data in enumerate(grid_data):
             for c, stamp in enumerate(row_data):
                 if stamp:
-                    if stamp['type'] == 'building':
-                        building_coords[stamp['name']] = [r, c]
-                    elif stamp['type'] == 'terminal':
-                        raw_terminals.append( (stamp['line_number'], (r,c), stamp['orientation']) )
-
-        # 2. Group terminals into logical pairs
-        terminals_by_line = {i: [] for i in range(1, 7)}
+                    if stamp['type'] == 'building': building_coords[stamp['name']] = [r, c]
+                    elif stamp['type'] == 'terminal': raw_terminals.append((stamp['line_number'], (r,c), stamp['orientation']))
+        
         for term in raw_terminals:
-            line_num, pos, orient = term
-            is_paired = False
-            # Check if this terminal is adjacent to another of the same line
+            line_num, pos, orient = term; is_paired = False
             for other_term in raw_terminals:
                 if term == other_term: continue
                 other_line, other_pos, other_orient = other_term
-                if line_num == other_line:
-                    # Check for adjacency (Manhattan distance of 1)
-                    if abs(pos[0] - other_pos[0]) + abs(pos[1] - other_pos[1]) == 1:
-                        # Found a pair. Add it to the list, ensuring no duplicates.
-                        pair = tuple(sorted((term, other_term)))
-                        if pair not in terminals_by_line[line_num]:
-                            terminals_by_line[line_num].append(pair)
-                        is_paired = True
-                        break
+                if line_num == other_line and abs(pos[0] - other_pos[0]) + abs(pos[1] - other_pos[1]) == 1:
+                    pair = tuple(sorted((term, other_term)))
+                    if pair not in terminals_by_line[line_num]: terminals_by_line[line_num].append(pair)
+                    is_paired = True; break
             if not is_paired:
-                messagebox.showerror("Validation Error", f"Terminal for Line {line_num} at {pos} is unpaired. All terminals must be placed in pairs.")
-                return
+                messagebox.showerror("Validation Error", f"Terminal for Line {line_num} at {pos} is unpaired."); return
 
-        # 3. Validate the grouped pairs
         final_terminal_data = {}
         for line_num, pairs in terminals_by_line.items():
             if not pairs: continue
-            
-            # Each "pair" in the list is a tuple of two terminals. There should be two such pairs for a complete line.
             if len(pairs) != 2:
-                messagebox.showerror("Validation Error", f"Line {line_num} has {len(pairs)} terminal ends placed. Each active line requires exactly two ends (four total curve tiles).")
-                return
-            
-            # Format the data into the exact structure from constants.py
-            # pair1 = [ ((r,c), o), ((r,c), o) ]
-            # pair2 = [ ((r,c), o), ((r,c), o) ]
-            pair1 = [ [list(p[1]), p[2]] for p in pairs[0] ]
-            pair2 = [ [list(p[1]), p[2]] for p in pairs[1] ]
+                messagebox.showerror("Validation Error", f"Line {line_num} has {len(pairs)} terminal ends. Each line requires exactly two."); return
+            pair1 = [ [list(p[1]), p[2]] for p in pairs[0] ]; pair2 = [ [list(p[1]), p[2]] for p in pairs[1] ]
             final_terminal_data[str(line_num)] = [ pair1, pair2 ]
 
-        # 4. Prompt for metadata and save location
+        # 2. Prompt for save location
         self.tk_root = tk.Tk(); self.tk_root.withdraw()
-        level_name = simpledialog.askstring("Export", "Enter Level Name:", initialvalue="Custom Level")
-        author_name = simpledialog.askstring("Export", "Enter Author Name:", initialvalue="Editor")
-        if not level_name or not author_name: return
-
         filepath = filedialog.asksaveasfilename(
             title="Export Level to JSON",
             initialdir=os.path.join(os.path.dirname(__file__), '..', 'levels'),
@@ -251,23 +252,31 @@ class EditorApp:
         self.tk_root.destroy()
         if not filepath: return
 
-        # 5. Create the final JSON object
+        # 3. Auto-generate metadata from the filename
+        base_name = os.path.basename(filepath)
+        name_without_ext = os.path.splitext(base_name)[0]
+        level_name = name_without_ext.replace('_', ' ').replace('-', ' ').title()
+        author_name = "Level Editor"
+
+        # 4. Create and write the final JSON object
         export_data = {
-            "level_name": level_name,
-            "author": author_name,
-            "grid_rows": self.grid.total_rows,
-            "grid_cols": self.grid.total_cols,
-            "playable_rows": [1, self.grid.playable_rows],
-            "playable_cols": [1, self.grid.playable_cols],
-            "building_coords": building_coords,
-            "terminal_data": final_terminal_data # Use the new, validated, and formatted data
+            "level_name": level_name, "author": author_name,
+            "grid_rows": self.grid.total_rows, "grid_cols": self.grid.total_cols,
+            "playable_rows": [1, self.grid.playable_rows], "playable_cols": [1, self.grid.playable_cols],
+            "building_coords": building_coords, "terminal_data": final_terminal_data
         }
-        
-        # 6. Write the file
         try:
-            with open(filepath, 'w') as f:
-                json.dump(export_data, f, indent=2)
+            with open(filepath, 'w') as f: json.dump(export_data, f, indent=2)
             messagebox.showinfo("Success", "Level exported successfully!")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to export level: {e}")
     # --- END OF CHANGE ---
+
+    def search_for_stamp(self):
+        """Prompts the user for a search term and tells the sidebar to find it."""
+        self.tk_root = tk.Tk(); self.tk_root.withdraw()
+        search_term = simpledialog.askstring("Search Stamp", "Enter name of tile, building, or tool to find:")
+        self.tk_root.destroy()
+        
+        if search_term:
+            self.sidebar.search_and_select(search_term)

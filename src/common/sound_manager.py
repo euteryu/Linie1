@@ -47,12 +47,15 @@ class SoundManager:
 
     def play(self, name, loops=0):
         """Play a loaded sound effect by its name."""
-        if self.is_muted or name not in self.sounds or self.sounds[name] is None:
+        if self.is_muted or not pygame.mixer: 
             return
-        self.sounds[name].play(loops)
+        if name in self.sounds and self.sounds[name] is not None:
+            self.sounds[name].play(loops)
 
     def play_music(self, name, loops=-1):
         """Load and play a music track by name. Loops forever by default."""
+        if self.is_muted or not pygame.mixer:
+            return
         if self.is_muted or name not in self.music_paths:
             return
         
@@ -71,6 +74,15 @@ class SoundManager:
         pygame.mixer.music.stop()
         self.music_path = "" # Clear the path so the next track can start fresh
             
+    def toggle_mute(self):
+        """Toggles the master mute state for all sounds and music."""
+        self.is_muted = not self.is_muted
+        if self.is_muted:
+            pygame.mixer.music.pause()
+        else:
+            pygame.mixer.music.unpause()
+        print(f"Sound has been {'Muted' if self.is_muted else 'Unmuted'}.")
+
     def set_music_volume(self, volume: float):
         """Sets the music volume. Volume should be between 0.0 and 1.0."""
         # Clamp volume between 0.0 and 1.0
