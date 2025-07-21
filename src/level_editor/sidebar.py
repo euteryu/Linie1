@@ -6,6 +6,7 @@ from tkinter import messagebox
 # Correct, fully qualified imports as requested
 from common import constants as C
 from common.rendering_utils import create_tile_surface, get_font, draw_text
+from common.sound_manager import SoundManager
 
 SIDEBAR_WIDTH = 250
 ITEM_SIZE = 60
@@ -189,18 +190,22 @@ class Sidebar:
         if max_scroll > 0: self.scroll_offset = min(self.scroll_offset, max_scroll)
         else: self.scroll_offset = 0
 
-    def draw(self, screen: pygame.Surface):
+    def draw(self, screen: pygame.Surface, sounds: SoundManager):
+        """
+        Draws all UI elements, including the dynamically labeled Mute button.
+
+        Args:
+            screen (pygame.Surface): The main display surface.
+            sounds (SoundManager): The game's sound manager instance.
+        """
         pygame.draw.rect(screen, (40, 40, 60), self.rect)
         
-        # --- START OF CHANGE: Simplified drawing loop ---
         for element in self._filtered_elements:
-            name = element['name']
-            elem_type = element['type']
+            name, elem_type = element['name'], element['type']
             abs_rect = self.ui_rects.get(name)
             if not abs_rect: continue
             
             pos_x, pos_y = self.rect.left + abs_rect.x, self.rect.top + abs_rect.y - self.scroll_offset
-            # Cull elements that are scrolled out of view
             if pos_y > self.height or pos_y + abs_rect.height < 0: continue
             
             rect = pygame.Rect(pos_x, pos_y, abs_rect.width, abs_rect.height)
@@ -216,12 +221,14 @@ class Sidebar:
                 draw_text(screen, element['text'], rect.left + 5, rect.centery, (180, 180, 200), 20, False, True)
 
             elif elem_type == 'action':
+                # Use the passed-in sounds object to get the current mute state
                 text = name
                 if name == 'Mute Music':
                     text = "Unmute" if sounds.is_muted else "Mute"
+                
                 color = (100, 100, 130) if rect.collidepoint(pygame.mouse.get_pos()) else (80, 80, 100)
                 pygame.draw.rect(screen, color, rect, border_radius=8)
-                draw_text(screen, name, rect.centerx, rect.centery, C.COLOR_WHITE, 22, True, True)
+                draw_text(screen, text, rect.centerx, rect.centery, C.COLOR_WHITE, 22, True, True)
                 pygame.draw.rect(screen, (120, 120, 150), rect, 2, border_radius=8)
             
             else: # It's a stamp

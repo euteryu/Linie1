@@ -7,36 +7,31 @@ from tkinter import simpledialog, filedialog, messagebox
 import pickle
 import json
 
-# --- START OF CHANGE: Correct the import paths ---
 # Since 'src' is on the system path, we import from its subdirectories directly.
 from level_editor.grid import Grid
 from level_editor.sidebar import Sidebar
 from common import constants as C
-# --- END OF CHANGE ---
+from common.sound_manager import SoundManager
 
 class EditorApp:
-    def __init__(self):
-        # --- Prompt for grid size ---
+    def __init__(self, sounds: SoundManager):
+        self.sounds = sounds # Store the passed-in SoundManager instance
+        
         self.tk_root = tk.Tk()
         self.tk_root.withdraw()
-        rows = simpledialog.askinteger("Grid Size", "Enter number of PLAYABLE rows (e.g., 12):", initialvalue=12, minvalue=3, maxvalue=50)
-        cols = simpledialog.askinteger("Grid Size", "Enter number of PLAYABLE columns (e.g., 12):", initialvalue=12, minvalue=3, maxvalue=50)
+        rows = simpledialog.askinteger("Grid Size", "Enter PLAYABLE rows:", initialvalue=12, minvalue=3, maxvalue=50)
+        cols = simpledialog.askinteger("Grid Size", "Enter PLAYABLE columns:", initialvalue=12, minvalue=3, maxvalue=50)
         self.tk_root.destroy()
 
         if not rows or not cols:
-            print("Invalid input. Exiting.")
             sys.exit()
 
-        # --- Initialize Pygame ---
-        pygame.init()
-        # You can adjust these values to perfectly match your preference
-        self.editor_width = 1545
-        self.editor_height = 881
+        # The pygame.init() call is now correctly in main.py
+        self.editor_width, self.editor_height = 1600, 900
         self.screen = pygame.display.set_mode((self.editor_width, self.editor_height))
         pygame.display.set_caption("Linie 1: Level Editor")
         self.clock = pygame.time.Clock()
 
-        # --- Create Components ---
         self.sidebar = Sidebar(self.editor_height, self.editor_width)
         self.grid = Grid(rows, cols, self.sidebar.width, self.editor_width, self.editor_height)
         

@@ -28,7 +28,7 @@ class MainMenuScene(Scene):
 
     def on_button_click(self, button_text):
         if button_text == "Play Game":
-            self.scene_manager.go_to_scene("GAME")
+            self.scene_manager.go_to_scene("LEVEL_SELECTION")
         elif button_text == "Load Game":
             self.scene_manager.load_game_action()
         elif button_text == "Save Game":

@@ -37,7 +37,7 @@ if __name__ == '__main__':
         sounds.load_sounds()
         sounds.play_music('main_theme')
         
-        app = EditorApp()
+        app = EditorApp(sounds)
         app.run()
     except Exception as e:
         print(f"\nAn unexpected error occurred: {e}")

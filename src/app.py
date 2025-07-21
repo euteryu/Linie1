@@ -5,6 +5,10 @@ import sys
 import json
 import tkinter as tk
 
+from scenes.level_selection_scene import LevelSelectionScene
+from levels.level import Level
+import subprocess
+
 # Import your scenes
 from common.asset_manager import AssetManager
 from scenes.intro_scene import IntroScene
@@ -15,10 +19,21 @@ from game_logic.game import Game
 from common.sound_manager import SoundManager
 from mods.mod_manager import ModManager
 from common import constants as C
+from levels.level import Level
 
 class App:
     """The main application class, now acting as a Scene Manager."""
-    def __init__(self, root_dir: str, player_types: list[str], difficulty: str, mod_manager: ModManager):
+    def __init__(self, root_dir: str, player_types: list[str], difficulty: str, mod_manager: ModManager, level_data: Level):
+        """
+        Initializes the main application.
+
+        Args:
+            root_dir (str): The project's root directory.
+            player_types (list[str]): List of player types for the game.
+            difficulty (str): AI difficulty.
+            mod_manager (ModManager): The game's mod manager.
+            level_data (Level): The loaded data for the map to be played.
+        """
         pygame.init()
         self.screen = pygame.display.set_mode((C.SCREEN_WIDTH, C.SCREEN_HEIGHT))
         pygame.display.set_caption("Linie 1: Gilded Rails")
@@ -26,74 +41,119 @@ class App:
         
         self.root_dir = root_dir
 
-        # 0. Load the theme dictionary. This MUST happen before scenes are created.
         theme_path = os.path.join(self.root_dir, 'src', 'assets', 'themes', 'ui_theme_dark.json')
         with open(theme_path, 'r') as f:
             self.theme = json.load(f)
 
-        # 1. Initialize core managers first.
         self.asset_manager = AssetManager(self.root_dir)
         self.sounds = SoundManager(self.root_dir)
         self.mod_manager = mod_manager
         
-        # Game-wide settings are stored here
-        self.settings = {
-            'cutscenes_enabled': True
-        }
+        self.settings = {'cutscenes_enabled': True}
         self.main_theme_playing = False
 
-        # 2. Load assets. This needs the TILE_DEFINITIONS which are part of the game logic constants.
         self.asset_manager.load_all_assets(C.TILE_DEFINITIONS) 
-            
-        # 3. Create the main game instance. This MUST happen before creating the GameScene.
-        self.game_instance = Game(player_types, difficulty, mod_manager)
         
-        # 4. Initialize Tkinter for file dialogs.
+        # Pass the level_data to the Game instance
+        self.game_instance = Game(player_types, difficulty, mod_manager, level_data)
+        
         try:
             self.tk_root = tk.Tk()
             self.tk_root.withdraw()
         except Exception as e:
             self.tk_root = None
 
-        # 5. Now that all required objects exist, create the scenes.
         self.scenes = {
             "INTRO": IntroScene(self, self.asset_manager),
             "MAIN_MENU": MainMenuScene(self, self.asset_manager),
+            "LEVEL_SELECTION": LevelSelectionScene(self, self.asset_manager),
             "GAME": GameScene(self, self.game_instance, self.sounds, self.mod_manager, self.asset_manager),
             "SETTINGS": SettingsScene(self, self.asset_manager)
         }
         
-        # 6. Set the starting scene.
         self.current_scene = self.scenes["INTRO"]
-        
-        # 7. Finally, link the game instance to its visualizer (the GameScene).
         self.game_instance.visualizer = self.scenes["GAME"]
+
+    def start_new_game(self, level_filename: str):
+        """
+        Creates a brand new Game and GameScene with the specified level file,
+        then switches to the game.
+        """
+        try:
+            # 1. Load the selected level data
+            level_path = os.path.join(self.root_dir, 'src', 'levels', level_filename)
+            level_data = Level(level_path)
+
+            # --- START OF CHANGE: Reconstruct the player_types list ---
+            # 2. Get the configuration from the old game instance
+            from game_logic.player import AIPlayer # Import for isinstance check
+            
+            # Create a new list of strings ('human' or 'ai') from the existing player objects
+            player_types = ['ai' if isinstance(p, AIPlayer) else 'human' for p in self.game_instance.players]
+            difficulty = self.game_instance.difficulty
+            
+            # 3. Create new game and scene instances using the correct data types
+            new_game = Game(player_types, difficulty, self.mod_manager, level_data)
+            # --- END OF CHANGE ---
+            
+            new_game_scene = GameScene(self, new_game, self.sounds, self.mod_manager, self.asset_manager)
+            
+            # 4. Replace the old instances in the App
+            self.game_instance = new_game
+            self.scenes['GAME'] = new_game_scene
+            
+            # 5. Switch to the new game
+            self.go_to_scene('GAME')
+
+        except Exception as e:
+            print(f"!!! ERROR starting new game with level '{level_filename}': {e}")
+            import traceback
+            traceback.print_exc()
+            self.go_to_scene('MAIN_MENU')
+
+    def launch_level_editor(self):
+        """Launches the level editor as a separate process."""
+        try:
+            editor_main_path = os.path.join(self.root_dir, 'src', 'level_editor', 'main.py')
+            # Use Popen to launch it without blocking the main game menu
+            subprocess.Popen([sys.executable, editor_main_path])
+        except Exception as e:
+            print(f"!!! ERROR launching level editor: {e}")
 
     def go_to_scene(self, scene_name: str):
         """
-        Switches the active scene and handles any on-enter logic, such as
-        starting music or triggering AI turns.
+        Switches the active scene and handles any on-enter logic, including
+        recovering from an interrupted turn progression for the AI.
         """
         if scene_name in self.scenes:
+            # First, stop the current scene's music if it's the main theme
+            if self.current_scene == self.scenes["MAIN_MENU"]:
+                self.main_theme_playing = False # Allow it to be restarted later
+
             self.current_scene = self.scenes[scene_name]
             print(f"Switching to scene: {scene_name}")
 
-            # --- Scene-specific "on enter" logic goes here ---
+            # --- Scene-specific "on enter" logic ---
 
-            # If we are entering the MAIN_MENU for the first time, start the main theme.
+            # If entering the MAIN_MENU, start the main theme if it's not already playing.
             if scene_name == "MAIN_MENU":
                 if not self.main_theme_playing:
-                    self.sounds.play_music('main_theme') # This will loop by default
+                    self.sounds.play_music('main_theme')
                     self.main_theme_playing = True
 
-            # If we are entering the GAME scene, check if an AI needs to be activated.
+            # If entering the GAME scene, check for and recover from a paused state.
             elif scene_name == "GAME":
+                # RECOVERY STEP 1: Check if the previous turn was completed but never confirmed.
+                if self.game_instance.actions_taken_this_turn >= C.MAX_PLAYER_ACTIONS:
+                    print("Unconfirmed turn detected upon returning to game. Confirming now...")
+                    self.game_instance.confirm_turn()
+
+                # RECOVERY STEP 2: Now that the state is clean, check if the NEW active player is an AI that needs to be started.
                 from game_logic.player import AIPlayer
                 active_player = self.game_instance.get_active_player()
                 if isinstance(active_player, AIPlayer) and self.game_instance.actions_taken_this_turn == 0:
                     print(f"Resuming/Starting AI Player {active_player.player_id}'s turn.")
                     active_player.handle_turn_logic(self.game_instance, self.scenes["GAME"], self.sounds)
-            
         else:
             print(f"Warning: Scene '{scene_name}' not found.")
 

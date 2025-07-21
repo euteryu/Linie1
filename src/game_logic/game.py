@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from .mod_manager import ModManager
     from ..scenes.game_scene import GameScene
     from ..states.game_states import InfluenceDecisionState
+    from ..levels.level import Level
 
 from .enums import PlayerState, GamePhase, Direction
 from .tile import TileType, PlacedTile
@@ -25,33 +26,80 @@ from .deck_manager import DeckManager
 import common.constants as C
 
 class Game:
-    def __init__(self, player_types: List[str], difficulty: str, mod_manager: 'ModManager'):
-        if not 1 <= len(player_types) <= 6: raise ValueError("Total players must be 1-6.")
-        self.rule_engine = RuleEngine(); self.turn_manager = TurnManager(); self.deck_manager = DeckManager(self); self.pathfinder: Pathfinder = BFSPathfinder(); self.mod_manager = mod_manager; self.visualizer: Optional['GameScene'] = None; self.command_history = CommandHistory()
-        self.num_players = len(player_types); self.difficulty = difficulty.lower(); self.players: List[Player] = []; self.tile_types = {name: TileType(name=name, **details) for name, details in C.TILE_DEFINITIONS.items()}; self.board = Board(); self.active_player_index: int = 0; self.game_phase: GamePhase = GamePhase.SETUP; self.current_turn: int = 0; self.winner: Optional[Player] = None; self.actions_taken_this_turn: int = 0; self.turn_start_history_index: int = -1
+    def __init__(self, player_types: List[str], difficulty: str, mod_manager: 'ModManager', level_data: Level):
+        """
+        Initializes the main Game object.
+
+        Args:
+            player_types (List[str]): A list of player types ('human' or 'ai').
+            difficulty (str): The AI difficulty ('normal' or 'king').
+            mod_manager (ModManager): The game's mod manager instance.
+            level_data (Level): The data object for the map to be played.
+        """
+        if not 1 <= len(player_types) <= 6:
+            raise ValueError("Total players must be 1-6.")
+
+        # --- Store Core Data & Managers ---
+        self.level_data = level_data
+        self.rule_engine = RuleEngine()
+        self.turn_manager = TurnManager()
+        self.deck_manager = DeckManager(self)
+        self.pathfinder: Pathfinder = BFSPathfinder()
+        self.mod_manager = mod_manager
+        self.visualizer: Optional['GameScene'] = None
+        self.command_history = CommandHistory()
+        
+        # --- Game State Attributes ---
+        self.num_players = len(player_types)
+        self.difficulty = difficulty.lower()
+        self.players: List[Player] = []
+        self.tile_types = {name: TileType(name=name, **details) for name, details in C.TILE_DEFINITIONS.items()}
+        
+        # The Board is now created using the level data
+        self.board = Board(level_data)
+        
+        self.active_player_index: int = 0
+        self.game_phase: GamePhase = GamePhase.SETUP
+        self.current_turn: int = 1
+        self.winner: Optional[Player] = None
+        self.actions_taken_this_turn: int = 0
+        self.turn_start_history_index: int = -1
         self.live_auctions: List[Dict[str, Any]] = []
         self.rail_foundation_capital: int = 0
-        self.MAX_PLAYER_ACTIONS = C.MAX_PLAYER_ACTIONS; self.HAND_TILE_LIMIT = C.HAND_TILE_LIMIT
+
+        # --- Game Constants ---
+        self.MAX_PLAYER_ACTIONS = C.MAX_PLAYER_ACTIONS
+        self.HAND_TILE_LIMIT = C.HAND_TILE_LIMIT
+
+        # --- Player Creation ---
         from .ai_strategy import HardStrategy, GreedySequentialStrategy
         for i, p_type in enumerate(player_types):
-            if p_type.lower() == 'human': self.players.append(HumanPlayer(i, self.difficulty))
-            elif p_type.lower() == 'ai': self.players.append(AIPlayer(i, HardStrategy(), self.difficulty))
+            if p_type.lower() == 'human':
+                self.players.append(HumanPlayer(i, self.difficulty))
+            elif p_type.lower() == 'ai':
+                self.players.append(AIPlayer(i, HardStrategy(), self.difficulty))
+            else:
+                raise ValueError(f"Unknown player type in config: {p_type}")
+        
+        # --- Final Setup Call ---
         self.setup_game()
 
     def setup_game(self):
-        """Initializes the game by delegating setup tasks."""
-        self.board._initialize_terminals(self.tile_types)
+        """Initializes the game by delegating setup tasks using loaded level data."""
+        # Initialize the board's terminals using data from the level object
+        self.board._initialize_terminals(self.tile_types, self.level_data.terminal_data)
+        
+        # Call mod hooks
         self.mod_manager.on_game_setup(self)
 
+        # Create and deal cards and tiles
         self.deck_manager.create_and_shuffle_piles()
         self.deck_manager.deal_starting_hands_and_cards()
         
+        # Set the initial game state
         self.game_phase = GamePhase.LAYING_TRACK
         self.current_turn = 1
         self.turn_start_history_index = -1
-        
-        # if isinstance(self.get_active_player(), AIPlayer):
-        #      pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT))
 
     # --- Core Public API ---
     def get_active_player(self) -> Player:
@@ -60,7 +108,15 @@ class Game:
         raise IndexError("Active player index out of bounds.")
 
     def get_terminal_coords(self, line_number: int) -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
-        return C.TERMINAL_COORDS.get(line_number)
+        line_num_str = str(line_number)
+        if line_num_str in self.level_data.terminal_data:
+            pairs = self.level_data.terminal_data[line_num_str]
+            # We need to find the "primary" tile of each pair to represent the terminal location.
+            # A simple rule is to take the first tile listed in each pair.
+            t1 = tuple(pairs[0][0][0])
+            t2 = tuple(pairs[1][0][0])
+            return t1, t2
+        return None
 
     def confirm_turn(self) -> bool:
         """Delegates turn confirmation to the TurnManager."""
@@ -246,17 +302,23 @@ class Game:
         sim_game = object.__new__(Game)
         
         sim_game.rule_engine = self.rule_engine
-        sim_game.turn_manager = self.turn_manager
         sim_game.pathfinder = self.pathfinder
         sim_game.tile_types = self.tile_types
         sim_game.num_players = self.num_players
         sim_game.MAX_PLAYER_ACTIONS = self.MAX_PLAYER_ACTIONS
+        sim_game.level_data = self.level_data
         
         sim_game.board = copy.deepcopy(self.board)
         sim_game.players = copy.deepcopy(self.players)
         
+        sim_game.game_phase = self.game_phase
+        sim_game.active_player_index = self.active_player_index
+        
+        # --- START OF CHANGE: Ensure the simulation copy also has these attributes ---
+        sim_game.live_auctions = copy.deepcopy(self.live_auctions)
+        # --- END OF CHANGE ---
+        
         return sim_game
-
     
     def resolve_auctions_for_player(self, player: Player):
         """

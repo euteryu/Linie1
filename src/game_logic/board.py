@@ -1,42 +1,59 @@
 # game_logic/board.py
-from typing import List, Dict, Tuple, Optional, Set
+from typing import List, Dict, Tuple, Optional, Set, Any
 from .enums import Direction # Relative import
 from .tile import PlacedTile, TileType # Relative import
 # Import constants used *only* by Board
 from common.constants import GRID_ROWS, GRID_COLS, PLAYABLE_ROWS, PLAYABLE_COLS, BUILDING_COORDS, TERMINAL_DATA
 
 class Board:
-    # Make sure _initialize_terminals uses PlacedTile correctly
-    def __init__(self, rows: int = GRID_ROWS, cols: int = GRID_COLS): # ... implementation ...
-        self.rows = rows; self.cols = cols; self.grid: List[List[Optional[PlacedTile]]] = [[None for _ in range(cols)] for _ in range(rows)]; self.building_coords = BUILDING_COORDS; self.coord_to_building: Dict[Tuple[int, int], str] = { v: k for k, v in self.building_coords.items() }; self.buildings_with_stops: Set[str] = set(); self.building_stop_locations: Dict[str, Tuple[int, int]] = {}
-    def _initialize_terminals(self, tile_types: Dict[str, TileType]): # ... (implementation) ...
+    def __init__(self, level_data: 'Level'):
+        """
+        Initializes the Board based on data from a loaded Level object.
+        """
+        self.rows = level_data.grid_rows
+        self.cols = level_data.grid_cols
+        self.playable_rows = level_data.playable_rows
+        self.playable_cols = level_data.playable_cols
+        
+        self.grid: List[List[Optional[PlacedTile]]] = [[None for _ in range(self.cols)] for _ in range(self.rows)]
+        
+        # Building data comes directly from the level file
+        self.building_coords = level_data.building_coords
+        self.coord_to_building: Dict[Tuple[int, int], str] = {v: k for k, v in self.building_coords.items()}
+        
+        # These are populated during gameplay
+        self.buildings_with_stops: Set[str] = set()
+        self.building_stop_locations: Dict[str, Tuple[int, int]] = {}
+
+    def _initialize_terminals(self, tile_types: Dict[str, TileType], terminal_data: Dict[str, Any]):
+        """Initializes terminal tiles based on data from the level file."""
         print("Initializing Terminals by placing tiles...")
-        curve_tile = tile_types.get("Curve"); # ... null check ...
-        if not curve_tile: print("FATAL ERROR: Could not find 'Curve' TileType."); return
-        # ... rest of terminal placement logic ...
-        for line_num, entrances in TERMINAL_DATA.items():
-             # ... validation ...
-             entrance_a, entrance_b = entrances
-             for entrance_pair in [entrance_a, entrance_b]:
-                  # ... validation ...
-                  cell1_info, cell2_info = entrance_pair
-                  # ... validation ...
-                  coord1, orient1 = cell1_info; coord2, orient2 = cell2_info
-                  # Place tiles using PlacedTile constructor
-                  if isinstance(coord1, tuple) and len(coord1) == 2 and isinstance(orient1, int):
-                       if self.is_valid_coordinate(coord1[0], coord1[1]):
-                            if self.grid[coord1[0]][coord1[1]] is None: self.grid[coord1[0]][coord1[1]] = PlacedTile(curve_tile, orient1, is_terminal=True)
-                  if isinstance(coord2, tuple) and len(coord2) == 2 and isinstance(orient2, int):
-                       if self.is_valid_coordinate(coord2[0], coord2[1]):
-                           if self.grid[coord2[0]][coord2[1]] is None: self.grid[coord2[0]][coord2[1]] = PlacedTile(curve_tile, orient2, is_terminal=True)
+        curve_tile = tile_types.get("Curve")
+        if not curve_tile:
+            print("FATAL ERROR: Could not find 'Curve' TileType.")
+            return
+
+        # The data is now passed in as an argument
+        for line_num_str, pairs in terminal_data.items():
+            for pair in pairs:
+                # pair = [ [[r,c], o], [[r,c], o] ]
+                cell1_info = pair[0]
+                cell2_info = pair[1]
+                coord1, orient1 = tuple(cell1_info[0]), cell1_info[1]
+                coord2, orient2 = tuple(cell2_info[0]), cell2_info[1]
+
+                if self.is_valid_coordinate(*coord1):
+                    self.grid[coord1[0]][coord1[1]] = PlacedTile(curve_tile, orient1, is_terminal=True)
+                if self.is_valid_coordinate(*coord2):
+                    self.grid[coord2[0]][coord2[1]] = PlacedTile(curve_tile, orient2, is_terminal=True)
         print("Finished placing terminal tiles.")
     
     def is_valid_coordinate(self, row: int, col: int) -> bool:
         return 0 <= row < self.rows and 0 <= col < self.cols
 
     def is_playable_coordinate(self, row: int, col: int) -> bool:
-        return (PLAYABLE_ROWS[0] <= row <= PLAYABLE_ROWS[1] and
-                PLAYABLE_COLS[0] <= col <= PLAYABLE_COLS[1])
+        return (self.playable_rows[0] <= row <= self.playable_rows[1] and
+                self.playable_cols[0] <= col <= self.playable_cols[1])
 
     def get_tile(self, row: int, col: int) -> Optional[PlacedTile]:
         if self.is_valid_coordinate(row, col):
