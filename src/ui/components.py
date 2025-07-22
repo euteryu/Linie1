@@ -24,7 +24,11 @@ class Button:
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.is_pressed:
             self.is_pressed = False
             if self.is_hovered:
-                self.callback(self.text)
+                # --- START OF CHANGE: The button now simply calls the callback. ---
+                # It is no longer responsible for passing any arguments. The lambda
+                # function that created the callback will provide the correct data.
+                self.callback()
+                # --- END OF CHANGE ---
 
     def draw(self, screen):
         color = self.hover_color if self.is_hovered else self.base_color

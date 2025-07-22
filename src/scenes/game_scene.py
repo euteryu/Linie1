@@ -3,6 +3,7 @@ import pygame
 from typing import Optional, List, Dict, Callable, Set, Tuple
 
 from scenes.scene import Scene
+from common.layout import LayoutConstants
 
 # --- FIX: Add missing imports for type hints and class references ---
 from game_logic.game import Game
@@ -19,40 +20,49 @@ from common.rendering_utils import create_tile_surface, get_font
 import common.constants as C
 
 class GameScene(Scene):
-    def __init__(self, scene_manager, game_instance, sounds, mod_manager, asset_manager):
+    def __init__(self, scene_manager, game_instance, sounds, mod_manager, asset_manager, layout: LayoutConstants):
         super().__init__(scene_manager)
         self.theme = scene_manager.theme
         self.game = game_instance
         self.sounds = sounds
-        self.mod_manager = mod_manager # Now correctly assigned
-        self.asset_manager = asset_manager # The new asset manager
+        self.mod_manager = mod_manager
+        self.asset_manager = asset_manager
+        self.layout = layout # Store the layout object
         
         self.screen = scene_manager.screen
         self.tk_root = scene_manager.tk_root
-        self.TILE_SIZE = C.TILE_SIZE
-        self.debug_mode = C.DEBUG_MODE
         
-        # View Toggles
+        # Use the dynamic TILE_SIZE from the layout object
+        self.TILE_SIZE = self.layout.TILE_SIZE
+        # --- END OF CHANGE ---
+
+        self.debug_mode = C.DEBUG_MODE
         self.show_ai_heatmap = False
         self.show_hint_path = False
-        self.strategy_view_active = True # Default to the clear strategic view
+        self.strategy_view_active = True
         
-        # Data for overlays
         self.heatmap_data: Set[tuple[int, int]] = set()
         self.hint_path_data: Set[Tuple[int, int]] = set()
 
         self.current_state: GameState = LayingTrackState(self)
         self.next_state_constructor: Optional[Callable] = None
-        self.update_current_state_for_player()
+        if game_instance: # Game instance can be None during re-init
+            self.update_current_state_for_player()
         
-        # Tile Surfaces for different views
-        self.tile_surfaces = {name: create_tile_surface(ttype, self.TILE_SIZE) for name, ttype in self.game.tile_types.items()}
+        self.tile_surfaces = {
+            name: create_tile_surface(TileType(name=name, **details), self.TILE_SIZE)
+            for name, details in C.TILE_DEFINITIONS.items()
+        }
         self.pretty_tile_surfaces = self.asset_manager.images['tiles']
-        self.ui_manager = UIManager(self.screen, self.tile_surfaces, self.pretty_tile_surfaces, self.mod_manager, self.theme)
         
-        # Debugging assets
-        self.debug_tile_types: List[TileType] = list(self.game.tile_types.values())
-        self.debug_tile_surfaces = {ttype.name: create_tile_surface(ttype, C.DEBUG_TILE_SIZE) for ttype in self.debug_tile_types}
+        self.ui_manager = UIManager(self, self.tile_surfaces, self.pretty_tile_surfaces, self.mod_manager, self.theme, self.layout)
+        
+        # This part also needs the same fix
+        self.debug_tile_types: List[TileType] = [TileType(name=name, **details) for name, details in C.TILE_DEFINITIONS.items()]
+        self.debug_tile_surfaces = {
+            ttype.name: create_tile_surface(ttype, self.layout.DEBUG_TILE_SIZE)
+            for ttype in self.debug_tile_types
+        }
         self.debug_die_surfaces = self._create_debug_die_surfaces()
         self.debug_tile_rects: Dict[int, pygame.Rect] = {}
         self.debug_die_rects: Dict[any, pygame.Rect] = {}

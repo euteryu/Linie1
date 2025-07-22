@@ -6,8 +6,11 @@ import json
 import tkinter as tk
 from tkinter import messagebox
 
+from typing import List, Dict, Tuple, Optional, Set, Any
 from scenes.level_selection_scene import LevelSelectionScene
+from scenes.resolution_confirmation_scene import ResolutionConfirmationScene
 from levels.level import Level
+from common.layout import LayoutConstants
 import subprocess
 
 # Import your scenes
@@ -26,54 +29,165 @@ class App:
     """The main application class, now acting as a Scene Manager."""
     def __init__(self, root_dir: str, player_types: list[str], difficulty: str, mod_manager: ModManager, level_data: Level):
         """
-        Initializes the main application.
-
-        Args:
-            root_dir (str): The project's root directory.
-            player_types (list[str]): List of player types for the game.
-            difficulty (str): AI difficulty.
-            mod_manager (ModManager): The game's mod manager.
-            level_data (Level): The loaded data for the map to be played.
+        Initializes the main application, loading settings and creating all
+        necessary managers and scenes in the correct order.
         """
         pygame.init()
-        self.screen = pygame.display.set_mode((C.SCREEN_WIDTH, C.SCREEN_HEIGHT))
+        self.root_dir = root_dir
+        
+        # 1. Load settings from settings.json
+        self.settings_path = os.path.join(self.root_dir, 'settings.json')
+        self.settings = self._load_settings()
+
+        # 2. Create the screen using the loaded resolution
+        initial_resolution = tuple(self.settings.get("resolution", [1600, 900]))
+        flags = pygame.RESIZABLE
+        if self.settings.get("fullscreen", False):
+            flags |= pygame.FULLSCREEN
+        self.screen = pygame.display.set_mode(initial_resolution, flags)
+
         pygame.display.set_caption("Linie 1: Gilded Rails")
         self.clock = pygame.time.Clock()
-        
-        self.root_dir = root_dir
 
+        # 3. Load the theme.
         theme_path = os.path.join(self.root_dir, 'src', 'assets', 'themes', 'ui_theme_dark.json')
         with open(theme_path, 'r') as f:
             self.theme = json.load(f)
 
+        # 4. Create the dynamic layout manager
+        self.layout = LayoutConstants(initial_resolution)
+
+        # 5. Initialize all other managers
         self.asset_manager = AssetManager(self.root_dir)
         self.sounds = SoundManager(self.root_dir)
         self.mod_manager = mod_manager
         
-        self.settings = {'cutscenes_enabled': True}
         self.main_theme_playing = False
-
         self.asset_manager.load_all_assets(C.TILE_DEFINITIONS) 
         
-        # Pass the level_data to the Game instance
+        # 6. Create the main game instance
         self.game_instance = Game(player_types, difficulty, mod_manager, level_data)
         
+        # 7. Initialize Tkinter for file dialogs
         try:
             self.tk_root = tk.Tk()
             self.tk_root.withdraw()
         except Exception as e:
             self.tk_root = None
 
-        self.scenes = {
-            "INTRO": IntroScene(self, self.asset_manager),
-            "MAIN_MENU": MainMenuScene(self, self.asset_manager),
-            "LEVEL_SELECTION": LevelSelectionScene(self, self.asset_manager),
-            "GAME": GameScene(self, self.game_instance, self.sounds, self.mod_manager, self.asset_manager),
-            "SETTINGS": SettingsScene(self, self.asset_manager)
+        # 8. Create all scenes
+        self.scenes: Dict[str, 'Scene'] = {
+            "INTRO": IntroScene(self, self.asset_manager)
         }
+        # Call the helper to create all *other* scenes
+        self._re_init_scenes(skip_intro=True)
         
+        # 9. Set the starting scene
         self.current_scene = self.scenes["INTRO"]
+        
+        # 10. Link the game instance to its visualizer
         self.game_instance.visualizer = self.scenes["GAME"]
+
+    def change_resolution(self, new_size: Tuple[int, int], confirm: bool = True):
+        """
+        Changes the screen resolution and, if required, enters the confirmation scene.
+        """
+        previous_size = (self.layout.SCREEN_WIDTH, self.layout.SCREEN_HEIGHT)
+        if new_size == previous_size:
+            return
+
+        # This line was fixed previously and is correct.
+        self.screen = pygame.display.set_mode(new_size, pygame.RESIZABLE)
+        
+        self.layout.recalculate(new_size)
+        self._re_init_scenes()
+        
+        if confirm:
+            confirm_scene = ResolutionConfirmationScene(self, self.asset_manager, self.layout, new_size, previous_size)
+            self.scenes["RESOLUTION_CONFIRM"] = confirm_scene
+            self.go_to_scene("RESOLUTION_CONFIRM")
+        else:
+            self.current_scene = self.scenes["SETTINGS"]
+
+    def _re_init_scenes(self, skip_intro: bool = False):
+        """
+        Creates fresh instances of all scenes that can be themed or resized.
+        Can optionally skip re-creating the IntroScene.
+        """
+        print("Re-initializing scenes...")
+        game_instance = self.game_instance if hasattr(self, 'game_instance') else None
+
+        # The IntroScene is a one-time event and should not be re-created
+        if not skip_intro:
+            self.scenes["INTRO"] = IntroScene(self, self.asset_manager)
+
+        # Re-create all other scenes that depend on themes and layout
+        self.scenes["MAIN_MENU"] = MainMenuScene(self, self.asset_manager, self.layout)
+        self.scenes["LEVEL_SELECTION"] = LevelSelectionScene(self, self.asset_manager)
+        self.scenes["GAME"] = GameScene(self, game_instance, self.sounds, self.mod_manager, self.asset_manager, self.layout)
+        self.scenes["SETTINGS"] = SettingsScene(self, self.asset_manager, self.layout)
+        
+        if game_instance:
+            game_instance.visualizer = self.scenes["GAME"]
+
+    def _load_settings(self) -> Dict[str, Any]:
+        """Loads settings from settings.json, creating it if it doesn't exist."""
+        try:
+            with open(self.settings_path, 'r') as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            # Create a default settings file
+            default_settings = {
+                "resolution": [1600, 900],
+                "cutscenes_enabled": True
+            }
+            with open(self.settings_path, 'w') as f:
+                json.dump(default_settings, f, indent=2)
+            return default_settings
+
+    def save_settings(self):
+        """Saves the current settings to settings.json."""
+        with open(self.settings_path, 'w') as f:
+            json.dump(self.settings, f, indent=2)
+
+    def change_resolution(self, new_size: Tuple[int, int], is_fullscreen: bool, confirm: bool = True):
+        """
+        Changes the screen resolution, now correctly handling the fullscreen flag.
+        
+        Args:
+            new_size (Tuple[int, int]): The new (width, height) resolution.
+            is_fullscreen (bool): Whether the new mode should be fullscreen.
+            confirm (bool): If True, will enter the confirmation scene.
+        """
+        previous_size = (self.layout.SCREEN_WIDTH, self.layout.SCREEN_HEIGHT)
+        previous_fullscreen = (self.screen.get_flags() & pygame.FULLSCREEN) != 0
+        
+        if new_size == previous_size and is_fullscreen == previous_fullscreen:
+            return
+
+        # 1. Determine the correct flags for the new display mode
+        flags = pygame.RESIZABLE
+        if is_fullscreen:
+            flags |= pygame.FULLSCREEN
+
+        # 2. Set the new display mode with the correct size and flags
+        self.screen = pygame.display.set_mode(new_size, flags)
+        
+        # 3. Recalculate all dynamic layout values
+        self.layout.recalculate(new_size)
+        
+        # 4. Re-create all scenes so their UI elements are scaled to the new size
+        self._re_init_scenes()
+        
+        # 5. Enter the confirmation flow if required
+        if confirm:
+            previous_state = (previous_size, previous_fullscreen)
+            confirm_scene = ResolutionConfirmationScene(self, self.asset_manager, self.layout, new_size, previous_state)
+            self.scenes["RESOLUTION_CONFIRM"] = confirm_scene
+            self.go_to_scene("RESOLUTION_CONFIRM")
+        else:
+            self.current_scene = self.scenes["SETTINGS"]
+
 
     def start_new_game(self, level_filename: str):
         """
@@ -91,7 +205,7 @@ class App:
             difficulty = self.game_instance.difficulty
             
             new_game = Game(player_types, difficulty, self.mod_manager, level_data)
-            new_game_scene = GameScene(self, new_game, self.sounds, self.mod_manager, self.asset_manager)
+            new_game_scene = GameScene(self, new_game, self.sounds, self.mod_manager, self.asset_manager, self.layout)
             
             # 3. Replace the old instances and switch to the game.
             self.game_instance = new_game
@@ -115,24 +229,30 @@ class App:
 
     def go_to_scene(self, scene_name: str):
         """
-        Switches the active scene and handles any on-enter logic, including
-        recovering from an interrupted turn progression for the AI.
+        Switches the active scene and handles all on-enter logic, with robust,
+        type-based music management.
         """
         if scene_name in self.scenes:
-            # First, stop the current scene's music if it's the main theme
-            if self.current_scene == self.scenes["MAIN_MENU"]:
-                self.main_theme_playing = False # Allow it to be restarted later
+            # --- START OF CHANGE: A complete rewrite of the music logic using isinstance ---
+            
+            # 1. Check the TYPE of the scene we are LEAVING.
+            # If we are leaving a scene that is not a "menu" scene, it means we are returning
+            # to the menu system and should prepare to play the theme music.
+            current_is_non_menu = isinstance(self.current_scene, (IntroScene, GameScene))
+            if current_is_non_menu:
+                self.main_theme_playing = False
+                self.sounds.stop_music()
 
+            # 2. Switch to the new scene.
             self.current_scene = self.scenes[scene_name]
             print(f"Switching to scene: {scene_name}")
 
-            # --- Scene-specific "on enter" logic ---
-
-            # If entering the MAIN_MENU, start the main theme if it's not already playing.
-            if scene_name == "MAIN_MENU":
-                if not self.main_theme_playing:
-                    self.sounds.play_music('main_theme')
-                    self.main_theme_playing = True
+            # 3. Check the TYPE of the scene we are ENTERING.
+            # If we are entering a "menu" scene and the theme is not already playing, start it.
+            new_is_menu = scene_name in ["MAIN_MENU", "SETTINGS", "LEVEL_SELECTION"]
+            if new_is_menu and not self.main_theme_playing:
+                self.sounds.play_music('main_theme')
+                self.main_theme_playing = True
 
             # If entering the GAME scene, check for and recover from a paused state.
             elif scene_name == "GAME":
@@ -151,18 +271,24 @@ class App:
             print(f"Warning: Scene '{scene_name}' not found.")
 
     def load_theme(self, theme_file):
-        """Loads a new theme and re-initializes all scenes to apply it."""
+        """Loads a new theme and correctly re-initializes scenes without restarting the intro."""
         try:
             theme_path = os.path.join(self.root_dir, 'src', 'assets', 'themes', theme_file)
             with open(theme_path, 'r') as f:
                 self.theme = json.load(f)
+            print(f"Theme '{theme_file}' loaded successfully.")
+
+            # Re-create all scenes, but skip re-creating the IntroScene
+            self._re_init_scenes(skip_intro=True)
             
-            self.scenes["MAIN_MENU"] = MainMenuScene(self, self.asset_manager)
-            self.scenes["GAME"] = GameScene(self, self.game_instance, self.sounds, self.mod_manager, self.asset_manager)
-            self.scenes["SETTINGS"] = SettingsScene(self, self.asset_manager)
-            
-            self.game_instance.visualizer = self.scenes["GAME"]
+            # Update the current scene to its new instance
+            if isinstance(self.current_scene, SettingsScene):
+                self.current_scene = self.scenes["SETTINGS"]
+            elif isinstance(self.current_scene, MainMenuScene):
+                 self.current_scene = self.scenes["MAIN_MENU"]
         except FileNotFoundError:
+            print(f"ERROR: Theme file '{theme_file}' not found.")
+            # Revert to a default if loading fails
             default_theme_path = os.path.join(self.root_dir, 'src', 'assets', 'themes', 'ui_theme_dark.json')
             with open(default_theme_path, 'r') as f:
                 self.theme = json.load(f)
@@ -176,17 +302,27 @@ class App:
             self.game_instance.save_game(filepath)
 
     def load_game_action(self):
+        """Loads a saved game and correctly re-initializes the GameScene."""
         if not self.tk_root: return
-        filepath = tk.filedialog.askopenfilename(
+        filepath = filedialog.askopenfilename(
             title="Load Game", filetypes=[("Linie 1 Saves", "*.json")]
         )
         if filepath:
-            self.mod_manager = ModManager()
-            loaded_game = Game.load_game(filepath, self.game_instance.tile_types, self.mod_manager)
+            self.mod_manager = ModManager() # Ensure clean mod state
+            
+            # Create a dummy level object for the load function
+            # The actual level data will be loaded from the save file's board data.
+            dummy_level = Level(os.path.join(self.root_dir, 'src', 'levels', 'default_12x12.json'))
+            
+            loaded_game = Game.load_game(filepath, C.TILE_DEFINITIONS, self.mod_manager, dummy_level)
             if loaded_game:
                 self.game_instance = loaded_game
-                self.scenes["GAME"] = GameScene(self, self.game_instance, self.sounds, self.mod_manager)
+                # Re-create the game scene with the new game instance and the layout object
+                self.scenes["GAME"] = GameScene(self, self.game_instance, self.sounds, self.mod_manager, self.asset_manager, self.layout)
+                
+                # Update the new game instance's reference to point to the new scene
                 self.game_instance.visualizer = self.scenes["GAME"]
+                
                 self.go_to_scene("GAME")
 
     # --- START OF CHANGE: The run method is the primary fix ---

@@ -18,10 +18,11 @@ class IntroScene(Scene):
         self.asset_manager = asset_manager
         self.ended = False
 
-        # 1. Stop any music that might be playing (e.g., if returning to menu).
-        self.scene_manager.sounds.stop_music()
-        # 2. Play the intro's dedicated theme once.
-        self.scene_manager.sounds.play_music('intro_theme', loops=0)
+        # Only play the intro theme if the main theme is NOT already playing.
+        # This prevents it from re-playing when changing themes from the main menu.
+        if not self.scene_manager.main_theme_playing:
+            self.scene_manager.sounds.stop_music()
+            self.scene_manager.sounds.play_music('intro_theme', loops=0)
 
         try:
             video_path = os.path.join(self.asset_manager.assets_path, 'videos', 'intro.mp4')
