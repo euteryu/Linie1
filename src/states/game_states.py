@@ -241,23 +241,26 @@ class LayingTrackState(GameState):
 
         # --- NEW: Handle clicks on UI elements defined in the layout ---
         if hovered_name:
-            if "hand_tile" in hovered_name:
-                # Extract the index (e.g., from "hand_tile_1", get 0)
+            if "at_hand" in hovered_name:
                 try:
                     hand_index = int(hovered_name.split('_')[-1]) - 1
                     self._on_hand_tile_click(hand_index)
-                except (ValueError, IndexError):
-                    pass # Invalid name, do nothing
+                except (ValueError, IndexError): 
+                    pass
             
             elif hovered_name == "stage_button":
-                print("Stage button clicked")
-                self._stage_current_move() # Use the same logic as the 'S' key
+                print("Stage button clicked via UI")
+                self._stage_current_move()
                 
             elif hovered_name == "commit_button":
-                print("Commit button clicked")
-                self._commit_staged_moves() # Use the same logic as the 'Enter' key
+                print("Commit button clicked via UI")
+                self._commit_staged_moves()
             
-            return # The click was on a UI element, so we're done
+            elif hovered_name == "settings_button":
+                print("Settings button clicked via UI")
+                self.scene.scene_manager.go_to_scene("MAIN_MENU")
+            
+            return
 
         # --- EXISTING: Handle clicks on the game board ---
         grid_r, grid_c = event.grid_pos

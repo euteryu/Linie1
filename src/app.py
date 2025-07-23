@@ -1,19 +1,17 @@
-# src/app.py
 import os
 import pygame
 import sys
 import json
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import messagebox
+import subprocess
 
 from typing import List, Dict, Tuple, Optional, Set, Any
 from scenes.level_selection_scene import LevelSelectionScene
 from scenes.resolution_confirmation_scene import ResolutionConfirmationScene
 from levels.level import Level
 from common.layout import LayoutConstants
-import subprocess
 
-# Import your scenes
 from common.asset_manager import AssetManager
 from scenes.intro_scene import IntroScene
 from scenes.main_menu_scene import MainMenuScene
@@ -23,10 +21,8 @@ from game_logic.game import Game
 from common.sound_manager import SoundManager
 from mods.mod_manager import ModManager
 from common import constants as C
-from levels.level import Level
 
 class App:
-    """The main application class, now acting as a Scene Manager."""
     def __init__(self, root_dir: str, player_types: list[str], difficulty: str, mod_manager: ModManager, level_data: Level):
         pygame.init()
         self.root_dir = root_dir
@@ -55,6 +51,7 @@ class App:
         if self.game_instance and self.scenes.get("GAME"): self.game_instance.visualizer = self.scenes["GAME"]
 
     def _re_init_scenes(self, skip_intro: bool = False):
+        """Creates fresh instances of all scenes that can be themed or resized."""
         print("Re-initializing scenes...")
         game_instance = self.game_instance if hasattr(self, 'game_instance') else None
         if not skip_intro: self.scenes["INTRO"] = IntroScene(self, self.asset_manager)
@@ -62,13 +59,30 @@ class App:
         self.scenes["MAIN_MENU"] = MainMenuScene(self, self.asset_manager, self.layout)
         self.scenes["LEVEL_SELECTION"] = LevelSelectionScene(self, self.asset_manager)
         
-        # --- CRITICAL FIX ---
-        # We now pass a default layout NAME string, not the layout object.
+        # --- CRITICAL FIX HERE ---
+        # Provide a default background name that matches the default level and layout.
         default_layout_name = "game_layout_12x12"
-        self.scenes["GAME"] = GameScene(self, game_instance, self.sounds, self.mod_manager, self.asset_manager, default_layout_name)
+        default_background_name = "game_background_12x12"
+        self.scenes["GAME"] = GameScene(self, game_instance, self.sounds, self.mod_manager, self.asset_manager, default_layout_name, default_background_name)
         
         self.scenes["SETTINGS"] = SettingsScene(self, self.asset_manager, self.layout)
         if game_instance and self.scenes.get("GAME"): game_instance.visualizer = self.scenes["GAME"]
+
+    def start_new_game(self, level_filename: str, layout_name: str, background_name: str):
+        """Creates a brand new Game and GameScene with all necessary assets."""
+        try:
+            level_path=os.path.join(self.root_dir,'src','levels',level_filename); level_data=Level(level_path)
+            from game_logic.player import AIPlayer
+            player_types=['ai' if isinstance(p,AIPlayer) else 'human' for p in self.game_instance.players]
+            difficulty=self.game_instance.difficulty
+            new_game=Game(player_types,difficulty,self.mod_manager,level_data)
+            
+            new_game_scene=GameScene(self,new_game,self.sounds,self.mod_manager,self.asset_manager,layout_name, background_name)
+            
+            self.game_instance=new_game; self.scenes['GAME']=new_game_scene; self.go_to_scene('GAME')
+        except Exception as e:
+            print(f"!!! ERROR starting new game with level '{level_filename}': {e}")
+            messagebox.showerror("Load Error",f"Failed to load level or layout files.\nReason: {e}"); self.go_to_scene('LEVEL_SELECTION')
 
     def change_resolution(self, new_size: Tuple[int, int], confirm: bool = True):
         """
@@ -149,23 +163,6 @@ class App:
             self.go_to_scene("RESOLUTION_CONFIRM")
         else:
             self.current_scene = self.scenes["SETTINGS"]
-
-
-    def start_new_game(self, level_filename: str, layout_name: str):
-        try:
-            level_path=os.path.join(self.root_dir,'src','levels',level_filename); level_data=Level(level_path)
-            from game_logic.player import AIPlayer
-            player_types=['ai' if isinstance(p,AIPlayer) else 'human' for p in self.game_instance.players]
-            difficulty=self.game_instance.difficulty
-            new_game=Game(player_types,difficulty,self.mod_manager,level_data)
-            
-            # This part is now correct: it passes the string `layout_name`
-            new_game_scene=GameScene(self,new_game,self.sounds,self.mod_manager,self.asset_manager,layout_name)
-            
-            self.game_instance=new_game; self.scenes['GAME']=new_game_scene; self.go_to_scene('GAME')
-        except Exception as e:
-            print(f"!!! ERROR starting new game with level '{level_filename}': {e}")
-            messagebox.showerror("Load Error",f"Failed to load level or layout files.\nReason: {e}"); self.go_to_scene('LEVEL_SELECTION')
 
     def launch_level_editor(self):
         """Launches the level editor as a separate process."""

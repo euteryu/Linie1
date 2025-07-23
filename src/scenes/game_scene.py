@@ -17,7 +17,7 @@ from common.rendering_utils import create_tile_surface, get_font, draw_text
 import common.constants as C
 
 class GameScene(Scene):
-    def __init__(self, scene_manager, game_instance, sounds, mod_manager, asset_manager, layout_name: str):
+    def __init__(self, scene_manager, game_instance, sounds, mod_manager, asset_manager, layout_name: str, background_name: str):
         super().__init__(scene_manager)
         self.theme = scene_manager.theme
         self.game = game_instance
@@ -25,6 +25,7 @@ class GameScene(Scene):
         self.mod_manager = mod_manager
         self.asset_manager = asset_manager
         self.screen = scene_manager.screen
+        self.background_image = self.asset_manager.load_background(background_name)
         
         self.imported_layout = None
         self.TILE_SIZE = 80
@@ -60,34 +61,29 @@ class GameScene(Scene):
         try:
             module_path = f"ui.layouts.{layout_name}"
             self.imported_layout = importlib.import_module(module_path)
-            print(f"INFO: Successfully loaded layout: {module_path}")
         except ImportError:
-            print(f"CRITICAL ERROR: Could not import layout '{layout_name}'.py. Ensure it exists in src/ui/layouts/.")
-            return
-
+            print(f"CRITICAL ERROR: Could not import layout '{layout_name}'.py."); return
+        
         all_region_names = [name.replace('_bounds', '') for name in dir(self.imported_layout) if name.endswith('_bounds')]
         
         for name in all_region_names:
             bounds = getattr(self.imported_layout, f"{name}_bounds")
             data = getattr(self.imported_layout, f"{name}_data")
             
-            if "hand_tile" in name:
+            if "at_hand" in name:
                 self.hand_tile_regions[name] = {'bounds': bounds, 'data': data}
             elif "button" in name:
                 self.button_regions[name] = {'bounds': bounds, 'data': data}
             elif "game_board" in name:
-                self.board_bounds = bounds
-                cols = data.get('cols', 12)
-                if cols > 0:
-                    self.TILE_SIZE = self.board_bounds.width // cols
-                print(f"Board layout loaded. TILE_SIZE: {self.TILE_SIZE}px")
+                self.board_bounds = bounds; cols = data.get('cols',12)
+                if cols > 0: self.TILE_SIZE = self.board_bounds.width // cols
 
     def draw_ui(self):
         player = self.game.get_active_player()
         if not player: return
 
         for i in range(5):
-            region_name = f"hand_tile_{i+1}"
+            region_name = f"at_hand_{i+1}"
             region = self.hand_tile_regions.get(region_name)
             if region and i < len(player.hand):
                 tile_type = player.hand[i]
@@ -113,6 +109,12 @@ class GameScene(Scene):
             self.screen.blit(text_surf, text_surf.get_rect(center=region['bounds'].center))
 
     def draw(self, screen):
+        if self.background_image:
+            scaled_bg = pygame.transform.scale(self.background_image, screen.get_size())
+            screen.blit(scaled_bg, (0, 0))
+        else:
+            screen.fill(self.theme["colors"]["panel_bg"])
+
         screen.fill(self.theme["colors"]["panel_bg"])
         if not self.imported_layout:
             font = get_font(30)

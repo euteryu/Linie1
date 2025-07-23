@@ -95,6 +95,19 @@ class AssetManager:
         except (pygame.error, FileNotFoundError) as e:
             print(f"!!! CRITICAL WARNING: Could not load essential UI assets. The UI may be invisible. Error: {e}")
 
+    def load_background(self, background_name: str) -> Optional[pygame.Surface]:
+        """Loads a single, full-screen background image from the backgrounds folder."""
+        try:
+            path = os.path.join(self.assets_path, 'images', 'backgrounds', f"{background_name}.png")
+            image = pygame.image.load(path).convert()
+            # Store it in the cache in case it's needed again
+            self.images['ui'][background_name] = image
+            print(f"    - Successfully loaded background: {background_name}.png")
+            return image
+        except (pygame.error, FileNotFoundError) as e:
+            print(f"!!! CRITICAL WARNING: Could not load background '{background_name}.png'. Error: {e}")
+            return None
+
     def get_tile_surface(self, tile_name: str) -> Optional[pygame.Surface]:
         """Convenience method to retrieve a specific tile's image surface."""
         return self.images['tiles'].get(tile_name)
