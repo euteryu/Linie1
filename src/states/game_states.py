@@ -168,8 +168,8 @@ class GameState:
 
 # --- Laying Track State ---
 class LayingTrackState(GameState):
-    def __init__(self, visualizer):
-        super().__init__(visualizer)
+    def __init__(self, scene):
+        super().__init__(scene)
         self.staged_moves: List[Dict[str, Any]] = []
         self.move_in_progress: Optional[Dict[str, Any]] = None
         self.message = "Select a board square or a special hand tile."
@@ -235,42 +235,43 @@ class LayingTrackState(GameState):
     # _handle_mouse_down, _handle_key_down, _validate_all_staged_moves,
     # _commit_staged_moves, and draw methods are correct.
     # I will omit them for conciseness as requested.
-    def _handle_mouse_down(self, event, active_player):
-        if event.button != 1: return
-        mouse_pos = event.pos
-        for index, rect in self.current_hand_rects.items():
-            if rect.collidepoint(mouse_pos):
-                tile_to_use = active_player.hand[index]
-                if self.game.mod_manager.on_hand_tile_clicked(self.game, active_player, tile_to_use):
-                    return
-                if self.move_in_progress and self.move_in_progress.get('coord'):
-                    self.scene.sounds.play('click_hand')
-                    if any(m['hand_index'] == index for m in self.staged_moves):
-                        self.message = "Tile already staged."
-                    else:
-                        self.move_in_progress['hand_index'] = index
-                        self.move_in_progress['tile_type'] = tile_to_use
-                        self.move_in_progress['orientation'] = 0
-                        self.message = f"Selected tile. [R] Rotate, [S] Stage."
-                    self._validate_all_staged_moves()
-                else:
-                    self.message = "Select a board square before clicking a normal tile."
-                return
-        if C.BOARD_X_OFFSET <= mouse_pos[0] < C.BOARD_X_OFFSET + C.BOARD_DRAW_WIDTH and \
-           C.BOARD_Y_OFFSET <= mouse_pos[1] < C.BOARD_Y_OFFSET + C.BOARD_DRAW_HEIGHT:
+    def _handle_mouse_down(self, event):
+        """Handles all left-clicks, now aware of data-driven UI regions."""
+        hovered_name = event.hovered_ui_name
+
+        # --- NEW: Handle clicks on UI elements defined in the layout ---
+        if hovered_name:
+            if "hand_tile" in hovered_name:
+                # Extract the index (e.g., from "hand_tile_1", get 0)
+                try:
+                    hand_index = int(hovered_name.split('_')[-1]) - 1
+                    self._on_hand_tile_click(hand_index)
+                except (ValueError, IndexError):
+                    pass # Invalid name, do nothing
+            
+            elif hovered_name == "stage_button":
+                print("Stage button clicked")
+                self._stage_current_move() # Use the same logic as the 'S' key
+                
+            elif hovered_name == "commit_button":
+                print("Commit button clicked")
+                self._commit_staged_moves() # Use the same logic as the 'Enter' key
+            
+            return # The click was on a UI element, so we're done
+
+        # --- EXISTING: Handle clicks on the game board ---
+        grid_r, grid_c = event.grid_pos
+        if self.game.board.is_valid_coordinate(grid_r, grid_c):
+            # ... (the existing logic for selecting a board square is perfect here) ...
             self.scene.sounds.play('click')
-            grid_r, grid_c = (mouse_pos[1] - C.BOARD_Y_OFFSET) // C.TILE_SIZE + C.PLAYABLE_ROWS[0], \
-                             (mouse_pos[0] - C.BOARD_X_OFFSET) // C.TILE_SIZE + C.PLAYABLE_COLS[0]
             self.move_in_progress = None
             self._validate_all_staged_moves()
-            if not self.game.board.is_valid_coordinate(grid_r, grid_c): self.message = "Cannot select outside grid."; return
             if self.game.board.get_building_at(grid_r, grid_c): self.message = "Cannot place on a building."; return
             if any(m['coord'] == (grid_r, grid_c) for m in self.staged_moves): self.message = "Square already staged."; return
             target_tile = self.game.board.get_tile(grid_r, grid_c)
             if target_tile and (target_tile.is_terminal or not target_tile.tile_type.is_swappable): self.message = "Tile is permanent."; return
             self.move_in_progress = {'coord': (grid_r, grid_c)}
             self.message = f"Selected {self.move_in_progress['coord']}. Click a hand tile."
-            return
 
     def _handle_key_down(self, event, active_player):
         """Handles keyboard input for the LayingTrackState."""

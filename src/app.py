@@ -4,7 +4,7 @@ import pygame
 import sys
 import json
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
 
 from typing import List, Dict, Tuple, Optional, Set, Any
 from scenes.level_selection_scene import LevelSelectionScene
@@ -28,65 +28,47 @@ from levels.level import Level
 class App:
     """The main application class, now acting as a Scene Manager."""
     def __init__(self, root_dir: str, player_types: list[str], difficulty: str, mod_manager: ModManager, level_data: Level):
-        """
-        Initializes the main application, loading settings and creating all
-        necessary managers and scenes in the correct order.
-        """
         pygame.init()
         self.root_dir = root_dir
-        
-        # 1. Load settings from settings.json
         self.settings_path = os.path.join(self.root_dir, 'settings.json')
         self.settings = self._load_settings()
-
-        # 2. Create the screen using the loaded resolution
         initial_resolution = tuple(self.settings.get("resolution", [1600, 900]))
         flags = pygame.RESIZABLE
-        if self.settings.get("fullscreen", False):
-            flags |= pygame.FULLSCREEN
+        if self.settings.get("fullscreen", False): flags |= pygame.FULLSCREEN
         self.screen = pygame.display.set_mode(initial_resolution, flags)
-
         pygame.display.set_caption("Linie 1: Gilded Rails")
         self.clock = pygame.time.Clock()
-
-        # 3. Load the theme.
         theme_path = os.path.join(self.root_dir, 'src', 'assets', 'themes', 'ui_theme_dark.json')
-        with open(theme_path, 'r') as f:
-            self.theme = json.load(f)
-
-        # 4. Create the dynamic layout manager
+        with open(theme_path, 'r') as f: self.theme = json.load(f)
         self.layout = LayoutConstants(initial_resolution)
-
-        # 5. Initialize all other managers
         self.asset_manager = AssetManager(self.root_dir)
         self.sounds = SoundManager(self.root_dir)
         self.mod_manager = mod_manager
-        
         self.main_theme_playing = False
         self.asset_manager.load_all_assets(C.TILE_DEFINITIONS) 
-        
-        # 6. Create the main game instance
         self.game_instance = Game(player_types, difficulty, mod_manager, level_data)
-        
-        # 7. Initialize Tkinter for file dialogs
-        try:
-            self.tk_root = tk.Tk()
-            self.tk_root.withdraw()
-        except Exception as e:
-            self.tk_root = None
-
-        # 8. Create all scenes
-        self.scenes: Dict[str, 'Scene'] = {
-            "INTRO": IntroScene(self, self.asset_manager)
-        }
-        # Call the helper to create all *other* scenes
+        try: self.tk_root = tk.Tk(); self.tk_root.withdraw()
+        except Exception: self.tk_root = None
+        self.scenes: Dict[str, 'Scene'] = {"INTRO": IntroScene(self, self.asset_manager)}
         self._re_init_scenes(skip_intro=True)
-        
-        # 9. Set the starting scene
         self.current_scene = self.scenes["INTRO"]
+        if self.game_instance and self.scenes.get("GAME"): self.game_instance.visualizer = self.scenes["GAME"]
+
+    def _re_init_scenes(self, skip_intro: bool = False):
+        print("Re-initializing scenes...")
+        game_instance = self.game_instance if hasattr(self, 'game_instance') else None
+        if not skip_intro: self.scenes["INTRO"] = IntroScene(self, self.asset_manager)
+
+        self.scenes["MAIN_MENU"] = MainMenuScene(self, self.asset_manager, self.layout)
+        self.scenes["LEVEL_SELECTION"] = LevelSelectionScene(self, self.asset_manager)
         
-        # 10. Link the game instance to its visualizer
-        self.game_instance.visualizer = self.scenes["GAME"]
+        # --- CRITICAL FIX ---
+        # We now pass a default layout NAME string, not the layout object.
+        default_layout_name = "game_layout_12x12"
+        self.scenes["GAME"] = GameScene(self, game_instance, self.sounds, self.mod_manager, self.asset_manager, default_layout_name)
+        
+        self.scenes["SETTINGS"] = SettingsScene(self, self.asset_manager, self.layout)
+        if game_instance and self.scenes.get("GAME"): game_instance.visualizer = self.scenes["GAME"]
 
     def change_resolution(self, new_size: Tuple[int, int], confirm: bool = True):
         """
@@ -109,26 +91,6 @@ class App:
         else:
             self.current_scene = self.scenes["SETTINGS"]
 
-    def _re_init_scenes(self, skip_intro: bool = False):
-        """
-        Creates fresh instances of all scenes that can be themed or resized.
-        Can optionally skip re-creating the IntroScene.
-        """
-        print("Re-initializing scenes...")
-        game_instance = self.game_instance if hasattr(self, 'game_instance') else None
-
-        # The IntroScene is a one-time event and should not be re-created
-        if not skip_intro:
-            self.scenes["INTRO"] = IntroScene(self, self.asset_manager)
-
-        # Re-create all other scenes that depend on themes and layout
-        self.scenes["MAIN_MENU"] = MainMenuScene(self, self.asset_manager, self.layout)
-        self.scenes["LEVEL_SELECTION"] = LevelSelectionScene(self, self.asset_manager)
-        self.scenes["GAME"] = GameScene(self, game_instance, self.sounds, self.mod_manager, self.asset_manager, self.layout)
-        self.scenes["SETTINGS"] = SettingsScene(self, self.asset_manager, self.layout)
-        
-        if game_instance:
-            game_instance.visualizer = self.scenes["GAME"]
 
     def _load_settings(self) -> Dict[str, Any]:
         """Loads settings from settings.json, creating it if it doesn't exist."""
@@ -189,34 +151,21 @@ class App:
             self.current_scene = self.scenes["SETTINGS"]
 
 
-    def start_new_game(self, level_filename: str):
-        """
-        Creates a brand new Game and GameScene with the specified level file,
-        now with robust error handling.
-        """
+    def start_new_game(self, level_filename: str, layout_name: str):
         try:
-            # 1. Attempt to load the selected level data. This may fail.
-            level_path = os.path.join(self.root_dir, 'src', 'levels', level_filename)
-            level_data = Level(level_path)
-
-            # 2. If loading succeeds, create the new game instances.
+            level_path=os.path.join(self.root_dir,'src','levels',level_filename); level_data=Level(level_path)
             from game_logic.player import AIPlayer
-            player_types = ['ai' if isinstance(p, AIPlayer) else 'human' for p in self.game_instance.players]
-            difficulty = self.game_instance.difficulty
+            player_types=['ai' if isinstance(p,AIPlayer) else 'human' for p in self.game_instance.players]
+            difficulty=self.game_instance.difficulty
+            new_game=Game(player_types,difficulty,self.mod_manager,level_data)
             
-            new_game = Game(player_types, difficulty, self.mod_manager, level_data)
-            new_game_scene = GameScene(self, new_game, self.sounds, self.mod_manager, self.asset_manager, self.layout)
+            # This part is now correct: it passes the string `layout_name`
+            new_game_scene=GameScene(self,new_game,self.sounds,self.mod_manager,self.asset_manager,layout_name)
             
-            # 3. Replace the old instances and switch to the game.
-            self.game_instance = new_game
-            self.scenes['GAME'] = new_game_scene
-            self.go_to_scene('GAME')
-
+            self.game_instance=new_game; self.scenes['GAME']=new_game_scene; self.go_to_scene('GAME')
         except Exception as e:
-            # 4. If loading fails for any reason, show an error and return to the menu.
             print(f"!!! ERROR starting new game with level '{level_filename}': {e}")
-            messagebox.showerror("Level Load Error", f"Failed to load level file:\n{level_filename}\n\nReason: {e}")
-            self.go_to_scene('LEVEL_SELECTION')
+            messagebox.showerror("Load Error",f"Failed to load level or layout files.\nReason: {e}"); self.go_to_scene('LEVEL_SELECTION')
 
     def launch_level_editor(self):
         """Launches the level editor as a separate process."""
