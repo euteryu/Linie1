@@ -1,0 +1,60 @@
+{
+  "level_name": "C1",
+  "author": "Level Editor",
+  "grid_rows": 14,
+  "grid_cols": 14,
+  "playable_rows": [
+    1,
+    12
+  ],
+  "playable_cols": [
+    1,
+    12
+  ],
+  "building_coords": {
+    "E": [
+      5,
+      5
+    ],
+    "G": [
+      7,
+      8
+    ]
+  },
+  "terminal_data": {
+    "1": [
+      [
+        [
+          [
+            0,
+            9
+          ],
+          90
+        ],
+        [
+          [
+            0,
+            10
+          ],
+          180
+        ]
+      ],
+      [
+        [
+          [
+            7,
+            13
+          ],
+          180
+        ],
+        [
+          [
+            8,
+            13
+          ],
+          270
+        ]
+      ]
+    ]
+  }
+}

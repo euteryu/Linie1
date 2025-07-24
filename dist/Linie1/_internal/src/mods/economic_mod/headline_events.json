@@ -1,0 +1,35 @@
+[
+  {
+    "id": "STEEL_BOOM_1",
+    "category": "Economic",
+    "headline": "STEEL BOOM! Foundries Announce Record Profits!",
+    "description": "Capital rewards for selling to the Scrapyard are DOUBLED for 1 round.",
+    "duration_rounds": 1,
+    "effects": {
+      "type": "SELL_REWARD_MODIFIER",
+      "multiplier": 2.0
+    }
+  },
+  {
+    "id": "INFLATION_PANIC_1",
+    "category": "Economic",
+    "headline": "INFLATIONARY PANIC! Cost of Goods Skyrockets!",
+    "description": "The Capital cost of 'Priority Requisition' is increased by 50% for 2 rounds.",
+    "duration_rounds": 2,
+    "effects": {
+      "type": "REQUISITION_COST_MODIFIER",
+      "multiplier": 1.5
+    }
+  },
+  {
+    "id": "MILD_RECESSION_1",
+    "category": "Economic",
+    "headline": "MILD RECESSION! Market Cools, Scrap Value Drops.",
+    "description": "Capital rewards for selling to the Scrapyard are HALVED for 1 round.",
+    "duration_rounds": 1,
+    "effects": {
+      "type": "SELL_REWARD_MODIFIER",
+      "multiplier": 0.5
+    }
+  }
+]
