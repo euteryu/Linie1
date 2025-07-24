@@ -6,6 +6,9 @@ import tkinter as tk
 from tkinter import simpledialog, messagebox, filedialog
 import copy
 
+from game_logic.player import Player
+from game_logic.enums import PlayerState
+
 # --- FIX: Import from new, correct locations ---
 from game_logic.commands import CombinedActionCommand, StageMoveCommand, UnstageAllCommand, PlaceTileCommand, ExchangeTileCommand
 from common import constants as C
@@ -182,11 +185,6 @@ class LayingTrackState(GameState):
         """
         pass
 
-    def _reset_staging(self):
-        self.staged_moves = []
-        self.move_in_progress = None
-        self.message = "Select a board square or a special hand tile."
-
     def undo_action(self):
         """
         Overrides the base undo action. Prioritizes clearing the staging area
@@ -205,36 +203,18 @@ class LayingTrackState(GameState):
     def handle_event(self, event):
         """Handles user input for the LayingTrackState."""
         active_player = self.game.get_active_player()
-        if isinstance(active_player, AIPlayer):
+        
+        # This safety check will now work because Player and PlayerState are imported.
+        if not isinstance(active_player, Player) or active_player.player_state != PlayerState.LAYING_TRACK:
             return
 
-        # --- START OF FIX ---
-        # The check for Save/Load/Undo/Redo button clicks is now entirely
-        # handled by the UIManager and the ButtonPanel's own handle_event method.
-        # This old, broken check that was causing the crash is now removed.
-        # We only need to check if we need to reset staging, which is better
-        # handled inside the undo_action method itself.
-        #
-        # The following block is now REMOVED:
-        # if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-        #     bp = self.scene.ui_manager.components[4] # This was brittle anyway
-        #     if bp.save_rect.collidepoint(event.pos) or \
-        #        ... (and so on)
-        # --- END OF FIX ---
-
-        if active_player.player_state != PlayerState.LAYING_TRACK:
-            return
-
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            self._handle_mouse_down(event, active_player)
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            # This is the corrected call that fixes the TypeError.
+            self._handle_mouse_down(event)
         elif event.type == pygame.KEYDOWN:
-            self._handle_key_down(event, active_player)
-            self._handle_key_down(event, active_player)
+            self._handle_key_down(event)
 
-    # --- THE REST OF LayingTrackState REMAINS UNCHANGED ---
-    # _handle_mouse_down, _handle_key_down, _validate_all_staged_moves,
-    # _commit_staged_moves, and draw methods are correct.
-    # I will omit them for conciseness as requested.
+          
     def _handle_mouse_down(self, event):
         """Handles all left-clicks, now aware of data-driven UI regions."""
         hovered_name = event.hovered_ui_name
@@ -276,55 +256,30 @@ class LayingTrackState(GameState):
             self.move_in_progress = {'coord': (grid_r, grid_c)}
             self.message = f"Selected {self.move_in_progress['coord']}. Click a hand tile."
 
-    def _handle_key_down(self, event, active_player):
-        """Handles keyboard input for the LayingTrackState."""
-        mods = pygame.key.get_mods()
-        if event.key == pygame.K_z and (mods & pygame.KMOD_CTRL):
-            self.undo_action()
-            return
-        if event.key == pygame.K_y and (mods & pygame.KMOD_CTRL):
-            self.redo_action()
-            return
-            
-        if event.key == pygame.K_r:
-            # The logic to modify the orientation was correct, but it was missing
-            # from the final version I provided. This restores it.
-            if self.move_in_progress and 'orientation' in self.move_in_progress:
-                self.move_in_progress['orientation'] = (self.move_in_progress['orientation'] + 45) % 360
-            elif self.staged_moves:
-                # Rotate the most recently staged move
-                self.staged_moves[-1]['orientation'] = (self.staged_moves[-1]['orientation'] + 45) % 360
-            
-            self._validate_all_staged_moves()
-            self.message = "Rotated selection."
-            return # Explicitly return after handling
+          
+    def _handle_key_down(self, event):
+        """Keyboard shortcuts for staging, committing, rotating, and canceling."""
+        active_player = self.game.get_active_player()
 
-        # --- START OF FIX ---
-        # Changed K_ESCAPE to K_BACKSPACE for canceling staging
+        if event.key == pygame.K_s:
+            self._stage_current_move()
+        elif event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
+            self._commit_staged_moves()
+        elif event.key == pygame.K_r:
+            if self.move_in_progress and 'orientation' in self.move_in_progress:
+                self.move_in_progress['orientation'] = (self.move_in_progress['orientation'] + 90) % 360
+                self._validate_all_staged_moves()
+                self.message = "Rotated selection."
+        # --- NEW: Backspace functionality ---
         elif event.key == pygame.K_BACKSPACE:
             if self.move_in_progress:
                 self.move_in_progress = None
                 self.message = "Selection cleared."
             elif self.staged_moves:
-                self.staged_moves = []
+                self._reset_staging()
                 self.message = "All staged moves cleared."
-        # --- END OF FIX ---
-        
-        elif event.key == C.pygame.K_s: # Using C to be safe
-            if self.move_in_progress and 'tile_type' in self.move_in_progress:
-                if len(self.staged_moves) + self.game.actions_taken_this_turn >= C.MAX_PLAYER_ACTIONS:
-                    self.message = "Cannot stage more moves."
-                    return
-                self.move_in_progress['action_type'] = 'exchange' if self.game.board.get_tile(*self.move_in_progress['coord']) else 'place'
-                
-                # This now works because StageMoveCommand is imported correctly.
-                command = StageMoveCommand(self.game, self, self.move_in_progress)
-                self.game.command_history.execute_command(command)
-            else:
-                self.message = "Nothing to stage."
-                
-        elif event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
-            self._commit_staged_moves(active_player)
+
+    
 
     def _validate_all_staged_moves(self):
         """
@@ -362,28 +317,72 @@ class LayingTrackState(GameState):
 
             move_to_validate['is_valid'] = is_valid
 
-    def _commit_staged_moves(self, player):
+          
+    def _stage_current_move(self):
+        """Encapsulated logic for staging a move (used by key and button)."""
+        if self.move_in_progress and 'tile_type' in self.move_in_progress:
+            if len(self.staged_moves) + self.game.actions_taken_this_turn >= C.MAX_PLAYER_ACTIONS:
+                self.message = "Cannot stage more moves."
+                return
+            self.move_in_progress['action_type'] = 'exchange' if self.game.board.get_tile(*self.move_in_progress['coord']) else 'place'
+            
+            # Use the imported StageMoveCommand
+            command = StageMoveCommand(self.game, self, self.move_in_progress)
+            self.game.command_history.execute_command(command)
+        else:
+            self.message = "Nothing to stage."
+
+    def _commit_staged_moves(self):
+        """Encapsulated logic for committing moves (used by key and button)."""
+        player = self.game.get_active_player()
         if self.move_in_progress:
-            self.message = "A move is being built. [S] to stage or [ESC] to clear."
+            self.message = "A move is being built. Stage it or clear it first."
             return
         
         if self.staged_moves:
             self._validate_all_staged_moves()
             if all(move.get('is_valid', False) for move in self.staged_moves):
+                # Use the imported CombinedActionCommand
                 command = CombinedActionCommand(self.game, player, self.staged_moves)
                 if self.game.command_history.execute_command(command):
                     self.scene.sounds.play('commit')
                     self._reset_staging()
-                    # --- FIX: No longer calls confirm_turn() here. ---
-                    # The command now posts an event to handle this.
                 else:
                     self.message = "Commit failed: Action limit would be exceeded."
             else:
-                self.message = "Cannot commit: one or more moves are invalid (red)."
+                self.message = "Cannot commit: one or more moves are invalid."
                 self.scene.sounds.play('error')
         else:
-            # Forfeit logic now also posts the event to be safe.
+            # Forfeit turn if nothing is staged
             pygame.event.post(pygame.event.Event(C.START_NEXT_TURN_EVENT, {'reason': 'forfeit_attempt'}))
+
+    def _reset_staging(self):
+        """Clears the entire staging area."""
+        self.staged_moves = []
+        self.move_in_progress = None
+        self.message = "Select a board square or a hand tile."
+
+    def _on_hand_tile_click(self, hand_index: int):
+        """Logic for when a hand tile is clicked."""
+        player = self.game.get_active_player()
+        if hand_index >= len(player.hand): return
+        
+        tile_to_use = player.hand[hand_index]
+        
+        if self.move_in_progress and self.move_in_progress.get('coord'):
+            self.scene.sounds.play('click_hand')
+            if any(m.get('hand_index') == hand_index for m in self.staged_moves):
+                self.message = "That specific tile is already staged."
+            else:
+                self.move_in_progress['hand_index'] = hand_index
+                self.move_in_progress['tile_type'] = tile_to_use
+                self.move_in_progress['orientation'] = 0
+                self.message = f"Selected tile. [R] Rotate, [S] or [Click Button] to Stage."
+                self._validate_all_staged_moves()
+        else:
+            self.message = "Select a board square before clicking a hand tile."
+
+    
 
     def draw(self, screen):
         # We now call draw_board and draw_overlays from the main visualizer loop

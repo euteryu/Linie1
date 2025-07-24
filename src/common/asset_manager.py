@@ -5,39 +5,16 @@ from typing import Dict, Any, Tuple, Optional, List
 from common import constants as C
 
 class AssetManager:
-    """
-    A centralized manager to load and store all game assets, such as images,
-    fonts, and sounds, once at the start of the game.
-    """
     def __init__(self, root_dir: str):
-        """
-        Initializes the AssetManager.
-        
-        Args:
-            root_dir: The absolute path to the project's root directory.
-        """
         self.root_dir = root_dir
         self.assets_path = os.path.join(self.root_dir, 'src', 'assets')
-
-        # --- CRITICAL FIX: Initialize all sub-dictionaries ---
-        self.images: Dict[str, Any] = {
-            'tiles': {},
-            'trains': {},
-            'ui': {}  # This key was missing
-        }
-        
+        self.images: Dict[str, Any] = {'tiles': {}, 'trains': {}, 'ui': {}}
         self.fonts: Dict[str, pygame.font.Font] = {}
         self.sounds: Dict[str, pygame.mixer.Sound] = {}
 
     def load_all_assets(self, tile_definitions: Dict[str, Any]):
-        """
-        Master function to load all game assets into memory.
-        This is called once when the application starts.
-        """
         print("--- Loading all game assets... ---")
         self._load_images(tile_definitions)
-        # self._load_fonts() # Placeholder for future font loading
-        # self._load_sounds() # Placeholder for future sound loading
         print("--- Asset loading complete. ---")
 
     def _load_images(self, tile_definitions: Dict[str, Any]):
@@ -96,11 +73,9 @@ class AssetManager:
             print(f"!!! CRITICAL WARNING: Could not load essential UI assets. The UI may be invisible. Error: {e}")
 
     def load_background(self, background_name: str) -> Optional[pygame.Surface]:
-        """Loads a single, full-screen background image from the backgrounds folder."""
         try:
             path = os.path.join(self.assets_path, 'images', 'backgrounds', f"{background_name}.png")
             image = pygame.image.load(path).convert()
-            # Store it in the cache in case it's needed again
             self.images['ui'][background_name] = image
             print(f"    - Successfully loaded background: {background_name}.png")
             return image

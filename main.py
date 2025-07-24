@@ -32,10 +32,10 @@ if __name__ == '__main__':
         # mod_manager.activate_mod("economic_mod")
 
         # 3. Define game configuration
-        # player_types = ['human', 'ai']
+        player_types = ['human', 'ai']
         # player_types = ['human', 'ai', 'ai', 'ai']
         # player_types = ['ai', 'ai', 'human']
-        player_types = ['ai', 'ai', 'human', 'human']
+        # player_types = ['ai', 'ai', 'human', 'human']
         # player_types = ['ai', 'ai', 'ai']
         # player_types = ['ai', 'ai', 'ai', 'ai']
         # player_types = ['ai', 'ai', 'ai', 'ai', 'ai']
